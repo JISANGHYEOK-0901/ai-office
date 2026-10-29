@@ -7,7 +7,7 @@
 //        [--model <slug>] [--effort low|medium|high|xhigh|max|ultra] [--dry-run]
 // 모델 우선순위: OFFICE_CODEX_MODEL/OFFICE_CODEX_EFFORT 환경변수 > --model/--effort > 검증실 부서 codexModel/codexEffort > gpt-6.1-sol / max
 import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { appendEvent, normalizeCodexItem, redact } from '../lib/events.mjs';
@@ -16,6 +16,9 @@ import { repoRoot } from '../lib/paths.mjs';
 import { CODEX_EFFORTS, CODEX_MODEL_PATTERN, codexModelArgs, resolveCommand, spawnCli, writePrompt } from '../lib/cli.mjs';
 
 const CONCURRENCY = 3;
+
+// 프롬프트·출력에 보이는 경로는 OS와 관계없이 '/' 로 통일한다
+const toPosix = (p) => p.split(sep).join('/');
 
 export const REVIEW_RULES = `- 읽기 전용으로 검토한다. 파일을 만들거나 고치지 않는다.
 - 대상 폴더의 산출물(brief.md, report.md 등)을 직접 열어 사실·숫자·출처·논리·문서 형식·코드 동작을 확인한다.
@@ -195,7 +198,7 @@ function runReviewer({ root, cmd, modelArgs, reviewer, targetAbs, targetRel, tas
         return;
       }
       const note = code === 0 ? '' : ` (codex 종료 코드 ${code})`;
-      finish({ verdict, reason: `${verdict}: ${relative(root, file)}${note}`, file });
+      finish({ verdict, reason: `${verdict}: ${toPosix(relative(root, file))}${note}`, file });
     });
   });
 }
@@ -229,7 +232,7 @@ export async function main(argv = process.argv.slice(2)) {
     console.error(`오류: ${err.message}`);
     return 1;
   }
-  const targetRel = relative(root, targetAbs) || '.';
+  const targetRel = toPosix(relative(root, targetAbs)) || '.';
 
   let loaded;
   try {

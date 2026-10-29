@@ -2,12 +2,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DONE_MISSING_OUTPUT, KICKOFF_MS, MEETING_STALE_MS, deriveTaskFlows, scheduleMeetings } from '../lib/flow.mjs';
 import { planOutputStatus } from '../lib/outputs.mjs';
+import { compactPlan } from '../lib/plan.mjs';
 import { buildState } from '../dashboard/state.mjs';
 
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const T0 = Date.parse('2026-10-29T01:00:00.000Z');
 const at = (sec) => new Date(T0 + sec * 1000).toISOString();
 const TA = '2026-10-29/task-a';
@@ -206,14 +210,65 @@ test('planOutputStatus: 업무 폴더 안 파일만 확인하고, 밖을 가리�
     { id: 'ok', output: `outputs/${TA}/marketing/a.md` },
     { id: 'none', output: `outputs/${TA}/marketing/b.md` },
     { id: 'dir', output: `outputs/${TA}/dev/folder.html` },
+    // validatePlan·compactPlan처럼 정규화 뒤 'outputs/'로 시작하지 않으면 업무 폴더 기준이라 outputs/<업무>/secret.txt(없음)를 뜻한다
     { id: 'escape', output: `outputs/${TA}/../../../secret.txt` },
+    { id: 'up', output: '../../secret.txt' },
+    { id: 'abs', output: join(root, 'secret.txt') },
     { id: 'other', output: 'outputs/2026-10-29/other/a.md' },
     { id: 'win', output: `outputs\\${TA.replace('/', '\\')}\\marketing\\a.md` },
     ...(linked ? [{ id: 'link', output: `outputs/${TA}/link.md` }] : []),
     { id: 'nul', output: 'outputs/a\0b' },
     { id: 'noout' },
   ] });
-  assert.deepEqual(status, { ok: true, none: false, dir: false, win: true, ...(linked ? { link: false } : {}) });
+  assert.deepEqual(status, { ok: true, none: false, dir: false, escape: false, win: true, ...(linked ? { link: false } : {}) });
+});
+
+test('planOutputStatus: plan.json 원본 경로로 확인해 공백 연속·비밀값 모양·긴 이름을 놓치지 않고, 비어 있지 않은 폴더 산출물은 있음', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'ai-office-outputs-raw-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const dir = join(root, 'outputs', ...TA.split('/'));
+  const long = `${'긴이름'.repeat(60)}.md`;
+  mkdirSync(join(dir, 'marketing'), { recursive: true });
+  mkdirSync(join(dir, 'dev', 'site', 'css'), { recursive: true });
+  mkdirSync(join(dir, 'dev', 'empty'), { recursive: true });
+  mkdirSync(join(dir, 'dev', 'hidden'), { recursive: true });
+  writeFileSync(join(dir, 'marketing', 'a  b.md'), '# a');
+  writeFileSync(join(dir, 'marketing', 'token=v2-notes.md'), '# t');
+  writeFileSync(join(dir, 'marketing', long), '# l');
+  writeFileSync(join(dir, 'dev', 'site', 'css', 'main.css'), 'body{}');
+  writeFileSync(join(dir, 'dev', 'hidden', '.keep'), '');
+  const raw = { stages: [
+    { id: 'space', output: 'marketing/a  b.md' },
+    { id: 'secret', output: `outputs/${TA}/marketing/token=v2-notes.md` },
+    { id: 'long', output: `marketing/${long}` },
+    { id: 'site', output: 'dev/site/' },
+    { id: 'empty', output: 'dev/empty' },
+    { id: 'hidden', output: 'dev/hidden/' },
+  ] };
+  // 요약(compactPlan)은 경로를 바꾼다: 이것으로 확인하면 있는 파일도 없음이 된다
+  const compact = compactPlan(raw, { taskId: TA, root });
+  assert.notEqual(compact.stages[0].output, `outputs/${TA}/marketing/a  b.md`);
+  assert.match(compact.stages[1].output, /\*\*\*/);
+  assert.deepEqual(planOutputStatus(root, TA, raw), { space: true, secret: true, long: true, site: true, empty: false, hidden: false });
+});
+
+test('task files: 계획 단계 산출물은 plan.json 원본 경로로 확인한다(공백 연속·폴더 산출물)', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'ai-office-taskfiles-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const dir = join(root, 'outputs', ...TA.split('/'));
+  mkdirSync(join(dir, 'marketing'), { recursive: true });
+  mkdirSync(join(dir, 'dev', 'site'), { recursive: true });
+  writeFileSync(join(dir, 'marketing', 'a  b.md'), '# a');
+  writeFileSync(join(dir, 'dev', 'site', 'index.html'), '<p>');
+  writeFileSync(join(dir, 'plan.json'), JSON.stringify({ version: 1, task: TA, goal: 'g', stages: [
+    { id: 's1', title: '조사', dept: 'marketing', agent: 'marketing-1', output: 'marketing/a  b.md' },
+    { id: 's2', title: '사이트', dept: 'dev', agent: 'dev-2', output: 'dev/site/' },
+    { id: 's3', title: '없음', dept: 'dev', agent: 'dev-2', output: 'dev/none.md' },
+  ] }));
+  const r = spawnSync(process.execPath, [join(REPO, 'scripts', 'office.mjs'), 'task', 'files', TA, '--json'], { env: { ...process.env, AI_OFFICE_ROOT: root }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(out.planOutputs.map((p) => [p.stage, p.exists]), [['s1', true], ['s2', true], ['s3', false]]);
 });
 
 test('서버: 상태를 만들 때 계획 단계 산출물 파일을 확인해 done_missing_output을 내고, meetings를 함께 준다', async (t) => {
@@ -256,6 +311,50 @@ test('서버: 상태를 만들 때 계획 단계 산출물 파일을 확인해 d
     writeFileSync(join(dir, 'dev', 'index.html'), '<h1>hi</h1>');
     const again = await (await fetch(`http://127.0.0.1:${handle.port}/api/state`)).json();
     assert.deepEqual(again.tasks.find((x) => x.id === TA).missingOutputs, []);
+  } finally {
+    await handle.close();
+  }
+});
+
+test('서버: 산출물 확인은 plan.json 원본 경로로 하므로 공백 연속·폴더 산출물이 산출물 없음으로 잘못 뜨지 않고, 원본과 다른 단계는 확인하지 않는다', async (t) => {
+  const { startServer } = await import('../dashboard/server.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'ai-office-kickoff-raw-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'org'), { recursive: true });
+  writeFileSync(join(root, 'org', 'departments.json'), JSON.stringify(ORG.departments));
+  writeFileSync(join(root, 'org', 'roster.json'), JSON.stringify(ORG.roster));
+  const dir = join(root, 'outputs', ...TA.split('/'));
+  mkdirSync(join(dir, 'marketing'), { recursive: true });
+  mkdirSync(join(dir, 'dev', 'site'), { recursive: true });
+  writeFileSync(join(dir, 'marketing', 'a  b.md'), '# 조사');
+  writeFileSync(join(dir, 'dev', 'site', 'index.html'), '<h1>hi</h1>');
+  const raw = { version: 1, task: TA, goal: '조사 후 사이트', stages: [
+    { id: 's1', title: '조사', dept: 'marketing', agent: 'marketing-1', output: 'marketing/a  b.md', done: 'd', dependsOn: [] },
+    { id: 's2', title: '사이트', dept: 'dev', agent: 'dev-2', output: 'dev/site/', done: 'd', dependsOn: ['s1'] },
+    { id: 's3', title: '정리', dept: 'dev', agent: 'dev-2', output: 'dev/notes.md', done: 'd', dependsOn: ['s2'] },
+  ] };
+  writeFileSync(join(dir, 'plan.json'), JSON.stringify(raw));
+  // plan.set 이벤트는 검사 때의 요약이다. s3는 그 뒤 plan.json에서 경로가 바뀐 경우(화면과 원본이 다르면 확인하지 않는다)
+  const shown = compactPlan({ ...raw, stages: raw.stages.map((s) => (s.id === 's3' ? { ...s, output: 'dev/old-notes.md' } : s)) }, { taskId: TA, root });
+  mkdirSync(join(root, '.office'), { recursive: true });
+  writeFileSync(join(root, '.office', 'tasks.json'), JSON.stringify([{ id: TA, title: '조사 사이트', status: 'active', created: at(0) }]));
+  const now = Date.now();
+  const ts = (sec) => new Date(now - 60_000 + sec * 1000).toISOString();
+  const evs = [
+    { ...cliEv(0, TA, { kind: 'plan.set', plan: shown }), ts: ts(0) },
+    ...[['marketing-1', 1], ['dev-2', 4], ['dev-2', 7]].flatMap(([agent, sec]) => [
+      { ...call(sec, TA, agent, '작업'), ts: ts(sec) },
+      { ...agentEv(sec + 1, TA, agent, 'agent.start'), ts: ts(sec + 1) },
+      { ...agentEv(sec + 2, TA, agent, 'agent.stop', { summary: '마쳤습니다.' }), ts: ts(sec + 2) },
+    ]),
+  ];
+  writeFileSync(join(root, '.office', 'events.jsonl'), evs.map((e) => JSON.stringify(e)).join('\n') + '\n');
+  const handle = await startServer({ root, port: 0, quiet: true, publicDir: join(root, 'public') });
+  try {
+    const state = await (await fetch(`http://127.0.0.1:${handle.port}/api/state`)).json();
+    const task = state.tasks.find((x) => x.id === TA);
+    assert.ok(!task.plan.stages.some((s) => s.status === DONE_MISSING_OUTPUT), JSON.stringify(task.plan.stages));
+    assert.deepEqual(task.missingOutputs, []);
   } finally {
     await handle.close();
   }

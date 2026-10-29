@@ -636,6 +636,13 @@ test('normalizeMeetings·meetingBadge: 업무 묶음 머리에 킥오프 중 / �
   assert.equal(meetingBadge(list, 'a', t0 + 9000), '');
   assert.equal(meetingBadge(list, 'c', t0 + 9000), '회의 중');
   assert.equal(meetingBadge(list, 'zz', t0), '');
+  // 끝 기록 없는 회의 뒤의 킥오프(scheduleMeetings가 until 없이 since=요청 시각, waiting으로 준다)는 시간이 지나도 대기다(activeRoom과 같은 기준)
+  const queued = normalizeMeetings([
+    { task: 'c', kind: 'meeting', attendees: ['chief'], since: iso(0) },
+    { task: 'd', kind: 'kickoff', attendees: ['chief'], since: iso(3), waiting: true },
+  ]);
+  assert.equal(meetingBadge(queued, 'd', t0 + 60_000), '회의실 대기');
+  assert.equal(meetingBadge(queued, 'c', t0 + 60_000), '회의 중');
   assert.deepEqual(normalizeState({ meetings: list }).meetings, list);
   assert.deepEqual(normalizeState({}).meetings, []);
 });
@@ -664,6 +671,15 @@ test('classifyChiefInput: 승인·반려 표현만 인식하고 질문·부정·
     '경쟁사 조사해서 승인 받을 보고서 만들어', '다시하자', '수정해야 할 문서 목록 정리해줘', 'OK 그럼 다음 업무로 마케팅 조사해줘', null, undefined]) {
     assert.deepEqual(classifyChiefInput(t), { intent: null }, String(t));
   }
+  // 띄어 쓴 부정·취소, 물음 어미, ok와 섞인 반려도 애매(실행으로)
+  for (const t of ['반려 하지 마', '반려 안 해', '반려 안해', '반려 취소', '반려 철회해', '반려 보류', '반려. 아니 됐다', '반려 ㄴㄴ', '반려 말고 그냥 둬',
+    '반려 마', '다시 해 볼까', '수정해 줄래', '반려 할까요', '반려 하지 말고 그대로 OK', '반려 말고 오케이', '반려 okay']) {
+    assert.deepEqual(classifyChiefInput(t), { intent: null }, t);
+  }
+  // 부정어처럼 시작하지만 피드백인 말은 그대로 반려
+  assert.deepEqual(classifyChiefInput('반려 마케팅 자료 보강'), { intent: 'reject', feedback: '마케팅 자료 보강' });
+  assert.deepEqual(classifyChiefInput('반려 안 맞는 숫자 고쳐'), { intent: 'reject', feedback: '안 맞는 숫자 고쳐' });
+  assert.deepEqual(classifyChiefInput('반려 book 목록 정리'), { intent: 'reject', feedback: 'book 목록 정리' });
 });
 
 test('chiefInputAction: review 업무 1건이면 그 업무, 여러 건이면 고르기, 없거나 애매하면 기존대로 실행', () => {

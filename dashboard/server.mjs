@@ -306,6 +306,8 @@ export async function startServer({
   let tasks = [];
   // 업무 id → 계획표 요약. planFiles: outputs/<업무>/plan.json(표시용), planEvents: 최신 plan.set 이벤트(검사 통과본)
   let planFiles = new Map();
+  // 업무 id → plan.json 원본(산출물 존재 확인용. 요약은 경로를 가리거나 잘라 실제 파일과 다를 수 있다). 화면·이벤트에는 쓰지 않는다
+  let planRaws = new Map();
   const planEvents = new Map();
   const offplanSeen = new Set(); // 이미 남긴 flow.offplan 경고(원 이벤트 기준, 중복 방지)
   let orgMtimes = '';
@@ -347,14 +349,19 @@ export async function startServer({
     const raw = readJsonSafe(tasksFile, []);
     const list = Array.isArray(raw) ? raw : Object.values(raw ?? {});
     const plans = new Map();
+    const raws = new Map();
     for (const t of list) {
       if (!t || !isTaskId(t.id)) continue;
       const plan = readJsonSafe(join(root, 'outputs', ...t.id.split('/'), 'plan.json'), null);
       if (plan && typeof plan === 'object' && Array.isArray(plan.stages)) {
-        try { plans.set(t.id, compactPlan(plan, { taskId: t.id, root })); } catch { /* 형식이 깨진 계획표는 표시하지 않는다 */ }
+        try {
+          plans.set(t.id, compactPlan(plan, { taskId: t.id, root }));
+          raws.set(t.id, plan);
+        } catch { /* 형식이 깨진 계획표는 표시하지 않는다 */ }
       }
     }
     planFiles = plans;
+    planRaws = raws;
     tasks = list
       .filter((t) => t && typeof t.id === 'string')
       .map((t) => {
@@ -449,8 +456,17 @@ export async function startServer({
     if (demo) return null;
     const statusOf = new Map(tasks.map((t) => [t.id, t.status]));
     const out = new Map();
+    // 경로는 plan.json 원본으로 확인한다. 화면 계획표(plan.set 이벤트 우선)와 원본의 단계 output이 다르면(검사 뒤 plan.json을 고친 경우) 그 단계는 확인하지 않는다
     for (const [id, plan] of plans) {
-      if (isTaskId(id) && statusOf.get(id) !== 'done') out.set(id, planOutputStatus(root, id, plan));
+      const raw = planRaws.get(id);
+      if (!isTaskId(id) || statusOf.get(id) === 'done' || !raw) continue;
+      const fileOutput = new Map((planFiles.get(id)?.stages ?? []).map((st) => [st.id, st.output]));
+      const shown = new Map((plan.stages ?? []).map((st) => [st.id, st.output]));
+      const status = {};
+      for (const [stage, exists] of Object.entries(planOutputStatus(root, id, raw))) {
+        if (shown.has(stage) && shown.get(stage) === fileOutput.get(stage)) status[stage] = exists;
+      }
+      out.set(id, status);
     }
     return out;
   }

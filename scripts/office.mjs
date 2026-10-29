@@ -232,8 +232,9 @@ function taskFiles(args) {
   const planFile = join(dir.real, 'plan.json');
   if (existsSync(planFile)) {
     try {
-      const plan = compactPlan(JSON.parse(readFileSync(planFile, 'utf8').replace(/^\uFEFF/, '')), { taskId: id, root });
-      const status = planOutputStatus(root, id, plan);
+      const raw = JSON.parse(readFileSync(planFile, 'utf8').replace(/^\uFEFF/, ''));
+      const plan = compactPlan(raw, { taskId: id, root });
+      const status = planOutputStatus(root, id, raw); // 요약 경로는 가리거나 잘려 있을 수 있어 원본 경로로 확인한다
       planOutputs = plan.stages.map((st) => ({ stage: st.id, agent: st.agent, output: st.output ?? null, exists: status[st.id] ?? null }));
     } catch {
       planOutputs = null; // 형식이 깨진 계획표는 plan validate가 알려 준다

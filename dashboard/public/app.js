@@ -532,7 +532,8 @@ export function meetingBadge(meetings = [], taskId, now = Date.now()) {
     if (m.kind === 'meeting' && !m.waiting) return '회의 중';
     if (m.kind !== 'kickoff') continue;
     if (Number.isFinite(until) && now >= until) continue;
-    if (!m.waiting || (Number.isFinite(since) && since <= now)) return '킥오프 중';
+    // 끝 기록 없는 회의 뒤에서 기다리는 킥오프는 until이 없고 since가 요청 시각(과거)이라, 여는 시각이 정해진(until 있음) 대기만 since로 승격한다(activeRoom과 같은 기준)
+    if (!m.waiting || (Number.isFinite(since) && Number.isFinite(until) && since <= now)) return '킥오프 중';
     label = '회의실 대기';
   }
   return label;
@@ -541,8 +542,13 @@ export function meetingBadge(meetings = [], taskId, now = Date.now()) {
 // ───── 비서실장 입력창의 승인·반려 인식 ─────
 // 사용자 확인 대기 업무가 있을 때 "승인"·"반려 …" 같은 입력을 새 비서실장 실행으로 보내지 않고 승인·반려 API로 처리한다.
 // 승인은 입력 전체가 승인 표현일 때만(앞에 '좋아'·'네' 정도는 허용), 반려는 '반려'·'다시 해'·'수정해'로 시작할 때다.
-// 질문(?로 끝남), 부정('승인하지 마'), 승인과 반려가 섞인 입력은 애매하므로 실행으로 보낸다
+// 질문(?로 끝남, '볼까'·'줄래'처럼 물음 어미로 끝남), 부정·취소('승인하지 마', '반려 안 해', '반려 취소'), 승인과 반려가 섞인 입력은 애매하므로 실행으로 보낸다
 const APPROVE_INPUT = /^(?:(?:좋아요?|좋습니다|네|예|응|그래요?|확인했(?:어요|습니다)?)\s*[,.]?\s*)?(?:승인|통과|ok|okay|오케이)(?:\s*(?:해|해요|해\s*줘|해\s*주세요|합니다|할게|할게요|처리해|처리해\s*줘|처리해\s*주세요|시켜|시켜\s*줘|이요|입니다))?\s*[.!~]*$/i;
+// 반려 표현 뒤의 말이 부정·취소로 시작하면(띄어 쓴 '반려 하지 마', '반려 안 해', '반려 취소'·'철회'·'보류', '반려. 아니 됐다') 애매하다
+const REJECT_NEGATION = /^(?:하지|말고|말아|마(?:라|요|세요|십시오)?(?=$|[\s,.!~])|안\s*(?:해|하|할|함|돼|되|됨|된)|못\s*(?:해|하)|취소|철회|보류|아니|ㄴㄴ|금지|그만|됐)/;
+// 물음표 없이 물음 어미로 끝나는 말('다시 해 볼까', '수정해 줄래')
+const QUESTION_ENDING = /(?:까|래|나|니|냐)요?\s*[.!~]*$/;
+const MIXED_APPROVE = /승인|통과|오케이|(?:^|[^a-z])ok(?:ay)?(?![a-z])/i;
 const REJECT_INPUT = /^(?:반려(?:합니다|할게요?|해요|해\s*줘|해\s*주세요|해)?|다시\s*해(?:\s*줘|\s*주세요|요)?|수정해(?:\s*줘|\s*주세요|요)?)(?=$|[\s,.:;!~\u2014-])[\s,.:;!~\u2014-]*([\s\S]*)$/;
 
 export function classifyChiefInput(text) {
@@ -552,7 +558,7 @@ export function classifyChiefInput(text) {
   const m = s.match(REJECT_INPUT);
   if (m) {
     const feedback = m[1].trim();
-    if (/승인|통과/.test(feedback)) return { intent: null };
+    if (MIXED_APPROVE.test(feedback) || REJECT_NEGATION.test(feedback) || QUESTION_ENDING.test(feedback)) return { intent: null };
     return { intent: 'reject', feedback };
   }
   return { intent: null };

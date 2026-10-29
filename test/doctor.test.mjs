@@ -54,10 +54,12 @@ function setup(t) {
 }
 
 // API 키 환경변수는 지운 깨끗한 환경
+// 작업 공간도 임시 경로로 둬서 사용자 작업 공간(~/AIOffice 등)을 보지 않게 한다
+const TEST_WORKSPACE = join(tmpdir(), 'ai-office-doctor-ws-none');
 function cleanEnv(extra) {
   const env = { ...process.env };
-  for (const n of [...BILLING_ENV_VARS, 'CLAUDE_CODE_GIT_BASH_PATH', 'FAKE_CLAUDE_AUTH', 'FAKE_CODEX_AUTH']) delete env[n];
-  return { ...env, ...extra };
+  for (const n of [...BILLING_ENV_VARS, 'CLAUDE_CODE_GIT_BASH_PATH', 'FAKE_CLAUDE_AUTH', 'FAKE_CODEX_AUTH', 'AI_OFFICE_ROOT']) delete env[n];
+  return { ...env, AI_OFFICE_WORKSPACE: TEST_WORKSPACE, ...extra };
 }
 
 // Git 탐색에 쓰이는 환경변수(PATH, Program Files, LOCALAPPDATA)를 대소문자 구분 없이 지운다
@@ -108,6 +110,11 @@ test('doctor --json: claude·codex 모두 로그인 → 필수 통과, 종료 �
   assert.equal(auth.authMethod, 'claude.ai');
   assert.equal(byId(r.json, 'codex').version, 'codex-cli 1.2.3');
   assert.deepEqual({ s: byId(r.json, 'codex-auth').status, l: byId(r.json, 'codex-auth').loggedIn }, { s: 'ok', l: true });
+  // 작업 공간 경로와 출처를 보여준다(필수 항목 아님)
+  const ws = byId(r.json, 'workspace');
+  assert.equal(ws.path, TEST_WORKSPACE);
+  assert.equal(ws.source, 'env');
+  assert.equal(ws.required, false);
   assert.equal(byId(r.json, 'api-env').status, 'ok');
   assert.equal(byId(r.json, 'port').status, 'ok');
   assert.equal(byId(r.json, 'port').label, `포트 ${r.port}`);

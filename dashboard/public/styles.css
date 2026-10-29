@@ -620,6 +620,8 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: var(--bor
 /* 회사 설정 · 백업 · 이전 */
 .org-backup { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
 .org-backup h3 { margin: 0 0 4px; font-size: 13px; }
+.workspace-path { margin: 6px 0; word-break: break-all; }
+.workspace-path code { font-size: 12px; }
 .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 #confirmText { white-space: pre-line; }
 

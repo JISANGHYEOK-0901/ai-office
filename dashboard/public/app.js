@@ -157,7 +157,21 @@ export function normalizeState(raw = {}) {
     presets: presetList(raw.presets),
     demo: !!raw.demo,
     tools: raw.tools && typeof raw.tools === 'object' ? raw.tools : {},
+    workspace: raw.workspace && typeof raw.workspace === 'object' ? raw.workspace : {},
   };
+}
+
+// 작업 공간 분리 안내 배너. 호환 모드(예전 데이터를 프로그램 폴더 안에서 계속 씀)이거나 예전 데이터가 남아 있으면 이전을 권한다.
+// 이전하기 전까지 계속 보여야 하므로 닫기 버튼을 달지 않는다
+export function workspaceBanners(workspace, { demo = false } = {}) {
+  if (demo || !workspace) return [];
+  if (workspace.compat) {
+    return [{ key: 'workspace', text: '호환 모드: 회사 데이터가 아직 대시보드 프로그램 폴더 안에 있습니다. AI 직원이 프로그램 코드를 고칠 수 없도록 서버를 끄고 npm run migrate로 작업 공간에 옮기세요.', sticky: true }];
+  }
+  if (workspace.legacyPending) {
+    return [{ key: 'workspace', text: '프로그램 폴더에 예전 회사 데이터가 남아 있습니다. 서버를 끄고 npm run migrate로 이 작업 공간에 옮기세요(지금 화면은 작업 공간의 데이터만 보여 줍니다).', sticky: true }];
+  }
+  return [];
 }
 
 // 서버 시작 때 빠른 점검 결과(tools) → 상단 배너 문구. installed가 false일 때만 알린다(null은 아직 모름)
@@ -975,10 +989,10 @@ function renderTop() {
 }
 
 function renderBanners() {
-  const list = toolBanners(S.tools, { demo: S.demo }).filter((b) => !ui.dismissedBanners.has(b.key));
+  const list = [...workspaceBanners(S.workspace, { demo: S.demo }), ...toolBanners(S.tools, { demo: S.demo })].filter((b) => !ui.dismissedBanners.has(b.key));
   setHTML($('toolBanners'), list.map((b) => `
-    <div class="tool-banner"><span>${esc(b.text)}</span>
-      <button type="button" class="icon-btn" data-banner="${esc(b.key)}" data-key="banner-${esc(b.key)}" aria-label="알림 닫기">✕</button></div>`).join(''));
+    <div class="tool-banner"><span>${esc(b.text)}</span>${b.sticky ? '' : `
+      <button type="button" class="icon-btn" data-banner="${esc(b.key)}" data-key="banner-${esc(b.key)}" aria-label="알림 닫기">✕</button>`}</div>`).join(''));
 }
 
 function presetCards(prefix) {
@@ -2140,12 +2154,17 @@ async function openCompany() {
   $('companySubmit').disabled = S.demo;
   $('orgImportBtn').disabled = S.demo;
   $('orgImportBtn').title = S.demo ? DEMO_HINT : '';
+  $('workspacePath').textContent = '불러오는 중…';
+  $('workspaceSource').textContent = '';
   $('companyDialog').showModal();
   try {
     const res = await authedGet('/api/company', 'application/json');
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
     $('companyRules').value = data.rules || '';
+    const ws = data.workspace || {};
+    $('workspacePath').textContent = ws.path || '알 수 없음';
+    $('workspaceSource').textContent = ws.label ? `(${ws.label})` : '';
   } catch (e) {
     $('companyError').textContent = `불러오지 못했어요: ${e.message}`;
     $('companyError').hidden = false;
@@ -2690,6 +2709,13 @@ function openOutputs(taskId) {
   if (taskId) { loadTaskFiles(taskId); $('outDetail').focus({ preventScroll: true }); }
 }
 
+async function openWorkspaceFolder() {
+  try {
+    await api('POST', '/api/workspace/open');
+    toast('작업 공간 폴더를 열었어요.');
+  } catch (e) { toast(e.message, { type: 'error' }); }
+}
+
 async function openFolder(taskId) {
   try {
     await api('POST', outputUrl(taskId, '/open'));
@@ -2982,6 +3008,7 @@ function init() {
   $('themeToggle').addEventListener('click', () => setTheme(ui.theme === 'neon' ? 'pastel' : 'neon'));
   $('addDeptBtn').addEventListener('click', () => openDeptDialog());
   $('companyBtn').addEventListener('click', openCompany);
+  $('workspaceOpenBtn').addEventListener('click', openWorkspaceFolder);
   $('companyForm').addEventListener('submit', submitCompany);
   $('companyRules').addEventListener('input', updateCompanyCount);
   $('orgExportBtn').addEventListener('click', exportOrgFile);

@@ -12,7 +12,9 @@ import { fileURLToPath } from 'node:url';
 
 const HERE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ENV_ROOT = process.env.CLAUDE_PROJECT_DIR ? resolve(process.env.CLAUDE_PROJECT_DIR) : null;
-const ROOT = ENV_ROOT && existsSync(join(ENV_ROOT, 'hooks', 'session-context.mjs')) ? ENV_ROOT : HERE_ROOT;
+// 데이터 위치: CLAUDE_PROJECT_DIR가 AI Office 작업 공간(표식 .ai-office-workspace)이거나 예전 방식의 레포(hooks/가 있음)면 그곳,
+// 아니면 이 파일 위치(프로그램 레포, 호환 모드). 작업 공간 설정의 훅은 프로그램 레포 훅의 절대경로로 불린다
+const ROOT = ENV_ROOT && (existsSync(join(ENV_ROOT, '.ai-office-workspace')) || existsSync(join(ENV_ROOT, 'hooks', 'session-context.mjs'))) ? ENV_ROOT : HERE_ROOT;
 const STDIN_TIMEOUT_MS = 1500;
 const HARD_LIMIT_MS = 1900;
 const MAX_CONTEXT = 9500;

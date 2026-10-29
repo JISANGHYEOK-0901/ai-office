@@ -4,7 +4,8 @@ import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, writ
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { loadOrg, loadPresets } from '../lib/org.mjs';
-import { kstDate, renameWithRetry } from '../lib/paths.mjs';
+import { kstDate, programRoot, renameWithRetry } from '../lib/paths.mjs';
+import { isCompatRoot } from '../lib/workspace.mjs';
 import { buildOrgMap } from '../lib/orgmap.mjs';
 import { addTask } from '../lib/tasks.mjs';
 import { isTaskId } from '../lib/plan.mjs';
@@ -375,9 +376,11 @@ export function createRunner({ root, onChange, maxConcurrent = 4, spawnImpl = ch
   function startReview({ target, reviewers, task } = {}) {
     if (typeof target !== 'string' || !target.trim()) throw httpError(400, '검토할 산출물 폴더를 지정해 주세요.');
     const list = Array.isArray(reviewers) ? reviewers.join(',') : (reviewers || 'all');
-    const args = [join(root, 'scripts', 'codex-review.mjs'), '--target', target, '--reviewers', String(list)];
+    // 스크립트는 프로그램 레포에 있고, 데이터 위치(작업 공간)는 환경변수로 넘긴다(호환 모드면 레포가 곧 데이터 위치)
+    const args = [join(programRoot(), 'scripts', 'codex-review.mjs'), '--target', target, '--reviewers', String(list)];
     if (task) args.push('--task', String(task));
-    const spec = { engine: 'codex', agentId: null, cmd: { command: process.execPath, prefixArgs: [], shell: false, display: 'codex-review' }, args, input: '', review: true };
+    const env = isCompatRoot(root) ? {} : { AI_OFFICE_WORKSPACE: root, AI_OFFICE_ROOT: '' };
+    const spec = { engine: 'codex', agentId: null, cmd: { command: process.execPath, prefixArgs: [], shell: false, display: 'codex-review' }, args, input: '', review: true, env };
     return addRun(spec, 'review', `검증: ${target} (${list})`);
   }
 

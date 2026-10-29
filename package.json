@@ -10,6 +10,7 @@
     "demo": "node dashboard/server.mjs --demo",
     "sync": "node scripts/sync-agents.mjs --write",
     "check": "node scripts/check.mjs",
-    "doctor": "node scripts/doctor.mjs"
+    "doctor": "node scripts/doctor.mjs",
+    "migrate": "node scripts/migrate.mjs"
   }
 }

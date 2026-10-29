@@ -158,7 +158,8 @@ test('인자 오류: 대상 없음·알 수 없는 검토자·검토자 없음�
   assert.equal(unknown.code, 1);
   assert.match(unknown.stderr, /알 수 없는 검토자입니다: ghost/);
 
-  const empty = setup({});
+  // 프리셋은 프로그램 레포에서 읽히므로, 검증실 프리셋도 없는 경우를 흉내 내려면 빈 프리셋을 작업 공간에 둔다
+  const empty = setup({ presets: { departments: [] } });
   const none = await run(['--target', empty.target, '--dry-run'], { AI_OFFICE_ROOT: empty.root });
   assert.equal(none.code, 1);
   assert.match(none.stderr, /검증실 직원이 없습니다/);

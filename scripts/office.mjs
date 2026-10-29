@@ -11,7 +11,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { kstDate, officeDir, outputsDir, repoRoot } from '../lib/paths.mjs';
+import { WorkspaceError, kstDate, officeDir, outputsDir, workspaceRoot } from '../lib/paths.mjs';
 import { readEvents, redact } from '../lib/events.mjs';
 import { checkOrgImport, exportOrg, importOrg, loadCompanyRules, loadOrg, writeFileAtomic } from '../lib/org.mjs';
 import { TASK_STATUSES, loadTasks as loadTaskList, saveTasks as saveTaskList } from '../lib/tasks.mjs';
@@ -39,7 +39,16 @@ const USAGE = [
 
 class UsageError extends Error {}
 
-const root = repoRoot();
+// 데이터 위치는 작업 공간이다(AI_OFFICE_WORKSPACE > .office-local.json > 호환 모드 > ~/AIOffice).
+// 작업 공간의 scripts/office.mjs(생성된 연결 파일)로 실행하면 그 작업 공간이 AI_OFFICE_WORKSPACE로 정해진다
+let root;
+try {
+  root = workspaceRoot();
+} catch (err) {
+  if (!(err instanceof WorkspaceError)) throw err;
+  console.error(`오류: ${err.message}`);
+  process.exit(1);
+}
 const loadTasks = () => loadTaskList(root);
 const saveTasks = (tasks) => saveTaskList(root, tasks);
 

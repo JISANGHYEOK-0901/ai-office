@@ -71,12 +71,13 @@ function mktDevEvents() {
 test('마케팅+개발: 요청 → 확인 → 하달 → 진행 → 협조 → 검토 → 사용자 확인 대기, 요청은 나중에 붙은 업무로 묶인다', () => {
   const events = mktDevEvents();
   const { items, tasks } = deriveTaskFlows(events, ORG_MKT_DEV, { tasks: [{ id: TASK, status: 'review' }] });
-  assert.deepEqual(stagesOf(items), ['request', 'intake', 'intake', 'intake', 'assign', 'accept', 'done', 'cooperate', 'accept', 'done', 'review_request', 'review_pass', 'deliver']);
+  assert.deepEqual(stagesOf(items), ['request', 'intake', 'intake', 'intake', 'kickoff', 'assign', 'accept', 'done', 'cooperate', 'accept', 'done', 'review_request', 'review_pass', 'deliver']);
   assert.ok(items.every((i) => i.task === TASK), '업무 등록 전 요청·확인도 같은 업무로 묶는다');
   assert.equal(items[0].text, "사용자 → 비서실장: 업무 요청 '중고명품 조사하고 HTML 페이지로 만들어줘'");
   assert.equal(items[1].text, '비서실장: 요청 내용 확인');
   assert.equal(items[2].text, "비서실장: 업무 등록 '중고명품 조사 HTML'");
   assert.match(items[3].text, /작업 계획 확정 — 단계 2개/);
+  assert.equal(items[4].text, '비서실장: 조사 후 HTML 업무 킥오프 — 참석 김팀장, 최대리');
   const assign = items.find((i) => i.stage === 'assign');
   assert.equal(assign.text, '비서실장 → 마케팅부 김팀장: 업무 하달 — 중고명품 시장 조사');
   assert.deepEqual([assign.from, assign.to], ['chief', 'marketing']);

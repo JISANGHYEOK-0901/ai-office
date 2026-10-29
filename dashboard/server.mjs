@@ -15,6 +15,7 @@ import { previewAgentFile } from '../lib/sync.mjs';
 import { isOffplanCall } from '../lib/flow.mjs';
 import { buildOrgMap } from '../lib/orgmap.mjs';
 import { compactPlan, isTaskId } from '../lib/plan.mjs';
+import { MAX_OUTPUT_FILES, insideRel, planOutputStatus, walkOutputFiles } from '../lib/outputs.mjs';
 import { loadTasks as loadTaskList, updateTask } from '../lib/tasks.mjs';
 import { createRunner } from './runner.mjs';
 import { buildState } from './state.mjs';
@@ -48,8 +49,6 @@ const MIME = {
 const DEPT_FIELDS = ['id', 'name', 'en', 'color', 'engine', 'tools', 'model', 'summary', 'active', 'permission', 'order', 'instructions', 'codexModel', 'codexEffort', 'capabilities', 'handoffs'];
 // 산출물 미리보기·목록 제한
 const PREVIEW_LIMIT = 5 * 1024 * 1024;
-const MAX_OUTPUT_FILES = 2000;
-const MAX_OUTPUT_DEPTH = 6;
 const TEXT_EXTS = new Set(['.md', '.markdown', '.txt', '.csv', '.tsv', '.json', '.jsonl', '.log', '.yaml', '.yml', '.xml', '.js', '.mjs', '.cjs', '.ts', '.py', '.sql', '.sh', '.css', '.toml', '.ini']);
 const HTML_EXTS = new Set(['.html', '.htm']);
 // html 미리보기 응답: 스크립트·외부 요청을 막는다(sandbox = 고유 출처·스크립트 비허용)
@@ -444,9 +443,22 @@ export async function startServer({
 
   const allRuns = () => (runner ? runner.list() : []);
 
+  // 계획표 단계 산출물이 실제로 있는지(업무 → {단계 id: boolean}). deriveFlow는 파일을 읽지 않으므로 여기서 확인해 넣는다.
+  // 완료로 표시된 단계에 파일이 없으면 화면이 '완료(산출물 없음)'로 경고한다. 데모(산출물 폴더 없음)와 완료된 업무는 확인하지 않는다
+  function currentOutputStatus(plans) {
+    if (demo) return null;
+    const statusOf = new Map(tasks.map((t) => [t.id, t.status]));
+    const out = new Map();
+    for (const [id, plan] of plans) {
+      if (isTaskId(id) && statusOf.get(id) !== 'done') out.set(id, planOutputStatus(root, id, plan));
+    }
+    return out;
+  }
+
   function currentState() {
+    const plans = currentPlans();
     return {
-      ...buildState({ org, events, runs: allRuns(), tasks, plans: currentPlans(), now: Date.now(), demo }),
+      ...buildState({ org, events, runs: allRuns(), tasks, plans, outputs: currentOutputStatus(plans), now: Date.now(), demo }),
       presets,
       demo,
       tools,
@@ -841,10 +853,6 @@ export async function startServer({
   // ---- 산출물(outputs/) ----
   const outputsBase = resolve(root, 'outputs');
   const outsideOutputs = () => new HttpError(400, '산출물 폴더(outputs/) 안의 경로만 열 수 있습니다.');
-  const insideRel = (base, target) => {
-    const rel = relative(base, target);
-    return rel && !rel.startsWith('..') && !isAbsolute(rel) ? rel : null;
-  };
 
   // outputs 기준 상대경로 → 실제 경로. 글자 경로와 실제 경로(realpath, 심볼릭 링크 해석) 모두 outputs 안이어야 한다
   function resolveOutput(p, kind) {
@@ -885,38 +893,6 @@ export async function startServer({
     }
   }
 
-  // 업무 폴더 아래 파일 목록. 심볼릭 링크는 실제 경로가 outputs 안일 때만 따라간다
-  function walkOutputs(dir, relDir, baseReal, depth, out) {
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const ent of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (out.length >= MAX_OUTPUT_FILES) return;
-      if (ent.name.startsWith('.')) continue;
-      const full = join(dir, ent.name);
-      let real = full;
-      let st;
-      try {
-        if (ent.isSymbolicLink()) {
-          real = realpathSync(full);
-          if (!insideRel(baseReal, real)) continue;
-        }
-        st = statSync(real);
-      } catch {
-        continue;
-      }
-      const rel = relDir ? `${relDir}/${ent.name}` : ent.name;
-      if (st.isDirectory()) {
-        if (depth < MAX_OUTPUT_DEPTH) walkOutputs(real, rel, baseReal, depth + 1, out);
-      } else if (st.isFile()) {
-        out.push({ rel, name: ent.name, size: st.size, mtime: st.mtime.toISOString() });
-      }
-    }
-  }
-
   function fileGroup(rel) {
     const [head, ...rest] = rel.split('/');
     if (!rest.length) {
@@ -947,8 +923,7 @@ export async function startServer({
         const id = `${date}/${slug}`;
         if (!isTaskId(id)) continue;
         const dir = join(baseReal, date, slug);
-        const files = [];
-        walkOutputs(dir, '', baseReal, 0, files);
+        const files = walkOutputFiles(dir, baseReal);
         const reviews = files.filter((f) => f.rel.startsWith('reviews/') && f.name.endsWith('.md'));
         const verdicts = {};
         for (const r of reviews) verdicts[r.name.replace(/\.md$/, '')] = verdictOf(join(dir, ...r.rel.split('/'))) ?? 'FIX';
@@ -982,8 +957,7 @@ export async function startServer({
       return { task: { id, title: id.split('/')[1], status: null }, dir: `outputs/${id}/`, files: [], truncated: false, demo: true };
     }
     const dir = resolveOutput(id, 'dir');
-    const files = [];
-    walkOutputs(dir.real, '', dir.baseReal, 0, files);
+    const files = walkOutputFiles(dir.real, dir.baseReal);
     const t = tasks.find((x) => x.id === id);
     return {
       task: { id, title: t?.title ?? id.split('/')[1], status: t?.status ?? null },

@@ -3,6 +3,7 @@
 //   node scripts/office.mjs task start "<제목>" [--slug x]
 //   node scripts/office.mjs task status <id> blocked|active [--by-user]   done·review와 review·done에서의 변경은 --by-user(대표 직접)
 //   node scripts/office.mjs task list [--json]
+//   node scripts/office.mjs task files <id> [--json]                              업무 폴더 파일 목록·크기(읽기 전용)
 //   node scripts/office.mjs flow <업무> review-request|review|deliver|cooperate ...   업무 흐름 명시 기록
 //   node scripts/office.mjs meeting <업무> start|end ...                            회의 기록
 //   node scripts/office.mjs plan validate <업무>                                    작업 계획표 검사
@@ -15,7 +16,8 @@ import { kstDate, officeDir, outputsDir, repoRoot } from '../lib/paths.mjs';
 import { readEvents, redact } from '../lib/events.mjs';
 import { checkOrgImport, exportOrg, importOrg, loadCompanyRules, loadOrg, writeFileAtomic } from '../lib/org.mjs';
 import { TASK_STATUSES, loadTasks as loadTaskList, saveTasks as saveTaskList } from '../lib/tasks.mjs';
-import { isTaskId, validatePlan } from '../lib/plan.mjs';
+import { compactPlan, isTaskId, validatePlan } from '../lib/plan.mjs';
+import { MAX_OUTPUT_FILES, planOutputStatus, resolveTaskDir, walkOutputFiles } from '../lib/outputs.mjs';
 import { countReviewRejects } from '../lib/flow.mjs';
 import { MAX_REVIEW_REJECTS } from '../lib/chief-guard.mjs';
 
@@ -26,6 +28,7 @@ const USAGE = [
   '  node scripts/office.mjs task start "<제목>" [--slug x]',
   '  node scripts/office.mjs task status <id> blocked|active   (done·review 전환과 사용자 확인 대기·완료 업무 변경은 대표가 --by-user로)',
   '  node scripts/office.mjs task list [--json]',
+  '  node scripts/office.mjs task files <id> [--json]   outputs/<id>/ 아래 파일 목록·크기와 계획 단계 산출물 확인(읽기 전용)',
   '  node scripts/office.mjs flow <업무> review-request --from <부서> [--note "…"]   검토 요청(부서 → 비서실장)',
   '  node scripts/office.mjs flow <업무> review --verdict pass|reject [--to <부서|직원>] [--stage <단계 id>] [--reason "…"]   검토 결과(반려는 --to 필요, 최대 2회)',
   '  node scripts/office.mjs flow <업무> deliver [--note "…"]   사용자 확인 대기로 전환(task status review)',
@@ -202,6 +205,51 @@ function taskList(args) {
   }
   for (const t of tasks) {
     console.log(`${t.id}\t${t.status}\t${t.title}\t보고서:${t.report ? '있음' : '없음'}\t리뷰:${t.reviews}개`);
+  }
+}
+
+function formatSize(n) {
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
+  return `${(n / 1024 / 1024).toFixed(1)}MB`;
+}
+
+// 업무 폴더 파일 목록(읽기 전용). 비서실장 세션에 Glob이 없어도 검토 전에 산출물을 확인할 수 있게 한다.
+// 숨김 파일과 outputs 밖을 가리키는 심볼릭 링크는 뺀다(대시보드 산출물 API와 같은 규칙). 계획표가 있으면 단계 산출물 존재도 보여준다
+function taskFiles(args) {
+  const json = args.includes('--json');
+  const rest = args.filter((a) => a !== '--json');
+  const unknown = rest.find((a) => a.startsWith('-'));
+  if (unknown) throw new UsageError(`알 수 없는 옵션입니다: ${unknown}`);
+  if (rest.length !== 1) throw new UsageError('업무 id를 하나 지정하세요.');
+  const id = rest[0];
+  if (!isTaskId(id)) throw new UsageError(`업무 id 형식이 올바르지 않습니다: ${id} (예: 2026-10-29/competitor-scan)`);
+  const dir = resolveTaskDir(root, id);
+  if (!dir) throw new Error(`업무 폴더가 없습니다: outputs/${id}/ (task list로 확인하세요)`);
+  const files = walkOutputFiles(dir.real, dir.baseReal);
+  const truncated = files.length >= MAX_OUTPUT_FILES;
+  let planOutputs = null;
+  const planFile = join(dir.real, 'plan.json');
+  if (existsSync(planFile)) {
+    try {
+      const plan = compactPlan(JSON.parse(readFileSync(planFile, 'utf8').replace(/^\uFEFF/, '')), { taskId: id, root });
+      const status = planOutputStatus(root, id, plan);
+      planOutputs = plan.stages.map((st) => ({ stage: st.id, agent: st.agent, output: st.output ?? null, exists: status[st.id] ?? null }));
+    } catch {
+      planOutputs = null; // 형식이 깨진 계획표는 plan validate가 알려 준다
+    }
+  }
+  if (json) {
+    console.log(JSON.stringify({ task: id, dir: `outputs/${id}/`, files: files.map((f) => ({ path: f.rel, size: f.size, mtime: f.mtime })), truncated, planOutputs }, null, 2));
+    return;
+  }
+  console.log(`업무 폴더: outputs/${id}/ (파일 ${files.length}개${truncated ? `, 처음 ${MAX_OUTPUT_FILES}개만 표시` : ''})`);
+  for (const f of files) console.log(`  ${f.rel}\t${formatSize(f.size)}`);
+  if (planOutputs) {
+    const missing = planOutputs.filter((p) => p.exists === false);
+    console.log(`계획 단계 산출물: ${planOutputs.length - missing.length}/${planOutputs.length}개 있음`);
+    for (const p of planOutputs) console.log(`  ${p.exists === false ? '없음' : p.exists ? '있음' : '확인 불가'}\t${p.stage}\t${p.output ?? '(output 없음)'}`);
+    if (missing.length) console.error(`주의: 산출물 파일이 없는 단계가 있습니다(${missing.map((p) => p.stage).join(', ')}). 작업 완료로 보고됐더라도 검토 전에 담당 직원에게 확인하세요.`);
   }
 }
 
@@ -446,6 +494,7 @@ async function main(argv) {
     if (cmd === 'start') return taskStart(rest);
     if (cmd === 'status') return taskStatus(rest);
     if (cmd === 'list') return taskList(rest);
+    if (cmd === 'files') return taskFiles(rest);
     throw new UsageError('알 수 없는 task 하위 명령입니다.');
   }
   if (group === 'flow') return flowCmd([cmd, ...rest]);

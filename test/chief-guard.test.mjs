@@ -300,8 +300,15 @@ test('office.mjs 하위 명령 허용 목록: org·task status done/review 거�
     `node scripts/office.mjs task status ${TASK} blocked`,
     `node scripts/office.mjs task status ${TASK} active`,
     'node scripts/office.mjs task list --json',
+    `node scripts/office.mjs task files ${TASK}`,
+    `node scripts/office.mjs task files ${TASK} --json`,
     `node scripts/office.mjs meeting ${TASK} end --summary '정리'`,
   ]) assert.equal(decide('Bash', { command: cmd }), null, cmd);
+  // task files도 단독 실행만: 파이프·리다이렉션으로 결과를 파일에 쓰거나 다른 명령을 잇지 못한다
+  for (const cmd of [`node scripts/office.mjs task files ${TASK} > outputs/x.md`, `node scripts/office.mjs task files ${TASK} | tee x`]) {
+    assert.ok(decide('Bash', { command: cmd }), cmd);
+  }
+  assert.equal(decide('PowerShell', { command: `node scripts/office.mjs task files ${TASK}` }), null);
 });
 
 test('업무가 tasks.json에 없거나 done이면 연결이 남아 있어도 제한하지 않는다(세션 영구 잠김 방지)', () => {

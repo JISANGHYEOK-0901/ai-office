@@ -5,7 +5,8 @@ import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import http from 'node:http';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import fsModule, { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import path, { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +16,7 @@ import {
 import { GENERATED_MANIFEST, buildWorkspaceSettings, ensureWorkspace, shimFile, syncWorkspace, workspaceFiles } from '../lib/workspace.mjs';
 import { decideRepoGuard, shellWriteTarget } from '../lib/chief-guard.mjs';
 import { MigrateError, migrateLegacy, planMigration } from '../lib/migrate.mjs';
+import { SERVER_LOCK, acquireServerLock, runningServer } from '../lib/server-lock.mjs';
 import { createRunner } from '../dashboard/runner.mjs';
 import { workspaceBanners } from '../dashboard/public/app.js';
 
@@ -447,7 +449,9 @@ test('서버 호환 모드: 작업 공간이 프로그램 레포면 생성물을
   mkdirSync(publicDir);
   writeFileSync(join(publicDir, 'index.html'), '<!doctype html>');
   const { startServer } = await import('../dashboard/server.mjs');
-  const handle = await startServer({ port: 0, publicDir, quiet: true, program, env: cleanEnv({ CLAUDE_BIN: join(program, 'none.js'), CODEX_BIN: join(program, 'none.js') }) });
+  // 기본 작업 공간(표식 여부)을 사용자 홈이 아닌 임시 홈에서 본다
+  const home = tmp(t, 'office-wshome-');
+  const handle = await startServer({ port: 0, publicDir, quiet: true, program, env: cleanEnv({ HOME: home, USERPROFILE: home, CLAUDE_BIN: join(program, 'none.js'), CODEX_BIN: join(program, 'none.js') }) });
   t.after(() => handle.close());
   assert.equal(handle.root, program);
   assert.equal(handle.compat, true);
@@ -540,6 +544,166 @@ test('migrate CLI: 확인 없이는 옮기지 않고(호환 모드 유지), --ye
   assert.equal(readFileSync(join(ws, '.claude', 'agents', 'mine.md'), 'utf8'), '내 에이전트(표식 없음)\n');
   // 이제 기본 결정은 기억된 작업 공간이다
   assert.deepEqual((({ path, source, compat }) => ({ path, source, compat }))(resolveWorkspace({ program, env: {} })), { path: ws, source: 'local', compat: false });
+});
+
+// ---- 검토 회귀: 이전 뒤 예전 항목 재등장, 서버 실행 중 이전, 끊긴 이전 이어서 하기 ----
+
+test('resolveWorkspace: 기본 작업 공간에 표식이 있으면 레포에 예전 항목이 다시 생겨도 호환 모드로 돌아가지 않는다', (t) => {
+  const program = tmp(t, 'office-reprog-');
+  const home = tmp(t, 'office-rehome-');
+  mkdirSync(join(program, 'outputs', '2026-10-29', 'x'), { recursive: true });
+  writeFileSync(join(program, 'outputs', '2026-10-29', 'x', 'brief.md'), '# 레포에서 연 세션의 산출물\n');
+  assert.equal(resolveWorkspace({ program, env: {}, homedir: home }).source, 'compat', '표식이 없으면 예전처럼 호환 모드');
+  mkdirSync(join(home, 'AIOffice'));
+  writeFileSync(join(home, 'AIOffice', WORKSPACE_MARKER), 'ai-office:generated\n');
+  const ws = resolveWorkspace({ program, env: {}, homedir: home });
+  assert.deepEqual({ path: ws.path, source: ws.source, compat: ws.compat, legacy: ws.legacy }, { path: join(home, 'AIOffice'), source: 'default', compat: false, legacy: ['outputs'] });
+});
+
+test('migrate CLI(기본 경로): 이전한 작업 공간을 기억해, 이전 뒤 레포에 산출물이 다시 생겨도 작업 공간을 쓴다', (t) => {
+  const program = copyProgram(t);
+  seedLegacy(program);
+  const home = tmp(t, 'office-mhome-');
+  const env = cleanEnv({ HOME: home, USERPROFILE: home });
+  const res = spawnSync(process.execPath, [join(program, 'scripts', 'migrate.mjs'), '--yes'], { env, encoding: 'utf8' });
+  assert.equal(res.status, 0, res.stdout + res.stderr);
+  const ws = join(home, 'AIOffice');
+  assert.deepEqual(JSON.parse(readFileSync(join(program, LOCAL_CONFIG), 'utf8')), { workspace: ws });
+  mkdirSync(join(program, 'outputs', '2026-10-29', 'x'), { recursive: true });
+  writeFileSync(join(program, 'outputs', '2026-10-29', 'x', 'brief.md'), '# 다시 생긴 산출물\n');
+  const after = resolveWorkspace({ program, env: {}, homedir: home });
+  assert.deepEqual({ path: after.path, source: after.source, compat: after.compat, legacy: after.legacy }, { path: ws, source: 'local', compat: false, legacy: ['outputs'] });
+  // 기억 파일이 없어져도 표식이 있는 기본 작업 공간을 쓴다
+  rmSync(join(program, LOCAL_CONFIG));
+  assert.equal(resolveWorkspace({ program, env: {}, homedir: home }).path, ws);
+  assert.ok(existsSync(join(ws, 'org', 'departments.json')));
+});
+
+test('migrate: 호환 모드 서버가 실행 중이면 거부하고(--force로 무시), 서버를 끄면 표식이 지워져 이전된다', async (t) => {
+  const program = copyProgram(t);
+  seedLegacy(program);
+  const home = tmp(t, 'office-lhome-');
+  const ws = join(home, 'AIOffice');
+  const publicDir = join(tmp(t, 'office-lpublic-'), 'public');
+  mkdirSync(publicDir);
+  writeFileSync(join(publicDir, 'index.html'), '<!doctype html>');
+  const { startServer } = await import('../dashboard/server.mjs');
+  const handle = await startServer({ port: 0, publicDir, quiet: true, program, env: cleanEnv({ HOME: home, USERPROFILE: home, CLAUDE_BIN: join(program, 'none.js'), CODEX_BIN: join(program, 'none.js') }) });
+  let closed = false;
+  t.after(() => (closed ? undefined : handle.close()));
+  assert.equal(handle.compat, true);
+  assert.deepEqual(runningServer(program), { pid: process.pid, port: handle.port, host: '127.0.0.1' });
+
+  assert.throws(() => migrateLegacy({ program, workspace: ws }), (err) => err instanceof MigrateError && /서버가 실행 중/.test(err.message) && err.message.includes(String(handle.port)));
+  assert.ok(existsSync(join(program, 'org', 'departments.json')), '원본은 그대로');
+  assert.equal(existsSync(ws), false, '작업 공간에 아무것도 만들지 않는다');
+  const cli = spawnSync(process.execPath, [join(program, 'scripts', 'migrate.mjs'), '--yes'], { env: cleanEnv({ HOME: home, USERPROFILE: home }), encoding: 'utf8' });
+  assert.equal(cli.status, 1, cli.stdout + cli.stderr);
+  assert.match(cli.stderr, /서버가 실행 중.*--force|--force/s);
+  assert.ok(existsSync(join(program, 'org', 'departments.json')));
+
+  await handle.close();
+  closed = true;
+  assert.equal(existsSync(join(program, ...SERVER_LOCK.split('/'))), false, 'close가 자기 표식을 지운다');
+  const result = migrateLegacy({ program, workspace: ws, date: '2026-10-29' });
+  assert.equal(result.moved, true);
+  assert.equal(existsSync(join(ws, ...SERVER_LOCK.split('/'))), false);
+});
+
+test('server-lock: 종료된 pid의 표식은 무시하고, 다른 서버의 표식은 지우지 않으며, migrate는 표식 파일을 옮기지 않는다', (t) => {
+  const root = tmp(t, 'office-lock-');
+  const dead = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+  mkdirSync(join(root, '.office'));
+  writeFileSync(join(root, ...SERVER_LOCK.split('/')), JSON.stringify({ pid: Number(dead.stdout), port: 4777, id: 'old' }));
+  assert.equal(runningServer(root), null, '종료된 서버');
+  writeFileSync(join(root, ...SERVER_LOCK.split('/')), '{ 깨진');
+  assert.equal(runningServer(root), null);
+  const releaseA = acquireServerLock(root, { port: 1 });
+  const releaseB = acquireServerLock(root, { port: 2 });
+  releaseA();
+  assert.equal(runningServer(root)?.port, 2, '나중에 시작한 서버의 표식은 남는다');
+  releaseB();
+  assert.equal(runningServer(root), null);
+
+  // 살아 있는 서버 표식은 이전을 막고 --force(force)로만 무시한다
+  const forced = tmp(t, 'office-lockforce-');
+  seedLegacy(forced);
+  const releaseLive = acquireServerLock(forced, { port: 4777 });
+  const forcedWs = join(tmp(t, 'office-lockforcews-'), 'AIOffice');
+  assert.throws(() => migrateLegacy({ program: forced, workspace: forcedWs }), /서버가 실행 중/);
+  assert.equal(migrateLegacy({ program: forced, workspace: forcedWs, force: true }).moved, true);
+  releaseLive();
+
+  // 종료된 서버가 남긴 표식은 이전을 막지 않고 작업 공간으로 따라가지도 않는다
+  const program = tmp(t, 'office-lockprog-');
+  seedLegacy(program);
+  writeFileSync(join(program, ...SERVER_LOCK.split('/')), JSON.stringify({ pid: Number(dead.stdout), port: 4777, id: 'old' }));
+  const ws = join(tmp(t, 'office-lockws-'), 'AIOffice');
+  assert.equal(migrateLegacy({ program, workspace: ws }).moved, true);
+  assert.equal(existsSync(join(ws, ...SERVER_LOCK.split('/'))), false);
+  assert.ok(existsSync(join(ws, '.office', 'events.jsonl')));
+});
+
+test('migrate 이어서 하기(복사 중 끊김): 같은 복사본은 건너뛰고, 내용이 다른 파일만 충돌로 본다', (t) => {
+  const program = tmp(t, 'office-rsprog-');
+  seedLegacy(program);
+  const ws = join(tmp(t, 'office-rsws-'), 'AIOffice');
+  // 끊긴 이전이 남긴 부분 복사본(롤백되지 않음)
+  for (const rel of ['org/departments.json', 'outputs/2026-10-29/scan/report.md']) {
+    mkdirSync(dirname(join(ws, ...rel.split('/'))), { recursive: true });
+    cpSync(join(program, ...rel.split('/')), join(ws, ...rel.split('/')));
+  }
+  const plan = planMigration({ program, workspace: ws });
+  assert.deepEqual(plan.conflicts, []);
+  assert.deepEqual(plan.copied, ['org/departments.json', 'outputs/2026-10-29/scan/report.md']);
+  // 크기는 같고 내용이 다른 파일은 충돌
+  writeFileSync(join(ws, 'org', 'departments.json'), readFileSync(join(program, 'org', 'departments.json'), 'utf8').replace('리서치부', '마케팅부'));
+  assert.deepEqual(planMigration({ program, workspace: ws }).conflicts, ['org/departments.json']);
+  assert.throws(() => migrateLegacy({ program, workspace: ws }), MigrateError);
+  cpSync(join(program, 'org', 'departments.json'), join(ws, 'org', 'departments.json'));
+
+  const result = migrateLegacy({ program, workspace: ws, date: '2026-10-29' });
+  assert.equal(result.moved, true);
+  assert.equal(result.resumed, 2);
+  assert.equal(result.files, 8);
+  for (const rel of ['org/departments.json', 'org/roster.json', 'outputs/2026-10-29/scan/report.md', '.office/runs/r1.log']) {
+    assert.ok(readFileSync(join(ws, ...rel.split('/'))).equals(readFileSync(join(result.backup, ...rel.split('/')))), rel);
+  }
+});
+
+test('migrate 이어서 하기(원본 이동 중 끊김): 작업 공간을 먼저 기억해 호환 모드로 돌아가지 않고, 다시 실행하면 남은 항목을 옮긴다', (t) => {
+  const program = tmp(t, 'office-rmprog-');
+  seedLegacy(program);
+  const home = tmp(t, 'office-rmhome-');
+  const ws = join(home, 'AIOffice');
+  const outputsSrc = join(program, 'outputs');
+  const realRename = fsModule.renameSync;
+  fsModule.renameSync = (from, to) => {
+    if (from === outputsSrc) throw Object.assign(new Error('강제 종료 흉내'), { code: 'EIO' });
+    return realRename(from, to);
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => migrateLegacy({ program, workspace: ws, date: '2026-10-29' }), (err) => err instanceof MigrateError && /다시 실행하면 이어서/.test(err.message));
+  } finally {
+    fsModule.renameSync = realRename;
+    syncBuiltinESMExports();
+  }
+  assert.equal(existsSync(join(program, 'org', 'departments.json')), false, 'org 원본은 이미 보관 폴더로');
+  assert.ok(existsSync(join(program, '.office-migrated-2026-10-29', 'org', 'departments.json')));
+  assert.ok(existsSync(join(program, 'outputs')), 'outputs 원본은 아직 레포에');
+  const mid = resolveWorkspace({ program, env: {}, homedir: home });
+  assert.deepEqual({ path: mid.path, source: mid.source, compat: mid.compat }, { path: ws, source: 'local', compat: false }, '옮긴 회사 데이터(org)가 있는 작업 공간을 쓴다');
+  assert.ok(mid.legacy.includes('outputs'));
+
+  const result = migrateLegacy({ program, workspace: ws, date: '2026-10-29' });
+  assert.equal(result.moved, true);
+  assert.ok(result.resumed > 0);
+  assert.deepEqual(legacyItems(program), []);
+  assert.equal(result.backup, join(program, '.office-migrated-2026-10-29-2'));
+  assert.ok(existsSync(join(result.backup, 'outputs', '2026-10-29', 'scan', 'report.md')));
+  assert.ok(existsSync(join(ws, 'outputs', '2026-10-29', 'scan', 'research', 'research-1-data.csv')));
+  assert.ok(existsSync(join(ws, 'org', 'departments.json')));
 });
 
 test('.gitignore: .office-local.json과 .office-migrated-*/는 Git에서 제외한다', (t) => {

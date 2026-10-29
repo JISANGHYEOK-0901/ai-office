@@ -11,6 +11,7 @@ import { ID_PATTERN, MAX_COMPANY_RULES, exportOrg, importOrg, loadCompanyRules, 
 import { quickToolCheck } from '../lib/doctor.mjs';
 import { WORKSPACE_SOURCE_LABEL, WorkspaceError, kstDate, legacyItems, programRoot, resolveWorkspace, saveLocalWorkspace } from '../lib/paths.mjs';
 import { ensureWorkspace, isCompatRoot } from '../lib/workspace.mjs';
+import { acquireServerLock } from '../lib/server-lock.mjs';
 import { appendEvent, readEvents, redact } from '../lib/events.mjs';
 import { previewAgentFile } from '../lib/sync.mjs';
 import { isOffplanCall } from '../lib/flow.mjs';
@@ -1315,6 +1316,13 @@ export async function startServer({
     });
   });
   const actualPort = server.address().port;
+  // 실행 표식: migrate가 서버가 켜진 채로 데이터를 옮기지 않도록 pid·포트를 남긴다(close에서 지운다)
+  let releaseLock = null;
+  try {
+    releaseLock = acquireServerLock(root, { port: actualPort, host });
+  } catch (err) {
+    warn('실행 표식(.office/server.lock)을 남기지 못했습니다. 이 서버가 켜져 있는 동안 npm run migrate를 실행하지 마세요', err);
+  }
   hosts = allowedHosts(host, actualPort);
   origins = new Set([...hosts].map((h) => `http://${h}`));
 
@@ -1379,6 +1387,7 @@ export async function startServer({
     }
     server.closeAllConnections?.();
     await new Promise((r) => server.close(() => r()));
+    releaseLock?.();
   }
 
   return { server, url, accessUrl, remote, token, port: actualPort, root, workspaceSource, compat, legacyPending, close };

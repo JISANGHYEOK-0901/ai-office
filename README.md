@@ -69,7 +69,7 @@ node scripts/office.mjs org import backup/ai-office-org.json   # 요약을 보�
 | **프로그램 레포**(이 폴더) | 대시보드·스크립트·훅 코드, 부서·직무 프리셋(`org/presets.json`, `org/templates/`), 수칙 원본(`AGENTS.md`, `.claude/skills/office-task/SKILL.md`, `.claude/settings.json`) |
 | **작업 공간**(기본 `~/AIOffice`) | 데이터: `org/`(departments.json·roster.json·company.md), `outputs/`, `.office/` · 생성물: `CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`, `.claude/skills/office-task/`, `.claude/agents/`, `.codex/agents/`, `scripts/office.mjs`·`scripts/codex-review.mjs`(프로그램 스크립트로 연결), `.ai-office-workspace`(표식) |
 
-- **위치 결정 순서:** `AI_OFFICE_WORKSPACE` 환경변수 > `npm run office -- --workspace <경로>` > 레포의 `.office-local.json`(앞의 옵션으로 고른 경로를 기억, Git 제외) > 기본값. 작업 공간은 프로그램 레포 안이나 레포를 품는 상위 폴더일 수 없습니다.
+- **위치 결정 순서:** `AI_OFFICE_WORKSPACE` 환경변수 > `npm run office -- --workspace <경로>` > 레포의 `.office-local.json`(앞의 옵션이나 `npm run migrate`로 고른 경로를 기억, Git 제외) > 기본값. 작업 공간은 프로그램 레포 안이나 레포를 품는 상위 폴더일 수 없습니다.
 - **실행 위치:** 대시보드가 띄우는 `claude`·`codex`, Codex 검증, office CLI는 모두 작업 공간을 현재 폴더로 실행합니다. Codex는 `codex exec -C <작업 공간>`으로 작업 공간을 기준 폴더로 씁니다.
 - **생성물:** 서버가 시작할 때(그리고 `npm run sync`) 프로그램 레포의 원본에서 작업 공간의 수칙·설정·스킬을 다시 만듭니다. 훅은 `{"command": "node", "args": ["<프로그램 레포 절대경로>/hooks/office-event.mjs"]}`처럼 셸을 거치지 않는 형식이라 경로에 공백이 있거나 Windows 경로여도 동작합니다. 생성 표식이 있는 파일(설정 JSON은 생성 기록 `.claude/ai-office-generated.json`의 해시와 같은 파일)만 갱신하고, 직접 만들거나 고친 파일은 덮어쓰지 않고 경고만 남깁니다. 작업 공간에서만 쓸 Claude 설정은 `.claude/settings.local.json`에 두세요.
 - **확인:** `npm run doctor`와 화면의 **회사 설정**에 작업 공간 경로가 보이고, 회사 설정의 **폴더 열기**로 Finder·탐색기에서 엽니다. 작업 공간 생성물·에이전트 파일이 정본과 맞는지는 `npm run sync -- --check`로 봅니다.
@@ -81,18 +81,21 @@ node scripts/office.mjs org import backup/ai-office-org.json   # 요약을 보�
 
 ### 예전 데이터 옮기기 (npm run migrate)
 
-예전 버전은 회사 데이터를 레포 안에 두었습니다. 새 버전은 레포 안에 데이터(`org/departments.json`·`roster.json`·`company.md`, `outputs/`, `.claude/agents/`, `.codex/agents/`)가 있고 작업 공간을 따로 고르지 않았으면 **호환 모드**로 예전 위치를 그대로 쓰고, 화면 상단과 `npm run doctor`에 이전 안내를 계속 띄웁니다. 호환 모드에서는 레포 보호 가드가 동작하지 않습니다.
+예전 버전은 회사 데이터를 레포 안에 두었습니다. 새 버전은 레포 안에 데이터(`org/departments.json`·`roster.json`·`company.md`, `outputs/`, `.claude/agents/`, `.codex/agents/`)가 있고 작업 공간을 따로 고르지 않았으며 기본 작업 공간(`~/AIOffice`)이 아직 준비되지 않았으면(표식 `.ai-office-workspace` 없음) **호환 모드**로 예전 위치를 그대로 쓰고, 화면 상단과 `npm run doctor`에 이전 안내를 계속 띄웁니다. 호환 모드에서는 레포 보호 가드가 동작하지 않습니다.
 
 ```bash
 # 대시보드 서버를 끈 뒤
 npm run migrate                                   # 기본 작업 공간(~/AIOffice)으로. 옮길 항목을 보여 주고 확인(y)을 받음
-npm run migrate -- --workspace D:\Office --yes     # 다른 위치로, 확인 생략(경로는 .office-local.json에 기억)
+npm run migrate -- --workspace D:\Office --yes     # 다른 위치로, 확인 생략
 npm run migrate -- --dry-run                      # 무엇을 옮길지만 보기
 ```
 
 - 순서: **복사 → 검증(파일 수·크기) → 원본은 레포의 `.office-migrated-<날짜>/`로 옮겨 보관**합니다. 아무것도 자동으로 지우지 않습니다. 확인한 뒤 보관 폴더를 직접 지우세요(Git에서는 제외됩니다).
 - 대상: 위 데이터와 `.office/`(이벤트·업무·실행 기록). 작업 공간에 같은 이름의 파일이 이미 있으면 덮어쓰지 않고 아무것도 바꾸지 않은 채 멈춥니다. 검증에 실패하면 이번에 복사한 파일만 되돌리고 원본은 그대로 둡니다.
 - 확인(대화형 터미널의 y 또는 `--yes`)이 없으면 옮기지 않고 호환 모드로 계속 동작합니다.
+- **서버 실행 중이면 거부:** 대시보드 서버는 켜져 있는 동안 데이터 위치의 `.office/server.lock`에 pid·포트를 남깁니다. migrate는 프로그램 폴더(호환 모드)나 대상 작업 공간의 서버가 살아 있으면 옮기지 않습니다. 서버가 이미 꺼졌는데(다른 프로세스가 같은 pid를 쓰는 경우 등) 거부되면 `--force`를 붙이세요.
+- **경로 기억:** 복사·검증이 끝나면 원본을 옮기기 전에 이전한 작업 공간을 `.office-local.json`에 기억합니다(기본 경로 포함). 그래서 이전 뒤 레포에 예전 항목이 다시 생기거나 원본을 옮기다 끊겨도 호환 모드로 돌아가지 않고 작업 공간을 씁니다(남은 항목은 배너로 알림).
+- **이어서 하기:** 강제 종료 등으로 중간에 끊겼으면 같은 명령을 다시 실행하세요. 작업 공간에 내용까지 같은 복사본이 있는 파일은 이미 복사한 것으로 보고 건너뜁니다. 옮기는 동안 누른 Ctrl+C는 이전이 끝난 뒤에 처리합니다.
 
 ## 빠른 시작
 
@@ -182,7 +185,7 @@ npm run migrate    # 레포 안의 예전 데이터를 작업 공간으로 옮�
 - **훅:** 작업 공간의 `.claude/settings.json`이 SessionStart·UserPromptSubmit·PreToolUse·PostToolUse·SubagentStart·SubagentStop·Stop 훅으로 프로그램 레포의 `hooks/office-event.mjs`를 절대경로로 부릅니다. 훅은 이벤트를 작업 공간의 `.office/events.jsonl`에 한 줄씩 남기고, 어떤 오류에도 종료 코드 0·stdout 무출력으로 끝납니다. 작업 공간에서 Claude Code를 쓰면(대시보드 실행이든 직접 실행이든) 화면에 똑같이 반영됩니다.
   - 훅은 셸을 거치지 않는 exec 형식(`"command": "node", "args": ["<프로그램 레포>/hooks/office-event.mjs"]`)입니다. 레포의 `.claude/settings.json`(호환 모드용·생성 원본)은 `${CLAUDE_PROJECT_DIR}/hooks/…` 자리표시자를 씁니다.
   - **Windows 확인 결과**(공식 문서 code.claude.com/docs/en/hooks, 2026-10-29): 셸 형식 훅은 Git Bash가 있으면 Git Bash, 없으면 PowerShell로 실행되며, PowerShell에서는 `$CLAUDE_PROJECT_DIR`이 펼쳐지지 않습니다. exec 형식이면 Git for Windows 유무와 관계없이 동작합니다. 훅 스크립트는 `CLAUDE_PROJECT_DIR`가 작업 공간(표식 `.ai-office-workspace`)이면 그곳에, 아니면 자기 파일 위치(레포, 호환 모드)에 기록합니다.
-- **비서실장 전용 훅:** `hooks/chief-guard.mjs`(PreToolUse)가 업무 중 비서실장의 직접 실무를 거부하고(작업 공간에서는 모든 에이전트의 프로그램 레포 쓰기도 거부), `hooks/session-context.mjs`(SessionStart)가 터미널에서 연 비서실장 세션에 현재 조직도를 넣습니다. 둘 다 직원(서브에이전트·`--agent` 실행)에는 적용되지 않고, 오류가 나면 아무것도 하지 않고 통과시킵니다. `.claude/settings.json`은 비서실장이 `node scripts/office.mjs …`·`node scripts/codex-review.mjs …`를 승인 대기 없이 실행하도록 이 두 명령만 허용합니다.
+- **비서실장 전용 훅:** `hooks/chief-guard.mjs`(PreToolUse)가 업무 중 비서실장의 직접 실무를 거부하고(작업 공간에서는 모든 에이전트의 프로그램 레포 쓰기도 거부), `hooks/session-context.mjs`(SessionStart)가 터미널에서 연 비서실장 세션에 현재 조직도를 넣습니다. 비서실장 판정(직접 실무 거부)과 조직도 주입은 직원(서브에이전트·`--agent` 실행)에는 적용되지 않지만, 프로그램 레포 쓰기 차단은 작업 공간 세션의 모든 에이전트(직원 포함)에 적용됩니다. 오류가 나면 아무것도 하지 않고 통과시킵니다. `.claude/settings.json`은 비서실장이 `node scripts/office.mjs …`·`node scripts/codex-review.mjs …`를 승인 대기 없이 실행하도록 이 두 명령만 허용합니다.
 - **업무 연결:** 비서실장이 `node scripts/office.mjs task start "<제목>"`을 실행하면 출력의 `OFFICE_TASK=<id>`를 훅이 읽어 그 세션의 이후 이벤트(서브에이전트 포함)에 업무 id를 붙입니다.
 - **서브에이전트:** 직원 = `.claude/agents/<id>.md`. 지침은 공통 머리말 → 회사 공통 규칙(`org/company.md`) → 부서 공통 지침 → 역할 지침 순서로 조립됩니다.
 - **대시보드 실행:** 직원에게 지시하면 `claude -p --output-format stream-json --verbose --permission-mode <부서 설정> --agent <id> [--allowedTools …] [--model …]`을 작업 공간에서 실행하고 요청 문장은 stdin으로 넣습니다. 비서실장 지시는 `--agent` 없이 실행합니다. 동시 실행은 4개까지이고 넘치면 대기열에 들어갑니다. 중지하면 프로세스 그룹에 SIGTERM, 5초 뒤 SIGKILL(Windows는 `taskkill /T /F`)을 보냅니다.

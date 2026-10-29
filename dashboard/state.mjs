@@ -1,4 +1,5 @@
 // 이벤트 → 화면 상태 리듀서. 입력만으로 결과가 정해지는 순수 함수다(파일·시계·전역 상태를 읽지 않는다).
+import { deriveTaskFlows } from '../lib/flow.mjs';
 
 // 이 시간 안에 tool 이벤트가 있으면 작업 중으로 본다(경계 포함: 정확히 90초 전도 작업 중).
 export const WORKING_WINDOW_MS = 90_000;
@@ -6,6 +7,8 @@ export const WORKING_WINDOW_MS = 90_000;
 // 훅이 SubagentStop을 놓치면 영원히 작업 중으로 남는 것을 막기 위한 안전장치다.
 export const STALE_START_MS = 6 * 60 * 60 * 1000;
 export const FEED_LIMIT = 200;
+// 업무 언어 피드(flow) 최근 항목 수
+export const FLOW_LIMIT = 300;
 export const CHIEF_ID = 'chief';
 
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -81,10 +84,14 @@ function closeOpen(track, prefix, key) {
   }
 }
 
+// 데모 모드(실행기가 없다)에서 시뮬레이터의 reply.wait로 답장 대기 아이콘을 연출하는 시간(답장은 보낼 수 없다)
+const DEMO_REPLY_MS = 3 * 60 * 1000;
+
 /**
- * @param {{org:{departments:any[], roster:any[]}, events:any[], runs?:any[], tasks?:any[], now?:Date|number|string}} input
+ * @param {{org:{departments:any[], roster:any[]}, events:any[], runs?:any[], tasks?:any[], plans?:Map|object, now?:Date|number|string, demo?:boolean}} input
+ *   plans: 업무 id → 계획표 요약(outputs/<업무>/plan.json). plan.set 이벤트가 있으면 그것이 우선한다
  */
-export function buildState({ org, events, runs = [], tasks = [], now = Date.now() } = {}) {
+export function buildState({ org, events, runs = [], tasks = [], plans = null, now = Date.now(), demo = false } = {}) {
   const nowMs = toMs(now);
   const today = kstDay(nowMs);
   const departments = listOf(org?.departments);
@@ -281,7 +288,9 @@ export function buildState({ org, events, runs = [], tasks = [], now = Date.now(
     });
 
   // 지표: 정본 직원 + 미등록 인원 기준(비서실장 제외). offline은 휴무(off-duty) 인원 수다.
-  const metrics = { active: 0, standby: 0, idle: 0, offline: 0, tasks: 0, reviews: reviewsToday, tools: toolsToday };
+  // needsReply: 답변이 질문으로 끝나 사용자의 답장을 기다리는 실행 수(runner의 휴리스틱, 답장하면 false가 된다)
+  const needsReply = runList.filter((r) => r && r.needsReply === true && r.status !== 'running' && r.status !== 'queued').length;
+  const metrics = { active: 0, standby: 0, idle: 0, offline: 0, tasks: 0, reviews: reviewsToday, tools: toolsToday, needsReply };
   for (const id of [...roster.map((a) => a.id), ...unregistered]) {
     const status = agents[id].status;
     if (status === 'working') metrics.active += 1;
@@ -298,14 +307,68 @@ export function buildState({ org, events, runs = [], tasks = [], now = Date.now(
   for (const [id, task] of taskFromEvents) {
     if (!taskMap.has(id)) taskMap.set(id, task);
   }
+  // 업무 흐름: 업무 언어 피드 항목과 업무별 단계 표시줄·계획표 단계 상태·역량 공백
+  const flow = deriveTaskFlows(eventList, { departments, roster }, { plans, tasks: [...taskMap.values()] });
   const taskViews = [...taskMap.values()]
-    .map((task) => ({
-      ...task,
-      verdicts: { ...(task.verdicts ?? {}), ...(taskVerdicts.get(task.id) ?? {}) },
-      lastActivity: taskLastActivity.get(task.id) ?? task.created ?? null,
-    }))
+    .map((task) => {
+      const f = flow.tasks[task.id];
+      const { plan: _plan, ...rest } = task;
+      return {
+        ...rest,
+        verdicts: { ...(task.verdicts ?? {}), ...(taskVerdicts.get(task.id) ?? {}) },
+        lastActivity: taskLastActivity.get(task.id) ?? task.created ?? null,
+        steps: f?.steps ?? null,
+        stage: f?.current ?? null,
+        rejects: f?.rejects ?? 0,
+        userRejects: f?.userRejects ?? 0,
+        depts: f?.depts ?? [],
+        // 계획표: plan.json 형식({goal, stages, gaps})에 단계 상태(pending|active|done|rejected)·반려 횟수를 붙인다
+        plan: f?.plan ? { goal: f.goal, stages: f.plan, gaps: f.gaps } : null,
+        goal: f?.goal ?? null,
+        gaps: f?.gaps ?? [],
+      };
+    })
     .sort((a, b) => String(b.created ?? '').localeCompare(String(a.created ?? '')) || String(b.id).localeCompare(String(a.id)));
-  metrics.tasks = taskViews.filter((t) => t.status === 'active').length;
+  metrics.tasks = taskViews.filter((t) => t.status === 'active' || t.status === 'review').length;
+
+  // 사용자 의견 필요: 답장 대기(reply), 사용자 확인 대기(approve), 역량 공백(gap). since 오름차순
+  const attention = [];
+  // reply: 대화(rootId)마다 needsReply인 마지막 run 하나. 연결된 업무가 사용자 확인 대기(approve가 대신 보여준다)거나
+  // 완료됐으면 뺀다(승인 뒤에도 💬가 남지 않게)
+  const statusOfTask = new Map(taskViews.map((t) => [t.id, t.status]));
+  const replyByThread = new Map();
+  for (const r of runList) {
+    if (!r || r.needsReply !== true || r.status === 'running' || r.status === 'queued') continue;
+    const st = r.task ? statusOfTask.get(r.task) : null;
+    if (st === 'review' || st === 'done') continue;
+    const key = r.rootId || r.id;
+    const prev = replyByThread.get(key);
+    if (!prev || String(r.endedAt ?? r.startedAt ?? '') >= String(prev.endedAt ?? prev.startedAt ?? '')) replyByThread.set(key, r);
+  }
+  for (const r of replyByThread.values()) {
+    attention.push({ kind: 'reply', agent: r.agentId || CHIEF_ID, runId: r.id, ...(r.task ? { task: r.task } : {}), since: r.endedAt ?? r.startedAt ?? null, text: r.summary || r.request || '' });
+  }
+  if (demo) {
+    // 데모: 최근 3분 안의 reply.wait를 직원별 하나씩(완료된 업무 제외)
+    const demoReply = new Map();
+    for (const ev of eventList) {
+      if (!ev || ev.kind !== 'reply.wait' || nowMs - toMs(ev.ts) > DEMO_REPLY_MS) continue;
+      if (ev.task && statusOfTask.get(ev.task) === 'done') continue;
+      demoReply.set(ev.agent || CHIEF_ID, ev);
+    }
+    for (const [agent, ev] of demoReply) attention.push({ kind: 'reply', agent, runId: null, ...(ev.task ? { task: ev.task } : {}), since: ev.ts, text: ev.summary || '' });
+  }
+  for (const t of taskViews) {
+    if (t.status === 'review') {
+      attention.push({ kind: 'approve', agent: CHIEF_ID, task: t.id, since: t.updated ?? t.lastActivity ?? t.created ?? null, text: `'${t.title ?? t.id}' 결과 확인 대기` });
+    }
+    if (t.gaps.length && t.status !== 'done') {
+      const text = t.gaps.map((g) => `${g.need}${g.suggestion ? ` → ${g.suggestion}` : ''}`).join(' / ');
+      attention.push({ kind: 'gap', agent: CHIEF_ID, task: t.id, since: t.created ?? t.lastActivity ?? null, text: `역량 공백: ${text}` });
+    }
+  }
+  attention.sort((a, b) => (toMs(a.since) || 0) - (toMs(b.since) || 0));
+  metrics.attention = attention.length;
 
   return {
     metrics,
@@ -315,5 +378,7 @@ export function buildState({ org, events, runs = [], tasks = [], now = Date.now(
     tasks: taskViews,
     runs: runList.map((r) => ({ ...r })),
     feed: eventList.slice(-FEED_LIMIT),
+    flow: flow.items.slice(-FLOW_LIMIT),
+    attention,
   };
 }

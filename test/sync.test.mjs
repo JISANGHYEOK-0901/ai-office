@@ -58,18 +58,25 @@ test('Claude 에이전트 파일: frontmatter, 표식, 머리말 → 템플릿 �
   assert.equal(fm.model, 'sonnet');
   // frontmatter 다음 줄이 생성 표식
   assert.match(text.split('\n---\n')[1], /^<!-- ai-office:generated .* -->\n/);
-  for (const s of ['이름: 김대리', '직급: 대리', '부서: 리서치부', '`research/`', 'research-2-<내용>.md', '## 보고 형식', '다른 직원(서브에이전트)을 부를 수 없다']) {
+  for (const s of ['이름: 김대리', '직급: 대리', '부서: 리서치부', '`research/`', 'research-2-<내용>.md', '## 보고 형식', '다른 직원(서브에이전트)을 부를 수 없다',
+    // 헤드리스 실행 질문 원칙: 낮은 위험은 가정, 큰 결정만 번호 목록 질문 + 권장 기본값 + 답장 안내
+    '단독(헤드리스)으로 실행될 수 있다', '`가정:`', '권장 기본값', "답장 또는 '기본값으로 진행'이라고 답하면 됩니다.",
+    // 업무 흐름: 단계 입력·출력·완료 기준 준수, 반려 반영, 회의 제안, 결과 첫 문장에 산출물 경로
+    '입력·출력·완료 기준이 있으면 그대로 따른다', '출력은 지정된 경로에만 쓰고', '`[반려]`로 시작하면', '반려 사유와 수정 기준을 항목별로 모두 반영',
+    '`[회의]`로 시작하면', '결과: 첫 문장에 산출물 경로를 넣어']) {
     assert.ok(text.includes(s), `머리말에 ${s} 없음`);
   }
   const iHeader = text.indexOf('## 근무 규칙');
   const iTemplate = text.indexOf('부서 템플릿 본문');
   const iInstr = text.indexOf('시장 지침 본문');
   assert.ok(iHeader > 0 && iHeader < iTemplate && iTemplate < iInstr, '본문 순서가 머리말 → 템플릿 → 지침이어야 함');
-  assert.ok(!text.includes('summary.md를 쓴다'), '팀장이 아닌 직원에게 팀장 업무가 들어가면 안 됨');
+  assert.ok(!text.includes('dept-report.md`를 쓴다'), '팀장이 아닌 직원에게 팀장 업무가 들어가면 안 됨');
+  // Claude Code가 서브에이전트의 report·summary·findings·analysis*.md 쓰기를 막으므로 이름 규칙을 알린다
+  assert.ok(text.includes('report·summary·findings·analysis로 시작하지 않는다'));
 
   const lead = read(root, '.claude/agents/research-1.md');
   assert.equal(parseFrontmatter(lead).model, 'opus', '팀장 기본 모델은 opus');
-  assert.ok(lead.includes('`research/summary.md`'));
+  assert.ok(lead.includes('`research/dept-report.md`'));
 });
 
 test('지침 계층: 머리말 → 회사 규칙 → 부서 instructions(템플릿보다 우선) → 역할 지침, 모델 우선순위', (t) => {

@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -40,13 +41,21 @@ test('loadOrg: 배열이 아니면 예외', (t) => {
   assert.throws(() => loadOrg(root), /배열/);
 });
 
-test('저장소 초기 정본은 빈 회사', () => {
-  assert.deepEqual(loadOrg(REPO), { departments: [], roster: [] });
+// 실제로 쓰는 중인 레포에는 사용자 정본이 있을 수 있다. 처음 받은 상태(Git이 추적하는 파일만)를 기준으로 검사한다
+test('저장소 초기 정본은 빈 회사', (t) => {
+  const res = spawnSync('git', ['ls-files', '--', 'org/departments.json', 'org/roster.json', 'org/company.md'], { cwd: REPO, encoding: 'utf8' });
+  if (res.error || res.status !== 0) t.diagnostic('git 저장소가 아니어서 추적 여부 검사는 건너뜀');
+  else assert.equal(res.stdout.trim(), '', '정본 파일은 Git이 추적하지 않는다(받으면 빈 회사)');
+  // 받은 직후와 같은 폴더(org/에 presets.json·templates만 있음)는 빈 회사로 읽힌다
+  const root = tempRoot(t);
+  mkdirSync(join(root, 'org'));
+  writeFileSync(join(root, 'org', 'presets.json'), readFileSync(join(REPO, 'org', 'presets.json')));
+  assert.deepEqual(loadOrg(root), { departments: [], roster: [] });
 });
 
 test('validateOrg: 정상 정본은 통과', () => {
   const r = validateOrg({ departments: [dept()], roster: [agent({ lead: true }), agent({ id: 'research-2' })] });
-  assert.deepEqual(r, { ok: true, errors: [] });
+  assert.deepEqual(r, { ok: true, errors: [], warnings: [] });
 });
 
 test('validateOrg: 검사 항목별 오류', () => {
@@ -189,5 +198,5 @@ test('presets로 만든 전체 조직이 검증을 통과한다', () => {
       org.roster.push({ id, name: r.name, department: d.id, title: r.lead ? '팀장' : '담당', lead: Boolean(r.lead), specialty: r.specialty, description: r.description, instructions: r.instructions, thoughts: r.thoughts });
     }
   }
-  assert.deepEqual(validateOrg(org), { ok: true, errors: [] });
+  assert.deepEqual(validateOrg(org), { ok: true, errors: [], warnings: [] });
 });

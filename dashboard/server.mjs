@@ -1,16 +1,21 @@
 // AI Office 대시보드 HTTP + SSE 서버. 기본 127.0.0.1:4777
 import http from 'node:http';
 import os from 'node:os';
+import { spawn } from 'node:child_process';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync, watch } from 'node:fs';
+import { closeSync, createReadStream, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync, watch } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ID_PATTERN, MAX_COMPANY_RULES, exportOrg, importOrg, loadCompanyRules, loadOrg, loadPresets, mutateOrg, saveCompanyRules, slugifyId, validateOrg } from '../lib/org.mjs';
 import { quickToolCheck } from '../lib/doctor.mjs';
 import { kstDate } from '../lib/paths.mjs';
-import { readEvents } from '../lib/events.mjs';
+import { appendEvent, readEvents, redact } from '../lib/events.mjs';
 import { previewAgentFile } from '../lib/sync.mjs';
+import { isOffplanCall } from '../lib/flow.mjs';
+import { buildOrgMap } from '../lib/orgmap.mjs';
+import { compactPlan, isTaskId } from '../lib/plan.mjs';
+import { loadTasks as loadTaskList, updateTask } from '../lib/tasks.mjs';
 import { createRunner } from './runner.mjs';
 import { buildState } from './state.mjs';
 
@@ -40,7 +45,18 @@ const MIME = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
-const DEPT_FIELDS = ['id', 'name', 'en', 'color', 'engine', 'tools', 'model', 'summary', 'active', 'permission', 'order', 'instructions', 'codexModel', 'codexEffort'];
+const DEPT_FIELDS = ['id', 'name', 'en', 'color', 'engine', 'tools', 'model', 'summary', 'active', 'permission', 'order', 'instructions', 'codexModel', 'codexEffort', 'capabilities', 'handoffs'];
+// 산출물 미리보기·목록 제한
+const PREVIEW_LIMIT = 5 * 1024 * 1024;
+const MAX_OUTPUT_FILES = 2000;
+const MAX_OUTPUT_DEPTH = 6;
+const TEXT_EXTS = new Set(['.md', '.markdown', '.txt', '.csv', '.tsv', '.json', '.jsonl', '.log', '.yaml', '.yml', '.xml', '.js', '.mjs', '.cjs', '.ts', '.py', '.sql', '.sh', '.css', '.toml', '.ini']);
+const HTML_EXTS = new Set(['.html', '.htm']);
+// html 미리보기 응답: 스크립트·외부 요청을 막는다(sandbox = 고유 출처·스크립트 비허용)
+export const HTML_PREVIEW_CSP = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; form-action 'none'";
+// 대시보드 화면 자체의 CSP. 스크립트는 같은 출처 파일만(인라인·eval 금지), 산출물 html 미리보기는 blob: iframe만 허용한다.
+// 생성 HTML의 style 속성(부서색 변수) 때문에 style-src에 'unsafe-inline'을 둔다
+export const DASHBOARD_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src blob:; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const NO_DESCRIPTION_WARNING = '비서실장이 배정 기준으로 쓸 설명이 없습니다. 담당 업무나 호출 설명을 채워 주세요.';
 const AGENT_FIELDS = ['id', 'name', 'department', 'title', 'lead', 'specialty', 'description', 'instructions', 'active', 'model', 'rank', 'thoughts', 'role'];
 const AUTH_COOKIE = 'office_auth';
@@ -196,6 +212,40 @@ function kebab(text) {
     .replace(/^-+|-+$/g, '');
 }
 
+// 산출물 파일 종류: text(미리보기) / html(sandbox 미리보기) / binary(다운로드)
+function outputKind(name) {
+  const ext = extname(name).toLowerCase();
+  if (HTML_EXTS.has(ext)) return 'html';
+  return TEXT_EXTS.has(ext) ? 'text' : 'binary';
+}
+
+// Content-Disposition 파일 이름: ASCII 대체 이름 + RFC 5987 UTF-8 이름(한글 파일명)
+function attachmentHeader(name) {
+  const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_') || 'download';
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
+// "폴더 열기" 명령(인자 배열, 셸 없음): macOS open, Windows explorer, 그 밖은 xdg-open
+export function openFolderCommand(dir, platform = process.platform) {
+  if (platform === 'darwin') return { command: 'open', args: [dir] };
+  if (platform === 'win32') return { command: 'explorer', args: [dir] };
+  return { command: 'xdg-open', args: [dir] };
+}
+
+function defaultOpenFolder(dir) {
+  const { command, args } = openFolderCommand(dir);
+  const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true });
+  child.on('error', () => {});
+  child.unref();
+}
+
+// /api/tasks/<날짜>/<slug>/<동작> 또는 /api/tasks/<날짜%2Fslug>/<동작> → 업무 id. 형식이 틀리면 null
+function taskIdFromParts(parts, start, tail) {
+  const n = parts.length - start - tail;
+  const id = n === 1 ? parts[start] : n === 2 ? `${parts[start]}/${parts[start + 1]}` : null;
+  return isTaskId(id) ? id : null;
+}
+
 function findRolePreset(presets, deptId, key) {
   const depts = presets.departments ?? [];
   const own = depts.find((d) => d.id === deptId)?.roles?.find((r) => r.key === key);
@@ -234,6 +284,7 @@ export async function startServer({
   publicDir = join(HERE, 'public'),
   quiet = false,
   env = process.env, // 시작 때 빠른 점검(claude·codex 설치 여부)에 쓰는 환경. 테스트에서 CLAUDE_BIN/CODEX_BIN을 바꿔 넣는다
+  openFolder = defaultOpenFolder, // "폴더 열기" 실행 함수(테스트에서 실제 탐색기를 띄우지 않도록 바꿔 넣는다)
 } = {}) {
   root = resolve(root);
   publicDir = resolve(publicDir);
@@ -254,6 +305,10 @@ export async function startServer({
   let org = { departments: [], roster: [] };
   let presets = { departments: [] };
   let tasks = [];
+  // 업무 id → 계획표 요약. planFiles: outputs/<업무>/plan.json(표시용), planEvents: 최신 plan.set 이벤트(검사 통과본)
+  let planFiles = new Map();
+  const planEvents = new Map();
+  const offplanSeen = new Set(); // 이미 남긴 flow.offplan 경고(원 이벤트 기준, 중복 방지)
   let orgMtimes = '';
   let tasksMtime = -1;
   // 시작 때 빠른 점검 결과. 점검이 끝나기 전에는 installed: null(모름)
@@ -292,6 +347,15 @@ export async function startServer({
     if (demo) return;
     const raw = readJsonSafe(tasksFile, []);
     const list = Array.isArray(raw) ? raw : Object.values(raw ?? {});
+    const plans = new Map();
+    for (const t of list) {
+      if (!t || !isTaskId(t.id)) continue;
+      const plan = readJsonSafe(join(root, 'outputs', ...t.id.split('/'), 'plan.json'), null);
+      if (plan && typeof plan === 'object' && Array.isArray(plan.stages)) {
+        try { plans.set(t.id, compactPlan(plan, { taskId: t.id, root })); } catch { /* 형식이 깨진 계획표는 표시하지 않는다 */ }
+      }
+    }
+    planFiles = plans;
     tasks = list
       .filter((t) => t && typeof t.id === 'string')
       .map((t) => {
@@ -328,10 +392,37 @@ export async function startServer({
     if (result.events.length) {
       events.push(...result.events);
       pruneEvents();
-      if (result.events.some((ev) => ev.kind === 'task.start' || ev.kind === 'task.update' || ev.kind === 'review.end')) loadTasks();
+      trackPlans(result.events);
+      if (result.events.some((ev) => ['task.start', 'task.update', 'review.end', 'plan.set', 'flow.deliver'].includes(ev.kind))) loadTasks();
       scheduleBroadcast();
     }
   }
+
+  // plan.set 이벤트를 기억하고, 계획표에 없는 직원 호출은 flow.offplan 경고 이벤트로 남긴다(데모 제외)
+  function trackPlans(batch) {
+    for (const ev of batch) {
+      if (ev && ev.kind === 'flow.offplan' && typeof ev.ref === 'string') offplanSeen.add(ev.ref);
+    }
+    for (const ev of batch) {
+      if (!ev || typeof ev !== 'object') continue;
+      if (ev.kind === 'plan.set' && isTaskId(ev.task) && ev.plan && Array.isArray(ev.plan.stages)) {
+        planEvents.set(ev.task, ev.plan);
+        continue;
+      }
+      if (demo || !ev.task || !planEvents.has(ev.task) || !isOffplanCall(ev, planEvents.get(ev.task))) continue;
+      const ref = `${ev.ts}|${ev.instance ?? ''}|${ev.target ?? ev.summary ?? ''}`;
+      if (offplanSeen.has(ref)) continue;
+      offplanSeen.add(ref);
+      const target = typeof ev.target === 'string' ? ev.target : String(ev.summary ?? '').split(':')[0];
+      try {
+        appendEvent(root, { engine: 'claude', session: 'office-server', instance: 'office-server', kind: 'flow.offplan', task: ev.task, target, ref, summary: redact(`계획에 없는 직원 호출: ${target}`) });
+      } catch (err) {
+        warn('계획 밖 호출 경고를 남기지 못했습니다', err);
+      }
+    }
+  }
+
+  const currentPlans = () => new Map([...planFiles, ...planEvents]);
 
   function pollFiles() {
     tailEvents();
@@ -355,7 +446,7 @@ export async function startServer({
 
   function currentState() {
     return {
-      ...buildState({ org, events, runs: allRuns(), tasks, now: Date.now() }),
+      ...buildState({ org, events, runs: allRuns(), tasks, plans: currentPlans(), now: Date.now(), demo }),
       presets,
       demo,
       tools,
@@ -430,7 +521,16 @@ export async function startServer({
       };
       o.departments.push(dept);
       return dept;
-    });
+    }).then((dept) => withHandoffWarnings(dept, body));
+  }
+
+  // 부서 handoffs에 없는 부서가 있으면 저장은 하고 경고를 붙인다(직접 보낸 handoffs만 알린다)
+  function withHandoffWarnings(dept, body) {
+    if (!dept || !Array.isArray(body.handoffs)) return dept;
+    const missing = body.handoffs.filter((h) => h !== dept.id && !org.departments.some((d) => d.id === h));
+    if (!missing.length) return dept;
+    const warnings = [...(dept.warnings ?? []), `결과를 넘길 부서가 조직에 없습니다: ${missing.join(', ')}. 부서를 추가하거나 handoffs에서 빼 주세요.`];
+    return { ...dept, warnings };
   }
 
   function updateDepartment(id, body) {
@@ -441,7 +541,7 @@ export async function startServer({
       applyPatch(dept, pick(body, DEPT_FIELDS));
       dept.id = id;
       return dept;
-    });
+    }).then((dept) => withHandoffWarnings(dept, body));
   }
 
   function deleteDepartment(id, cascade) {
@@ -603,6 +703,19 @@ export async function startServer({
     }
   }
 
+  // 끝난 실행의 세션을 이어서 답한다(runner.reply: 상태 409, 직원 삭제·휴무 400)
+  async function replyRun(id, body) {
+    if (!runner) throw new HttpError(409, '데모 모드에서는 답장을 보낼 수 없습니다.');
+    const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
+    if (!prompt) throw new HttpError(400, '답장 내용(prompt)이 필요합니다.');
+    if (prompt.length > MAX_PROMPT) throw new HttpError(400, `답장은 ${MAX_PROMPT}자 이하여야 합니다.`);
+    const model = body.model || null;
+    if (model !== null && typeof model !== 'string') throw new HttpError(400, 'model은 문자열이어야 합니다.');
+    const run = await callRunner(() => runner.reply(id, { prompt, model }), '답장을 보내지 못했습니다.');
+    scheduleBroadcast();
+    return run;
+  }
+
   async function stopRun(id) {
     if (!runner) throw new HttpError(404, `실행을 찾을 수 없습니다: ${id}`);
     const run = await callRunner(() => runner.stop(id), '작업을 중지하지 못했습니다.');
@@ -626,6 +739,308 @@ export async function startServer({
     const run = await callRunner(() => runner.startReview({ target, reviewers, task }), '검증을 시작하지 못했습니다.');
     scheduleBroadcast();
     return run;
+  }
+
+  // ---- 사용자 확인(승인·반려) ----
+  function serverEvent(kind, task, summary, extra = {}) {
+    // 사용자 행동이라 agent를 붙이지 않는다(상태 리듀서가 직원으로 세지 않게)
+    appendEvent(root, { engine: 'claude', session: 'office-server', instance: 'office-server', kind, task, ...(summary ? { summary: redact(summary) } : {}), ...extra });
+  }
+
+  function reviewTask(id) {
+    if (!id) throw new HttpError(400, '업무 id 형식이 올바르지 않습니다(예: 2026-10-29/slug).');
+    const task = loadTaskList(root).find((t) => t && t.id === id);
+    if (!task) throw new HttpError(404, `업무를 찾을 수 없습니다: ${id}`);
+    if (task.status !== 'review') throw new HttpError(409, `사용자 확인 대기 상태인 업무만 처리할 수 있습니다(현재: ${task.status ?? '알 수 없음'}).`);
+    return task;
+  }
+
+  function approveTask(id) {
+    if (demo) throw new HttpError(409, '데모 모드에서는 승인할 수 없습니다.');
+    const task = reviewTask(id);
+    const now = new Date().toISOString();
+    const updated = updateTask(root, id, (t) => {
+      if (t.status !== 'review') return false;
+      t.status = 'done';
+      t.updated = now;
+      t.approvedAt = now;
+      return true;
+    });
+    if (!updated || updated.status !== 'done') throw new HttpError(409, '업무 상태가 바뀌어 승인하지 못했습니다. 새로고침 후 다시 시도해 주세요.');
+    // 비서실장이 deliver 답변을 질문으로 끝냈어도 승인했으면 더 답할 필요가 없다
+    try { runner?.clearNeedsReply(id, sessionsForTask(id)); } catch (err) { warn('답변 필요 표시를 끄지 못했습니다', err); }
+    serverEvent('flow.user_approve', id, '사용자 승인');
+    serverEvent('task.update', id, `${task.title ?? id}: review → done`, { status: 'done' });
+    loadTasks();
+    scheduleBroadcast();
+    return { ok: true, task: updated };
+  }
+
+  // 그 업무에 연결된 세션(.office/sessions.json: 세션 → 업무)
+  function sessionsForTask(id) {
+    const map = readJsonSafe(join(officePath, 'sessions.json'), {});
+    return map && typeof map === 'object' ? Object.keys(map).filter((s) => map[s] === id) : [];
+  }
+
+  function rejectPrompt(task, feedback, direct) {
+    const lines = [
+      `[사용자 반려] 업무 ${task.id} ('${redact(task.title ?? task.id, 80)}') 결과를 사용자가 반려했습니다.`,
+      '',
+      '피드백:',
+      feedback,
+      '',
+    ];
+    if (direct) {
+      lines.push(`피드백을 반영해 수정하고 결과를 outputs/${task.id}/ 에 다시 저장하세요.`);
+    } else {
+      lines.push(
+        `산출물 폴더: outputs/${task.id}/ (brief.md·plan.json·report.md 참고)`,
+        '피드백의 원인이 된 단계의 담당 부서에 재배정하세요(비서실장은 직접 실무를 하지 않습니다).',
+        `수정이 끝나면 다시 검토하고 \`node scripts/office.mjs flow ${task.id} deliver\`로 사용자 확인을 요청하세요.`,
+      );
+    }
+    return lines.join('\n');
+  }
+
+  // 반려: 그 업무의 실행(비서실장 또는 직접 지시 직원)에 이어서 답하기로 피드백을 전달한다. 세션이 없으면 새 비서실장 실행
+  async function rejectTask(id, body) {
+    if (!runner) throw new HttpError(409, '데모 모드에서는 반려할 수 없습니다.');
+    const feedback = typeof body.feedback === 'string' ? body.feedback.trim() : '';
+    if (!feedback) throw new HttpError(400, '반려 사유(feedback)를 입력해 주세요.');
+    if (feedback.length > MAX_PROMPT) throw new HttpError(400, `반려 사유는 ${MAX_PROMPT}자 이하여야 합니다.`);
+    const task = reviewTask(id);
+    const prev = runner.latestForTask(id, sessionsForTask(id));
+    const direct = Boolean(task.run && task.agent);
+    const prompt = rejectPrompt(task, feedback, direct || Boolean(prev?.agentId));
+    // 실행 목록·대화 스레드에는 시스템 프롬프트 대신 대표의 피드백을 보여준다(프롬프트 원문은 stdin으로만 전달)
+    const display = `사용자 반려: ${feedback}`;
+    let run;
+    let mode;
+    if (prev && prev.canReply) {
+      run = await callRunner(() => runner.reply(prev.id, { prompt, task: id, display }), '반려 내용을 전달하지 못했습니다.');
+      mode = 'reply';
+    } else {
+      if (prev && (prev.status === 'running' || prev.status === 'queued')) throw new HttpError(409, '이전 실행이 끝난 뒤 반려할 수 있습니다.');
+      run = await callRunner(() => runner.start({ prompt, task: id, display }), '반려 내용을 전달하지 못했습니다.');
+      mode = 'new';
+    }
+    const now = new Date().toISOString();
+    const updated = updateTask(root, id, (t) => {
+      t.status = 'active';
+      t.updated = now;
+      t.userRejects = (Number(t.userRejects) || 0) + 1;
+      return true;
+    });
+    serverEvent('flow.user_reject', id, feedback);
+    serverEvent('task.update', id, `${task.title ?? id}: review → active (사용자 반려)`, { status: 'active' });
+    loadTasks();
+    scheduleBroadcast();
+    return { ok: true, task: updated, run, mode };
+  }
+
+  // ---- 산출물(outputs/) ----
+  const outputsBase = resolve(root, 'outputs');
+  const outsideOutputs = () => new HttpError(400, '산출물 폴더(outputs/) 안의 경로만 열 수 있습니다.');
+  const insideRel = (base, target) => {
+    const rel = relative(base, target);
+    return rel && !rel.startsWith('..') && !isAbsolute(rel) ? rel : null;
+  };
+
+  // outputs 기준 상대경로 → 실제 경로. 글자 경로와 실제 경로(realpath, 심볼릭 링크 해석) 모두 outputs 안이어야 한다
+  function resolveOutput(p, kind) {
+    if (typeof p !== 'string' || !p.trim() || p.includes('\0')) throw new HttpError(400, 'path(산출물 경로)가 필요합니다.');
+    const cleaned = p.replace(/^outputs[\\/]/, '');
+    const abs = resolve(outputsBase, cleaned);
+    if (!insideRel(outputsBase, abs)) throw outsideOutputs();
+    if (!existsSync(abs)) throw new HttpError(404, `산출물이 없습니다: ${cleaned}`);
+    let real;
+    let baseReal;
+    try {
+      real = realpathSync(abs);
+      baseReal = realpathSync(outputsBase);
+    } catch {
+      throw new HttpError(404, `산출물이 없습니다: ${cleaned}`);
+    }
+    const rel = insideRel(baseReal, real);
+    if (!rel) throw outsideOutputs();
+    const st = statSync(real);
+    if (kind === 'file' && !st.isFile()) throw new HttpError(400, `파일이 아닙니다: ${cleaned}`);
+    if (kind === 'dir' && !st.isDirectory()) throw new HttpError(404, `업무 폴더가 없습니다: ${cleaned}`);
+    return { real, baseReal, rel: rel.split(sep).join('/'), size: st.size, mtime: st.mtime.toISOString() };
+  }
+
+  function verdictOf(file) {
+    try {
+      const fd = openSync(file, 'r');
+      try {
+        const buf = Buffer.alloc(300);
+        const n = readSync(fd, buf, 0, buf.length, 0);
+        const m = buf.subarray(0, n).toString('utf8').match(/VERDICT:\s*(PASS|FIX|BLOCK)/i);
+        return m ? m[1].toUpperCase() : null;
+      } finally {
+        closeSync(fd);
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  // 업무 폴더 아래 파일 목록. 심볼릭 링크는 실제 경로가 outputs 안일 때만 따라간다
+  function walkOutputs(dir, relDir, baseReal, depth, out) {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (out.length >= MAX_OUTPUT_FILES) return;
+      if (ent.name.startsWith('.')) continue;
+      const full = join(dir, ent.name);
+      let real = full;
+      let st;
+      try {
+        if (ent.isSymbolicLink()) {
+          real = realpathSync(full);
+          if (!insideRel(baseReal, real)) continue;
+        }
+        st = statSync(real);
+      } catch {
+        continue;
+      }
+      const rel = relDir ? `${relDir}/${ent.name}` : ent.name;
+      if (st.isDirectory()) {
+        if (depth < MAX_OUTPUT_DEPTH) walkOutputs(real, rel, baseReal, depth + 1, out);
+      } else if (st.isFile()) {
+        out.push({ rel, name: ent.name, size: st.size, mtime: st.mtime.toISOString() });
+      }
+    }
+  }
+
+  function fileGroup(rel) {
+    const [head, ...rest] = rel.split('/');
+    if (!rest.length) {
+      return { 'report.md': 'report', 'meeting.md': 'meeting', 'plan.json': 'plan', 'brief.md': 'brief', 'review-notes.md': 'review-notes' }[head] ?? 'other';
+    }
+    return head === 'reviews' ? 'reviews' : head;
+  }
+
+  function listOutputs() {
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const out = [];
+    let baseReal;
+    try {
+      baseReal = realpathSync(outputsBase);
+    } catch {
+      return { outputs: [] };
+    }
+    let dates = [];
+    try {
+      dates = readdirSync(baseReal, { withFileTypes: true }).filter((d) => d.isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(d.name)).map((d) => d.name);
+    } catch { /* 폴더 없음 */ }
+    for (const date of dates.sort().reverse()) {
+      let slugs = [];
+      try {
+        slugs = readdirSync(join(baseReal, date), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+      } catch { continue; }
+      for (const slug of slugs.sort()) {
+        const id = `${date}/${slug}`;
+        if (!isTaskId(id)) continue;
+        const dir = join(baseReal, date, slug);
+        const files = [];
+        walkOutputs(dir, '', baseReal, 0, files);
+        const reviews = files.filter((f) => f.rel.startsWith('reviews/') && f.name.endsWith('.md'));
+        const verdicts = {};
+        for (const r of reviews) verdicts[r.name.replace(/\.md$/, '')] = verdictOf(join(dir, ...r.rel.split('/'))) ?? 'FIX';
+        const t = byId.get(id);
+        const depts = [...new Set(files.map((f) => f.rel.split('/')).filter((p) => p.length > 1 && p[0] !== 'reviews').map((p) => p[0]))];
+        out.push({
+          id,
+          date,
+          slug,
+          title: t?.title ?? slug,
+          status: t?.status ?? null,
+          hasReport: files.some((f) => f.rel === 'report.md'),
+          hasMeeting: files.some((f) => f.rel === 'meeting.md'),
+          hasPlan: files.some((f) => f.rel === 'plan.json'),
+          verdicts,
+          depts,
+          fileCount: files.length,
+          updated: files.reduce((m, f) => (f.mtime > m ? f.mtime : m), t?.updated ?? t?.created ?? ''),
+          run: t?.run ?? null,
+          agent: t?.agent ?? null,
+        });
+      }
+    }
+    return { outputs: out };
+  }
+
+  function outputFiles(id) {
+    if (!id) throw new HttpError(400, '업무 id 형식이 올바르지 않습니다(예: 2026-10-29/slug).');
+    // 데모 업무(시뮬레이터 이벤트에만 있다)는 산출물 폴더가 없다. 사용자 확인 모달이 404로 콘솔 오류를 내지 않게 빈 목록을 준다
+    if (demo && isTaskId(id) && !existsSync(join(outputsBase, ...id.split('/')))) {
+      return { task: { id, title: id.split('/')[1], status: null }, dir: `outputs/${id}/`, files: [], truncated: false, demo: true };
+    }
+    const dir = resolveOutput(id, 'dir');
+    const files = [];
+    walkOutputs(dir.real, '', dir.baseReal, 0, files);
+    const t = tasks.find((x) => x.id === id);
+    return {
+      task: { id, title: t?.title ?? id.split('/')[1], status: t?.status ?? null },
+      dir: `outputs/${id}/`,
+      files: files.map((f) => ({
+        path: `${id}/${f.rel}`,
+        name: f.name,
+        dir: f.rel.includes('/') ? f.rel.slice(0, f.rel.lastIndexOf('/')) : '',
+        group: fileGroup(f.rel),
+        size: f.size,
+        mtime: f.mtime,
+        kind: outputKind(f.name),
+      })),
+      truncated: files.length >= MAX_OUTPUT_FILES,
+    };
+  }
+
+  // 텍스트류는 text/plain 미리보기, html은 CSP sandbox 미리보기(as=text면 소스), 그 밖·download=1은 첨부 다운로드
+  function sendOutputFile(res, url) {
+    const info = resolveOutput(url.searchParams.get('path'), 'file');
+    const name = info.rel.split('/').at(-1);
+    const kind = outputKind(name);
+    const download = ['1', 'true'].includes(url.searchParams.get('download') ?? '') || kind === 'binary';
+    if (download) {
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': attachmentHeader(name),
+        'Content-Length': info.size,
+        'Cache-Control': 'no-store',
+      });
+      const stream = createReadStream(info.real);
+      stream.on('error', () => res.destroy());
+      stream.pipe(res);
+      return undefined;
+    }
+    if (info.size > PREVIEW_LIMIT) throw new HttpError(413, `미리보기는 ${PREVIEW_LIMIT / (1024 * 1024)}MB 이하 파일만 됩니다. 다운로드해 주세요.`);
+    const data = readFileSync(info.real);
+    const headers = { 'Cache-Control': 'no-store', 'X-Output-Kind': kind };
+    if (kind === 'html' && url.searchParams.get('as') !== 'text') {
+      headers['Content-Type'] = 'text/html; charset=utf-8';
+      headers['Content-Security-Policy'] = HTML_PREVIEW_CSP;
+    } else {
+      headers['Content-Type'] = 'text/plain; charset=utf-8';
+    }
+    res.writeHead(200, headers);
+    return res.end(data);
+  }
+
+  function openOutputFolder(id) {
+    if (!id) throw new HttpError(400, '업무 id 형식이 올바르지 않습니다(예: 2026-10-29/slug).');
+    const dir = resolveOutput(id, 'dir');
+    try {
+      openFolder(dir.real);
+    } catch (err) {
+      throw new HttpError(500, `폴더를 열지 못했습니다: ${err.message}`);
+    }
+    return { ok: true, path: `outputs/${id}/` };
   }
 
   function runLog(id) {
@@ -659,6 +1074,7 @@ export async function startServer({
     if (ext === '.html') {
       data = Buffer.from(data.toString('utf8').replaceAll('__OFFICE_TOKEN__', token));
       headers['Cache-Control'] = 'no-store';
+      headers['Content-Security-Policy'] = DASHBOARD_CSP;
     } else {
       headers['Cache-Control'] = 'no-cache';
     }
@@ -749,6 +1165,28 @@ export async function startServer({
         checkToken(req);
         return orgExport(res);
       }
+      if (parts.length === 4 && parts[1] === 'runs' && parts[3] === 'result') {
+        checkToken(req);
+        if (!runner) throw new HttpError(404, `실행을 찾을 수 없습니다: ${parts[2]}`);
+        const r = await callRunner(() => runner.result(parts[2]), '답변을 불러오지 못했습니다.');
+        const headers = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'X-Result-Source': r.source };
+        // 터미널에서 이어가기(claude --resume <id>) 안내용. 토큰이 있는 요청에만 준다
+        if (r.sessionId) headers['X-Session-Id'] = r.sessionId;
+        res.writeHead(200, headers);
+        return res.end(r.text);
+      }
+      if (parts.length === 2 && parts[1] === 'orgmap') {
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+        return res.end(buildOrgMap(org, { presets }));
+      }
+      // 산출물: 원문이 들어 있어 토큰을 요구한다
+      if (parts[1] === 'outputs') {
+        checkToken(req);
+        if (parts.length === 2) return sendJson(res, 200, listOutputs());
+        if (parts.length === 3 && parts[2] === 'file') return sendOutputFile(res, url);
+        if (parts.length >= 4 && parts.at(-1) === 'files') return sendJson(res, 200, outputFiles(taskIdFromParts(parts, 2, 1)));
+        throw new HttpError(404, '없는 API입니다.');
+      }
       if (parts.length === 4 && parts[1] === 'runs' && parts[3] === 'log') {
         checkToken(req);
         const text = runLog(parts[2]);
@@ -781,6 +1219,16 @@ export async function startServer({
     if (resource === 'runs') {
       if (method === 'POST' && parts.length === 2) return sendJson(res, 202, await startRun(body));
       if (method === 'POST' && parts.length === 4 && action === 'stop') return sendJson(res, 200, await stopRun(id));
+      if (method === 'POST' && parts.length === 4 && action === 'reply') return sendJson(res, 202, await replyRun(id, body));
+    }
+    if (resource === 'tasks' && method === 'POST' && parts.length >= 4) {
+      const taskAction = parts.at(-1);
+      const taskId = taskIdFromParts(parts, 2, 1);
+      if (taskAction === 'approve') return sendJson(res, 200, approveTask(taskId));
+      if (taskAction === 'reject') return sendJson(res, 202, await rejectTask(taskId, body));
+    }
+    if (resource === 'outputs' && method === 'POST' && parts.length >= 4 && parts.at(-1) === 'open') {
+      return sendJson(res, 200, openOutputFolder(taskIdFromParts(parts, 2, 1)));
     }
     if (resource === 'reviews' && method === 'POST' && parts.length === 2) return sendJson(res, 202, await startReview(body));
     if (resource === 'company' && method === 'PUT' && parts.length === 2) return sendJson(res, 200, await putCompany(body));

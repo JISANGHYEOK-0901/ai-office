@@ -13,12 +13,15 @@ const SPEED = 72; // 걷기 속도(px/s)
 const UI_FONT = 'system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
 const NARROW_W = 640; // 이 폭보다 좁은 화면(모바일)은 방을 1열로 놓고 폭에 맞춘다
 const LABEL_MIN_Z = 0.38; // 이 배율보다 작으면 이름표·말풍선을 그리지 않는다
+const CHIEF_W = 176; // 비서실 폭
+const FRESH_MS = 30000; // 이보다 오래된 이벤트는 연출하지 않는다
 
 const HAIR = ['#2b1d16', '#4a2f1d', '#6b3f22', '#a0522d', '#d9a441', '#1f2937', '#6d4bd8', '#e0679f', '#9ca3af', '#3b2a5a'];
 const SHIRT = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#64748b', '#f97316', '#22c55e', '#0ea5e9', '#a855f7'];
 const PANTS = ['#1e293b', '#334155', '#3f3f46', '#1e3a8a', '#44403c'];
 const SKIN = ['#f6d7bf', '#f1c7a5', '#e0ac85', '#c68863', '#8d5a3b'];
 
+const CHIEF_LOOK = { hair: '#111827', shirt: '#1e3a8a', pants: '#1e293b', skin: '#f6d7bf', style: 3 };
 const DEFAULT_THOUGHTS = ['다음 업무 뭐지?', '커피 한 잔 할까…', '자료 정리 중', '보고서 다시 볼까', '오늘도 파이팅!'];
 
 export const PALETTES = {
@@ -28,7 +31,7 @@ export const PALETTES = {
     monitor: '#070b16', screenOff: '#14203a', screenOn: '#34f5c5', screenLine: '#0a4b3e', kbd: '#3a4a6e',
     plate: 'rgba(5,9,20,.82)', plateText: '#d6e4ff', bubble: '#0a1324', bubbleText: '#eafff9', bubbleLine: '#34f5c5',
     thought: '#141c36', thoughtText: '#c4cff0', thoughtLine: '#56658a', plant: '#22c55e', plantDark: '#15803d',
-    pot: '#3b4a6b', rug: '#141a38', wood: '#2a3a5c', ceo: '#f472b6', meeting: '#38bdf8', shadow: 'rgba(0,0,0,.5)',
+    pot: '#3b4a6b', rug: '#141a38', wood: '#2a3a5c', ceo: '#f472b6', chief: '#fbbf24', meeting: '#38bdf8', shadow: 'rgba(0,0,0,.5)',
     outline: null, blush: null, headerFill: null, select: '#34f5c5',
   },
   pastel: {
@@ -37,7 +40,7 @@ export const PALETTES = {
     monitor: '#3a3450', screenOff: '#5b5478', screenOn: '#9ff0d0', screenLine: '#4fbf98', kbd: '#ffffff',
     plate: 'rgba(255,255,255,.92)', plateText: '#4a2b3c', bubble: '#ffffff', bubbleText: '#4a2b3c', bubbleLine: '#4a2b3c',
     thought: '#fff8fb', thoughtText: '#8a6076', thoughtLine: '#e9a8c8', plant: '#5cc46a', plantDark: '#2f8a45',
-    pot: '#ffffff', rug: '#ffc4de', wood: '#d9a877', ceo: '#ff5fa8', meeting: '#9b7bff', shadow: 'rgba(74,43,60,.18)',
+    pot: '#ffffff', rug: '#ffc4de', wood: '#d9a877', ceo: '#ff5fa8', chief: '#f5a524', meeting: '#9b7bff', shadow: 'rgba(74,43,60,.18)',
     outline: '#3b2433', blush: '#ff9dc7', headerFill: true, select: '#ff5fa8',
   },
 };
@@ -90,13 +93,23 @@ export function layoutOffice(departments = [], { maxCols = 4 } = {}) {
   for (let c = 0; c < gridCols; c++) { colX.push(cx); cx += colW[c] + GAP; }
   const gridW = cx - GAP - MARGIN;
 
+  // 윗줄: 대표실 · 비서실(대표실 옆) · 회의실. 좁은 화면(1열)에서는 회의실을 다음 줄로 내린다
   const rooms = [];
-  const ceo = finishRoom({ id: '__ceo', kind: 'ceo', name: '대표실', en: 'CEO', x: MARGIN, y: MARGIN, w: 216, h: TOP_H });
-  const meeting = finishRoom({ id: '__meeting', kind: 'meeting', name: '회의실', en: 'MEETING', x: MARGIN + 216 + GAP, y: MARGIN, w: 300, h: TOP_H });
-  rooms.push(ceo, meeting);
+  const ceo = finishRoom({ id: '__ceo', kind: 'ceo', name: '대표실', en: 'CEO', x: MARGIN, y: MARGIN, w: 216, h: TOP_H, laneX: MARGIN - GAP / 2 });
+  const chiefX = MARGIN + 216 + GAP;
+  const chief = finishRoom({ id: '__chief', kind: 'chief', name: '비서실', en: 'CHIEF OF STAFF', x: chiefX, y: MARGIN, w: CHIEF_W, h: TOP_H, laneX: chiefX - GAP / 2 });
+  const stacked = maxCols === 1;
+  const meetX = stacked ? MARGIN : chiefX + CHIEF_W + GAP;
+  const meetY = stacked ? MARGIN + TOP_H + GAP : MARGIN;
+  const meeting = finishRoom({ id: '__meeting', kind: 'meeting', name: '회의실', en: 'MEETING', x: meetX, y: meetY, w: 300, h: TOP_H, laneX: meetX - GAP / 2 });
+  rooms.push(ceo, chief, meeting);
+  // 비서실장 자리(정본 직원이 아니라 메인 세션이므로 seats 맵과 따로 둔다)
+  const cs = { agentId: 'chief', x0: chief.x + Math.round(chief.w / 2) - 30, y0: chief.y + 62, room: chief };
+  cs.x = cs.x0 + 22; cs.y = cs.y0 + 42;
+  chief.seats = [cs];
 
   const seats = new Map();
-  let y = MARGIN + TOP_H + GAP;
+  let y = meeting.y + TOP_H + GAP;
   for (let r = 0; r * gridCols < n; r++) {
     const rowItems = departments.slice(r * gridCols, (r + 1) * gridCols);
     const rowH = Math.max(...rowItems.map((_, i) => sizes[r * gridCols + i].h));
@@ -122,15 +135,17 @@ export function layoutOffice(departments = [], { maxCols = 4 } = {}) {
     });
     y += rowH + GAP;
   }
-  const width = Math.max(gridW, meeting.x + meeting.w - MARGIN) + MARGIN * 2;
-  const height = (n ? y - GAP : MARGIN + TOP_H) + MARGIN;
+  const topW = Math.max(meeting.x + meeting.w, chief.x + chief.w) - MARGIN;
+  const width = Math.max(gridW, topW) + MARGIN * 2;
+  const height = (n ? y - GAP : meeting.y + TOP_H) + MARGIN;
   // 대표실 보고 자리, 회의실 모임 자리
   ceo.spots = [-36, -12, 12, 36, -60, 60].map((dx) => ({ x: ceo.x + ceo.w / 2 + dx, y: ceo.y + 138 }));
+  chief.spots = [-40, 40, -64, 64].map((dx) => ({ x: chief.x + chief.w / 2 + dx, y: chief.y + 150 }));
   const mx = meeting.x + meeting.w / 2;
   meeting.spots = [];
   for (const dy of [74, 142]) for (const dx of [-84, -42, 0, 42, 84]) meeting.spots.push({ x: mx + dx, y: meeting.y + dy });
   meeting.spots.push({ x: mx - 128, y: meeting.y + 112 }, { x: mx + 128, y: meeting.y + 112 });
-  return { width, height, rooms, seats, ceo, meeting, gridCols };
+  return { width, height, rooms, seats, ceo, chief, chiefSeat: cs, meeting, gridCols };
 }
 
 // 두 방 사이 경로: 문 → 복도 → (세로 통로) → 대상 문 → 목적지
@@ -156,6 +171,69 @@ export function openReviewers(feed = []) {
     if (e.kind === 'review.start') open.add(e.agent); else open.delete(e.agent);
   }
   return open;
+}
+
+function attendeeList(v) {
+  if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean);
+  return typeof v === 'string' ? v.split(',').map((x) => x.trim()).filter(Boolean) : [];
+}
+
+// 지금 회의 중인 직원 id 집합.
+// - 명시 이벤트: meeting.start(attendees) ~ meeting.end(같은 업무)
+// - 업무 흐름: stage 'meeting'의 attendees(명시 회의, ended 항목에서 끝)와 [회의] 호출 대상(target)은 그 직원의 'done'까지 회의 중
+// 오래된 기록(maxAgeMs 이전)은 무시해 회의실에 사람이 남아 있지 않게 한다.
+export function meetingAttendees(feed = [], flow = [], now = Date.now(), maxAgeMs = 30 * 60 * 1000) {
+  const since = now - maxAgeMs;
+  const recent = (e) => { const t = Date.parse(e?.ts); return Number.isFinite(t) && t >= since; };
+  const byTask = new Map();
+  const events = [...feed].filter((e) => e && (e.kind === 'meeting.start' || e.kind === 'meeting.end') && recent(e))
+    .sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+  for (const e of events) {
+    const key = e.task || '';
+    if (e.kind === 'meeting.start') byTask.set(key, attendeeList(e.attendees ?? e.detail?.attendees));
+    else byTask.delete(key);
+  }
+  const open = new Set([...byTask.values()].flat());
+  const items = [...flow].filter((it) => it && recent(it)).sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+  const flowOpen = new Set();
+  const explicit = new Map(); // 업무 → 명시 회의(meeting.start 항목의 attendees)
+  for (const it of items) {
+    if (it.stage === 'meeting') {
+      if (it.ended) { explicit.delete(it.task || ''); continue; }
+      if (Array.isArray(it.attendees)) explicit.set(it.task || '', attendeeList(it.attendees));
+      // [회의] 호출: 대상 직원(target)은 그 직원의 done(회의 의견 제출)이 올 때까지 회의 중
+      for (const id of [it.target, it.agent].filter((x) => x && x !== 'chief' && x !== 'user')) flowOpen.add(id);
+    } else if (it.stage === 'done' && it.actor) flowOpen.delete(it.actor);
+  }
+  for (const list of explicit.values()) for (const id of list) open.add(id);
+  for (const id of flowOpen) open.add(id);
+  return open;
+}
+
+// 사용자 의견 필요 아이콘(픽셀 비트맵). '#' 외곽선, 'o' 채움, 'd' 세부, 'k' 강조, '.' 투명
+export const ATTENTION_ICONS = {
+  reply: ['.#########.', '#ooooooooo#', '#ooooooooo#', '#odoodoodo#', '#ooooooooo#', '#ooooooooo#', '.##o######.', '..#o#......', '..##.......'],
+  approve: ['...#####...', '.###ddd###.', '.#ooooooo#.', '.#oddddoo#.', '.#ooooooo#.', '.#odddddo#.', '.#ooooooo#.', '.#oddokko#.', '.#ooookko#.', '.#ooooooo#.', '.#########.'],
+  gap: ['.....#.....', '....#o#....', '...#odo#...', '...#odo#...', '..#oodoo#..', '..#oodoo#..', '.#ooooooo#.', '.#ooodooo#.', '#ooooooooo#', '###########'],
+};
+const ICON_COLORS = {
+  neon: {
+    reply: { o: '#e0f2fe', d: '#0369a1', glow: '#38bdf8' },
+    approve: { o: '#f8fafc', d: '#64748b', k: '#f43f5e', glow: '#34f5c5' },
+    gap: { o: '#fde047', d: '#1f1300', glow: '#fbbf24' },
+    line: '#020617',
+  },
+  pastel: {
+    reply: { o: '#ffffff', d: '#7c5cff', glow: '#b9a6ff' },
+    approve: { o: '#fffdf2', d: '#a08a96', k: '#ff3d8b', glow: '#ff8fc0' },
+    gap: { o: '#ffd84d', d: '#3b2433', glow: '#ffb020' },
+    line: '#3b2433',
+  },
+};
+
+// 아이콘 크기 보정: 축소(z<1)해도 화면에서 같은 크기로 보이게 1/z배(최대 3.2배), 확대 시에는 원래 크기
+export function iconScale(z) {
+  return Math.min(3.2, Math.max(1, 1 / (Number(z) || 1)));
 }
 
 function mix(hex, other, t) {
@@ -274,6 +352,14 @@ export function createOffice(canvas, handlers = {}) {
   let firstUpdate = true;
   let reviewers = new Set();
   let ceoBubbleUntil = 0;
+  let themeName = 'neon';
+  let chiefAgent = null; // 비서실장(메인 세션) 상태
+  let attention = new Map(); // agentId → 'reply'|'approve'|'gap'
+  let iconRects = []; // 마지막 프레임의 아이콘 위치(월드 좌표). 클릭 판정에서 캐릭터보다 먼저 본다
+  let meetingSet = new Set();
+  let docs = []; // 협조 요청 서류 전달 연출
+  let seenHandoffs = new Set();
+  let firstHandoffs = true;
   let cssW = 0;
   let cssH = 0;
   let dpr = 1;
@@ -362,24 +448,29 @@ export function createOffice(canvas, handlers = {}) {
         Object.assign(ch, { x: seat.x, y: seat.y, room: seat.room, mode: 'sit', path: [], job: null, bubble: null });
         continue;
       }
-      const inReview = reviewers.has(id);
+      // 검토(review.start~end)·회의(meeting.start~end, [회의] 호출) 중이면 회의실에 모인다
+      const gather = reviewers.has(id) ? 'review' : meetingSet.has(id) ? 'meeting' : null;
+      const gathered = ch.job === 'review' || ch.job === 'meeting';
+      const spotFor = () => {
+        const spots = layout.meeting.spots;
+        return spots[[...chars.values()].filter((c) => c !== ch && (c.job === 'review' || c.job === 'meeting')).length % spots.length];
+      };
       if (firstUpdate) {
-        // 처음 열 때 이미 리뷰 중이면 걷지 않고 회의실에 바로 둔다
-        if (inReview) {
-          const spots = layout.meeting.spots;
-          const spot = spots[[...chars.values()].filter((c) => c.job === 'review').length % spots.length];
-          Object.assign(ch, { x: spot.x, y: spot.y, room: layout.meeting, mode: 'stand', job: 'review', path: [] });
+        // 처음 열 때 이미 모여 있으면 걷지 않고 회의실에 바로 둔다
+        if (gather) {
+          const spot = spotFor();
+          Object.assign(ch, { x: spot.x, y: spot.y, room: layout.meeting, mode: 'stand', job: gather, path: [] });
         }
         continue;
       }
-      if (inReview && ch.job !== 'review') {
-        const spots = layout.meeting.spots;
-        const idx = [...chars.values()].filter((c) => c.job === 'review').length % spots.length;
-        ch.job = 'review';
-        goTo(ch, spots[idx], layout.meeting, { type: 'stand' });
+      if (gather && !gathered) {
+        const spot = spotFor();
+        ch.job = gather;
+        goTo(ch, spot, layout.meeting, { type: 'stand' });
         continue;
       }
-      if (!inReview && ch.job === 'review') { ch.job = null; goHome(ch); continue; }
+      if (gather && gathered) { ch.job = gather; continue; }
+      if (!gather && gathered) { ch.job = null; goHome(ch); continue; }
       if (next === 'working' && prev !== 'working') {
         // 작업 시작: 자리로 걸어가 앉는다
         ch.job = null;
@@ -389,6 +480,26 @@ export function createOffice(canvas, handlers = {}) {
       }
     }
     for (const id of [...chars.keys()]) if (!agents.has(id) || !seatOf(id)) chars.delete(id);
+  }
+
+  // 협조 요청(cooperate) → 보낸 부서 방에서 비서실을 거쳐 받는 부서 방으로 서류가 날아가는 연출.
+  // handoffs: [{key, from: 부서 id, to: 부서 id, ts}]. 처음 받은 목록과 30초보다 오래된 항목은 연출하지 않는다
+  function queueHandoffs(list) {
+    const recent = Date.now() - FRESH_MS;
+    for (const h of list) {
+      if (!h || !h.key || seenHandoffs.has(h.key)) continue;
+      seenHandoffs.add(h.key);
+      if (firstHandoffs || !(Date.parse(h.ts) > recent)) continue;
+      const a = layout.rooms.find((r) => r.kind === 'dept' && r.id === h.from);
+      const b = layout.rooms.find((r) => r.kind === 'dept' && r.id === h.to);
+      if (!a || !b || a === b) continue;
+      const c = layout.chief;
+      const pts = [{ x: a.doorIn.x, y: a.doorIn.y }, ...routeBetween(a.doorIn, a, c.doorIn, c), ...routeBetween(c.doorIn, c, b.doorIn, b).slice(1)];
+      docs.push({ pts, i: 0, x: pts[0].x, y: pts[0].y, color: a.color, to: b, bornAt: now(), doneAt: 0 });
+    }
+    if (seenHandoffs.size > 600) seenHandoffs = new Set([...seenHandoffs].slice(-300));
+    if (list.length || layout.rooms.some((r) => r.kind === 'dept')) firstHandoffs = false;
+    if (docs.length > 6) docs = docs.slice(-6);
   }
 
   function update(next) {
@@ -404,6 +515,10 @@ export function createOffice(canvas, handlers = {}) {
     agents.clear();
     for (const d of depts) for (const m of d.members || []) agents.set(m.id, m);
     reviewers = openReviewers(model.feed || []);
+    meetingSet = model.meeting instanceof Set ? model.meeting : new Set(model.meeting || []);
+    chiefAgent = model.chief || null;
+    attention = model.attention instanceof Map ? model.attention : new Map(Object.entries(model.attention || {}));
+    queueHandoffs(model.handoffs || []);
     // 새 agent.stop 이벤트가 오면 보고 연출
     // 처음 받은 피드(과거 기록)는 연출하지 않고, 최근 30초 안의 이벤트만 쓴다
     const fresh = [];
@@ -418,7 +533,7 @@ export function createOffice(canvas, handlers = {}) {
     syncChars(prevSig);
     for (const id of fresh) {
       const ch = chars.get(id);
-      if (ch && ch.job !== 'report' && ch.job !== 'review' && ch.status !== 'off-duty') startReport(ch);
+      if (ch && ch.job !== 'report' && ch.job !== 'review' && ch.job !== 'meeting' && ch.status !== 'off-duty') startReport(ch);
     }
     if (depts.length) firstUpdate = false;
   }
@@ -472,10 +587,25 @@ export function createOffice(canvas, handlers = {}) {
       if (ch.mode === 'sit' && ch.job === 'wander') ch.job = null;
       if (ch.bubble && t > ch.bubble.until) ch.bubble = null;
     }
-    // 자동 순찰
+    // 서류 전달 연출
+    for (const d of docs) {
+      if (d.doneAt) continue;
+      let dist = 150 * dt;
+      while (dist > 0 && d.i < d.pts.length) {
+        const p = d.pts[d.i];
+        const dx = p.x - d.x; const dy = p.y - d.y;
+        const len = Math.hypot(dx, dy);
+        if (len <= dist) { d.x = p.x; d.y = p.y; d.i += 1; dist -= len; } else { d.x += dx / len * dist; d.y += dy / len * dist; dist = 0; }
+      }
+      if (d.i >= d.pts.length) d.doneAt = t;
+    }
+    docs = docs.filter((d) => !d.doneAt || t - d.doneAt < 1.6);
+    // 자동 순찰: 의견이 필요한 직원의 방 → 작업 중인 방 → 모든 부서 방 순서로 고른다
     if (patrol && t > patrolAt) {
+      const attnRooms = layout.rooms.filter((r) => (r.kind === 'chief' && attention.has('chief'))
+        || (r.kind === 'dept' && r.seats.some((s) => attention.has(s.agentId))));
       const active = layout.rooms.filter((r) => r.kind === 'dept' && r.seats.some((s) => agents.get(s.agentId)?.status === 'working'));
-      const pool = active.length ? active : layout.rooms.filter((r) => r.kind === 'dept');
+      const pool = attnRooms.length ? attnRooms : active.length ? active : layout.rooms.filter((r) => r.kind === 'dept');
       if (pool.length) { focusRoom(pool[patrolIndex % pool.length]); patrolIndex++; } else fit(false);
       patrolAt = t + 6;
     }
@@ -707,8 +837,11 @@ export function createOffice(canvas, handlers = {}) {
   }
 
   function drawMeeting(room, t) {
-    const busy = [...chars.values()].some((c) => c.job === 'review');
-    drawRoomShell(room, pal.meeting, '회의실', 'MEETING', busy ? { text: '리뷰 중', short: '리뷰', dot: '#f472b6' } : { text: '비어 있음', short: '', dot: '#94a3b8' });
+    const meetingNow = [...chars.values()].some((c) => c.job === 'meeting');
+    const reviewNow = [...chars.values()].some((c) => c.job === 'review');
+    const counts = meetingNow ? { text: '회의 중', short: '회의', dot: '#fbbf24' }
+      : reviewNow ? { text: '리뷰 중', short: '리뷰', dot: '#f472b6' } : { text: '비어 있음', short: '', dot: '#94a3b8' };
+    drawRoomShell(room, pal.meeting, '회의실', 'MEETING', counts);
     const cx = room.x + room.w / 2;
     // 화이트보드
     ctx.fillStyle = pal.glow ? '#0f1a33' : '#ffffff'; ctx.fillRect(cx - 40, room.y + 34, 80, 26);
@@ -761,11 +894,117 @@ export function createOffice(canvas, handlers = {}) {
     ctx.restore();
   }
 
+  function drawChief(room, t, bubbles) {
+    const status = chiefAgent?.status || 'idle';
+    const working = status === 'working';
+    drawRoomShell(room, pal.chief, '비서실', 'CHIEF', {
+      text: working ? '업무 조율 중' : status === 'standby' ? '대기' : '자리 비움', short: working ? '조율' : '', dot: statusColor(status),
+    });
+    // 서류함·화분·결재함
+    ctx.fillStyle = pal.wood; ctx.fillRect(room.x + 12, room.y + 40, 22, 40);
+    for (let i = 0; i < 3; i++) { ctx.fillStyle = mix(pal.wood, '#ffffff', 0.25); ctx.fillRect(room.x + 15, room.y + 44 + i * 12, 16, 8); }
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(room.x + room.w - 34, room.y + 48, 18, 4); ctx.fillRect(room.x + room.w - 33, room.y + 53, 16, 4);
+    ctx.fillStyle = pal.chief; ctx.fillRect(room.x + room.w - 36, room.y + 58, 22, 3);
+    drawPlant(room.x + room.w - 16, room.y + room.h - 8, true);
+    const seat = layout.chiefSeat;
+    const { x0, y0 } = seat;
+    ctx.fillStyle = pal.chair; ctx.fillRect(x0 + 13, y0 + 16, 18, 18);
+    drawCharacter(ctx, seat.x, seat.y, CHIEF_LOOK, {
+      pose: 'sit', typing: working, frame: Math.floor(t * 7), bob: !working && Math.floor(t * 0.8) % 2 === 0, outline: pal.outline, blush: pal.blush,
+    });
+    ctx.fillStyle = pal.deskTop; ctx.fillRect(x0 - 4, y0 + 34, 68, 5);
+    ctx.fillStyle = pal.deskFront; ctx.fillRect(x0 - 4, y0 + 39, 68, 9);
+    if (pal.outline) { ctx.fillStyle = pal.outline; ctx.fillRect(x0 - 4, y0 + 48, 68, 1); }
+    ctx.fillStyle = pal.monitor; ctx.fillRect(x0 + 34, y0 + 19, 19, 14);
+    ctx.save();
+    if (working && pal.glow) { ctx.shadowColor = pal.screenOn; ctx.shadowBlur = 12; }
+    ctx.fillStyle = working ? pal.screenOn : pal.screenOff; ctx.fillRect(x0 + 35, y0 + 20, 17, 11);
+    ctx.restore();
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(x0 + 2, y0 + 31, 9, 3); ctx.fillRect(x0 + 3, y0 + 29, 9, 2);
+    if (cam.z >= LABEL_MIN_Z) {
+      const k = labelScale();
+      ctx.font = `700 ${8 * k}px ${UI_FONT}`;
+      const name = '비서실장';
+      const dot = 2.5 * k;
+      const tw = ctx.measureText(name).width + 9 + dot;
+      const ph = 11 * k;
+      const px = Math.round(x0 + 30 - tw / 2);
+      ctx.fillStyle = pal.plate; rr(ctx, px, y0 + 52, tw, ph, 3); ctx.fill();
+      if (pal.outline) { ctx.strokeStyle = pal.outline; ctx.lineWidth = 1; ctx.stroke(); }
+      ctx.fillStyle = statusColor(status); ctx.fillRect(px + 3, y0 + 52 + ph / 2 - dot / 2, dot, dot);
+      ctx.fillStyle = pal.plateText; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(name, px + 6 + dot, y0 + 52 + ph / 2 + 0.5);
+    }
+    if (working) bubbles.push({ x: seat.x, y: seat.y - 30, text: chiefAgent?.lastTool || '업무 조율', kind: 'say' });
+    if (selectedId === 'chief' || hoverId === 'chief') marker(seat.x, seat.y - 30, selectedId === 'chief');
+  }
+
+  function drawDocs(t, bubbles) {
+    for (const d of docs) {
+      const bob = Math.sin(t * 10) * 1.5;
+      const x = Math.round(d.x - 6); const y = Math.round(d.y - 22 + bob);
+      ctx.save();
+      if (pal.glow) { ctx.shadowColor = d.color; ctx.shadowBlur = 10; }
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(x, y, 12, 15);
+      ctx.restore();
+      ctx.fillStyle = d.color; ctx.fillRect(x, y, 12, 3);
+      ctx.fillStyle = '#94a3b8'; ctx.fillRect(x + 2, y + 6, 8, 1); ctx.fillRect(x + 2, y + 9, 6, 1); ctx.fillRect(x + 2, y + 12, 7, 1);
+      if (pal.outline) { ctx.strokeStyle = pal.outline; ctx.lineWidth = 1; ctx.strokeRect(x - 0.5, y - 0.5, 13, 16); }
+      if (!d.doneAt && t - d.bornAt < 1.4) bubbles.push({ x: d.x, y: d.y - 26, text: '협조 요청', kind: 'say' });
+      if (d.doneAt) bubbles.push({ x: d.to.doorIn.x, y: d.to.doorIn.y - 26, text: '협조 요청 도착', kind: 'say' });
+    }
+  }
+
+  // 머리 위 아이콘 위치(월드 좌표): 걷는 중이면 현재 위치, 앉아 있으면 좌석
+  function headOf(id) {
+    if (id === 'chief') return { x: layout.chiefSeat.x, y: layout.chiefSeat.y - 30 };
+    const ch = chars.get(id);
+    if (ch && ch.status !== 'off-duty' && ch.mode !== 'sit') return { x: ch.x, y: ch.y - 30 };
+    const seat = seatOf(id);
+    return seat ? { x: seat.x, y: seat.y - 30 } : null;
+  }
+
+  function drawAttention(t) {
+    const rects = [];
+    const colors = ICON_COLORS[themeName] || ICON_COLORS.neon;
+    const s = iconScale(cam.z);
+    const P = 2.4 * s;
+    for (const [id, kind] of attention) {
+      const bmp = ATTENTION_ICONS[kind];
+      const head = bmp && headOf(id);
+      if (!head) continue;
+      const c = colors[kind];
+      const w = bmp[0].length * P; const h = bmp.length * P;
+      const phase = hashString(id) % 7;
+      const bounce = Math.abs(Math.sin(t * 3.4 + phase)) * 5 * s;
+      // 도구명·혼잣말 말풍선(머리 위 약 16px) 위로 띄운다
+      const x = head.x - w / 2; const y = head.y - 18 * s - h - bounce;
+      // 은은한 발광(테마 공통): 반투명 원 + 네온은 그림자 번짐
+      ctx.save();
+      ctx.globalAlpha = 0.28 + 0.18 * Math.sin(t * 4 + phase);
+      if (pal.glow) { ctx.shadowColor = c.glow; ctx.shadowBlur = 16 * s; }
+      ctx.fillStyle = c.glow;
+      ctx.beginPath(); ctx.arc(head.x, y + h / 2, Math.max(w, h) * 0.72, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      bmp.forEach((row, ry) => {
+        for (let rx = 0; rx < row.length; rx++) {
+          const ch = row[rx];
+          if (ch === '.') continue;
+          ctx.fillStyle = ch === '#' ? colors.line : c[ch] || c.o;
+          ctx.fillRect(x + rx * P, y + ry * P, Math.ceil(P), Math.ceil(P));
+        }
+      });
+      rects.push({ id, x: x - 3 * s, y: y - 3 * s, w: w + 6 * s, h: h + 6 * s });
+    }
+    iconRects = rects;
+  }
+
   function render(t) {
     drawBackground();
     const bubbles = [];
     for (const room of layout.rooms) {
       if (room.kind === 'ceo') drawCeo(room, t, bubbles);
+      else if (room.kind === 'chief') drawChief(room, t, bubbles);
       else if (room.kind === 'meeting') drawMeeting(room, t);
       else drawDept(room, t, bubbles);
     }
@@ -787,9 +1026,13 @@ export function createOffice(canvas, handlers = {}) {
       }
       if (ch.bubble?.text) bubbles.push({ x: ch.x, y: ch.y - 30, text: ch.bubble.text, kind: ch.bubble.kind });
       else if (ch.job === 'review') bubbles.push({ x: ch.x, y: ch.y - 30, text: '검토 중', kind: 'say' });
+      else if (ch.job === 'meeting') bubbles.push({ x: ch.x, y: ch.y - 30, text: '회의 중', kind: 'say' });
       if (ch.id === selectedId || ch.id === hoverId) marker(ch.x, ch.y - 30, ch.id === selectedId);
     }
+    drawDocs(t, bubbles);
     if (cam.z >= LABEL_MIN_Z) for (const b of bubbles) drawBubble(b.x, b.y, b.text, b.kind);
+    // 의견 필요 아이콘은 배율과 관계없이 맨 위에 그린다
+    drawAttention(t);
   }
 
   function frame(ms) {
@@ -809,8 +1052,15 @@ export function createOffice(canvas, handlers = {}) {
   }
 
   function hitTest(p) {
+    // 의견 필요 아이콘이 캐릭터보다 우선한다(위에 그려진 것부터)
+    for (let i = iconRects.length - 1; i >= 0; i--) {
+      const r = iconRects[i];
+      if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) return { type: 'attention', id: r.id };
+    }
     const movers = [...chars.values()].filter((c) => c.mode !== 'sit' && c.status !== 'off-duty').sort((a, b) => b.y - a.y);
     for (const ch of movers) if (p.x >= ch.x - 11 && p.x <= ch.x + 11 && p.y >= ch.y - 30 && p.y <= ch.y + 10) return { type: 'agent', id: ch.id };
+    const cs = layout.chiefSeat;
+    if (cs && p.x >= cs.x0 && p.x <= cs.x0 + SLOT_W && p.y >= cs.y0 + 8 && p.y <= cs.y0 + SLOT_H) return { type: 'agent', id: 'chief' };
     for (const room of layout.rooms) {
       if (room.kind !== 'dept') continue;
       for (const s of room.seats) if (p.x >= s.x0 && p.x <= s.x0 + SLOT_W && p.y >= s.y0 + 8 && p.y <= s.y0 + SLOT_H) return { type: 'agent', id: s.agentId };
@@ -839,7 +1089,7 @@ export function createOffice(canvas, handlers = {}) {
       return;
     }
     const hit = hitTest(toWorld(ev));
-    hoverId = hit?.type === 'agent' ? hit.id : null;
+    hoverId = hit?.type === 'agent' || hit?.type === 'attention' ? hit.id : null;
     canvas.style.cursor = hit ? 'pointer' : 'grab';
   });
   canvas.addEventListener('pointerup', (ev) => {
@@ -848,7 +1098,8 @@ export function createOffice(canvas, handlers = {}) {
     if (!d || d.moved) return;
     const hit = hitTest(toWorld(ev));
     if (!hit) return;
-    if (hit.type === 'agent') { selectedId = hit.id; handlers.onAgentClick?.(hit.id); } else if (hit.type === 'add') handlers.onAddAgent?.(hit.id);
+    if (hit.type === 'attention') handlers.onAttentionClick?.(hit.id);
+    else if (hit.type === 'agent') { selectedId = hit.id; handlers.onAgentClick?.(hit.id); } else if (hit.type === 'add') handlers.onAddAgent?.(hit.id);
     else handlers.onRoomClick?.(hit.id);
   });
   canvas.addEventListener('pointercancel', () => { drag = null; canvas.classList.remove('dragging'); });
@@ -872,7 +1123,7 @@ export function createOffice(canvas, handlers = {}) {
 
   return {
     update,
-    setTheme(name) { pal = PALETTES[name] || PALETTES.neon; },
+    setTheme(name) { themeName = PALETTES[name] ? name : 'neon'; pal = PALETTES[themeName]; },
     setPatrol(on) { patrol = !!on; patrolAt = 0; if (!on) camTarget = null; else userMoved = false; },
     setSelected(id) { selectedId = id || null; },
     setVisible(on) {
@@ -882,6 +1133,10 @@ export function createOffice(canvas, handlers = {}) {
     zoomOut() { zoomAt(0.8); },
     fit() { userMoved = false; fit(false); },
     focusDept(id) { const room = layout.rooms.find((r) => r.id === id); if (room) { stopPatrolByUser(); focusRoom(room); } },
+    focusAgent(id) {
+      const room = id === 'chief' ? layout.chief : seatOf(id)?.room;
+      if (room) { stopPatrolByUser(); focusRoom(room); selectedId = id; }
+    },
     resize,
     destroy() { running = false; ro?.disconnect(); },
   };

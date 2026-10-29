@@ -71,9 +71,27 @@ async function withServer(root, fn, opts = {}) {
 const runCli = (root, args, opts = {}) =>
   spawnSync(process.execPath, [OFFICE, ...args], { env: { ...process.env, AI_OFFICE_ROOT: root }, encoding: 'utf8', cwd: root, ...opts });
 
-test('저장소에 개인 데이터 파일이 없고 .gitignore가 제외한다', () => {
-  for (const f of ['org/departments.json', 'org/roster.json', 'org/company.md']) {
-    assert.equal(existsSync(join(REPO, f)), false, `${f}는 레포에 두지 않는다`);
+// 개인 데이터 파일은 사용자 컴퓨터에는 있을 수 있다(실제로 쓰는 중인 레포). 그래서 파일 존재가 아니라 Git 추적 여부로 검사한다
+function git(args) {
+  const res = spawnSync('git', args, { cwd: REPO, encoding: 'utf8' });
+  return res.error ? null : res;
+}
+
+test('저장소에 개인 데이터 파일이 없고 .gitignore가 제외한다', (t) => {
+  const personal = ['org/departments.json', 'org/roster.json', 'org/company.md'];
+  const inRepo = git(['rev-parse', '--is-inside-work-tree']);
+  if (!inRepo || inRepo.status !== 0) {
+    t.diagnostic('git 저장소가 아니어서 추적 여부 검사는 건너뜀(.gitignore만 검사)');
+  } else {
+    const tracked = git(['ls-files', '--', ...personal, '.claude/agents', '.codex/agents']);
+    assert.equal(tracked.status, 0, tracked.stderr);
+    assert.deepEqual(tracked.stdout.split(/\r?\n/).filter(Boolean), [], '개인 데이터·생성 파일은 Git이 추적하지 않는다');
+    // 사용자 컴퓨터에 파일이 있어도 Git이 무시하는지(.gitignore 판정)
+    for (const f of [...personal, '.claude/agents/x.md', '.codex/agents/x.toml']) {
+      assert.equal(git(['check-ignore', '-q', '--', f]).status, 0, `${f}는 .gitignore로 제외되어야 한다`);
+    }
+    const kept = git(['ls-files', '--', 'org/presets.json', '.claude/settings.json', '.claude/skills/office-task/SKILL.md']);
+    assert.equal(kept.stdout.split(/\r?\n/).filter(Boolean).length, 3, '프리셋·훅 설정·스킬은 추적한다');
   }
   assert.ok(existsSync(join(REPO, 'org', 'presets.json')));
   const ignore = readFileSync(join(REPO, '.gitignore'), 'utf8').split(/\r?\n/).map((l) => l.trim());

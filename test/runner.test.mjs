@@ -75,15 +75,23 @@ test('claude 실행 인자: 부서 권한·도구·--agent, prompt 는 stdin', a
   assert.deepEqual(calls[0].args, [...cmd.prefixArgs, '-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'bypassPermissions',
     '--agent', 'research-1', '--allowedTools', 'Read,WebSearch']);
   await tick();
-  assert.equal(calls[0].child.input, '-rf 같은 문자로 시작해도 안전해야 함');
+  // 직원 직접 지시는 산출물 폴더(outputs/<날짜>/run-<id>/)를 프롬프트 끝에 덧붙인다
+  assert.ok(calls[0].child.input.startsWith('-rf 같은 문자로 시작해도 안전해야 함\n\n[저장 위치]'), calls[0].child.input);
+  assert.match(calls[0].child.input, new RegExp(`outputs/\\d{4}-\\d{2}-\\d{2}/run-${run.id}/`));
   assert.equal(calls[0].opts.cwd, root);
   assert.equal(calls[0].opts.windowsHide, true);
   if (process.platform !== 'win32') assert.equal(calls[0].opts.detached, true);
   assert.ok(!calls[0].opts.shell || /\.(cmd|bat)$/i.test(cmd.command));
 
   // 비서실장: --agent 없음, 기본 acceptEdits, 작업 단위 모델 지정
+  // 비서실장에게는 현재 조직도를 --append-system-prompt(길면 -file)로 주입한다
   runner.start({ prompt: '업무를 나눠 줘', model: 'opus' });
-  assert.deepEqual(calls[1].args, [...cmd.prefixArgs, '-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits', '--model', 'opus']);
+  assert.deepEqual(calls[1].args.slice(0, -2), [...cmd.prefixArgs, '-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits', '--model', 'opus']);
+  assert.ok(['--append-system-prompt', '--append-system-prompt-file'].includes(calls[1].args.at(-2)));
+  assert.equal(calls[1].opts.env.OFFICE_ORGMAP_INJECTED, '1', 'SessionStart 훅이 조직도를 또 넣지 않게 알린다');
+  assert.equal(calls[0].opts.env.OFFICE_ORGMAP_INJECTED, process.env.OFFICE_ORGMAP_INJECTED, '직원 실행에는 붙이지 않는다');
+  assert.equal(calls[1].opts.env.OFFICE_CHIEF_RUN, '1', '비서실장 실행은 chief-guard가 업무 등록 전에도 판정하게 알린다');
+  assert.equal(calls[0].opts.env.OFFICE_CHIEF_RUN, process.env.OFFICE_CHIEF_RUN, '직원 실행에는 붙이지 않는다');
   assert.equal(runner.list()[1].target, 'chief');
   assert.throws(() => runner.start({ prompt: 'x', model: 'gpt-4' }), (e) => e.status === 400);
 
@@ -169,7 +177,7 @@ test('동시 4개 초과는 queued, 끝나면 순서대로 실행, 대기 중 �
   calls[0].child.finish(0);
   await waitFor(() => calls.length === 5);
   await tick();
-  assert.equal(calls[4].child.input, '작업 4');
+  assert.ok(calls[4].child.input.startsWith('작업 4'));
   assert.equal(runner.list()[4].status, 'running');
   for (const c of calls.slice(1)) c.child.finish(0);
   await waitFor(() => runner.list().filter((r) => r.status === 'done').length === 5);
@@ -243,15 +251,43 @@ setInterval(() => {}, 1000);
     const pidFile = join(root, 'grandchild.pid');
     await waitFor(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8').length > 0);
     const grandchild = Number(readFileSync(pidFile, 'utf8'));
+    // 가짜 바이너리의 출력(init·stdin)이 로그에 남은 뒤에 중지한다. 부하가 크면 손자 pid 파일만 쓰고 출력 전에 죽어 로그가 빌 수 있다
+    const logFile = join(root, '.office', 'runs', `${run.id}.log`);
+    await waitFor(() => existsSync(logFile) && /"subtype":"stdin"/.test(readFileSync(logFile, 'utf8')), 5000);
     runner.stop(run.id);
     await waitFor(() => runner.list()[0].status === 'stopped', 5000);
     const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
     await waitFor(() => !alive(grandchild), 3000);
     const log = readFileSync(join(root, '.office', 'runs', `${run.id}.log`), 'utf8');
     assert.match(log, /"--agent","research-1"/);
-    assert.match(log, /"input":"오래 걸리는 일"/);
+    assert.match(log, /"input":"오래 걸리는 일(\\n\\n\[저장 위치\][^"]*)?"/);
   } finally {
     if (prev === undefined) delete process.env.CLAUDE_BIN;
     else process.env.CLAUDE_BIN = prev;
   }
+});
+
+test('비서실장 실행 중 task start로 연결된 업무(sessions.json)를 실행이 끝날 때 run.task에 남긴다', async () => {
+  const root = makeRoot(ORG);
+  const { calls, spawnImpl } = fakeSpawner();
+  const runner = createRunner({ root, spawnImpl });
+  const run = runner.start({ prompt: '시장 조사해서 보고서로' });
+  await waitFor(() => calls.length === 1);
+  const sid = '0f8fad5b-d9cb-469f-a165-70867728950e';
+  calls[0].child.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: sid }) + '\n');
+  // 훅이 OFFICE_TASK 를 보고 세션 → 업무를 기록한 상황
+  mkdirSync(join(root, '.office'), { recursive: true });
+  writeFileSync(join(root, '.office', 'sessions.json'), JSON.stringify({ [sid]: '2026-10-29/market-scan', other: '../x' }));
+  calls[0].child.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: '업무를 마쳤습니다.', session_id: sid }) + '\n');
+  calls[0].child.finish(0);
+  await waitFor(() => runner.list().find((r) => r.id === run.id)?.status === 'done');
+  assert.equal(runner.list().find((r) => r.id === run.id).task, '2026-10-29/market-scan');
+  assert.equal(runner.latestForTask('2026-10-29/market-scan')?.id, run.id);
+  // 연결이 없으면 task 를 붙이지 않는다
+  const run2 = runner.start({ prompt: '질문만' });
+  await waitFor(() => calls.length === 2);
+  calls[1].child.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: '답입니다.', session_id: 'a1b2c3d4-0000-4000-8000-000000000000' }) + '\n');
+  calls[1].child.finish(0);
+  await waitFor(() => runner.list().find((r) => r.id === run2.id)?.status === 'done');
+  assert.equal(runner.list().find((r) => r.id === run2.id).task ?? null, null);
 });

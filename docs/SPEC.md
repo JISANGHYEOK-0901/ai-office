@@ -29,7 +29,7 @@
   - codex 엔진 부서는 `codex-review.mjs`를 거쳐 `codex exec`를 실행한다.
 - **비서실장에게 지시:** 직원을 지정하지 않으면 `claude -p`를 메인 세션(비서실장)으로 실행한다. 비서실장은 `office-task` 절차에 따라 업무를 나누고 직원들에게 배정한다.
 - **실행 관리:**
-  - 서버는 실행 목록(`runs`)을 메모리와 `.office/runs.json`에 둔다. 필드는 `id`, 대상, 요청 요약, pid, 상태(running/done/failed/stopped), 시작·종료 시각, 마지막 출력 요약이다.
+  - 서버는 실행 목록(`runs`)을 메모리와 `.office/runs.json`에 둔다. 필드는 `id`, 대상, 요청 요약, pid, 상태(running/done/failed/stopped), 시작·종료 시각, 마지막 출력 요약이다. 이어서 답하기용으로 `sessionId`·`parentId`·`rootId`·`model`·`needsReply`가 붙는다(아래 "이어서 답하기").
   - 중지하면 프로세스 그룹에 SIGTERM을 보내고, 5초 뒤에도 살아 있으면 SIGKILL을 보낸다.
   - 동시 실행은 기본 4개로 제한하고, 넘치면 대기열에 넣는다.
 - **화면 반영:** 실행 중인 직원은 사무실 뷰에서 작업 애니메이션이 나온다. Claude 훅 이벤트가 들어오므로 실행 경로와 관계없이 화면은 같은 방식으로 갱신된다. 실행 결과(마지막 답변)는 직원 상세 패널에서 본다.
@@ -53,6 +53,8 @@ scripts/office.mjs        업무 폴더 관리 CLI (task start|status|list)
 scripts/codex-review.mjs  Codex 검증 실행기 (codex exec --json → 리뷰 파일 + 이벤트)
 scripts/simulate-events.mjs  데모 이벤트 생성기(.office/demo-events.jsonl 전용)
 hooks/office-event.mjs    Claude 훅 입력 → 정규화 이벤트 추가
+hooks/chief-guard.mjs     PreToolUse: 업무 중 비서실장의 직접 실무·근무중 아닌 직원 호출 거부(판정은 lib/chief-guard.mjs)
+hooks/session-context.mjs SessionStart: 비서실장 세션에 현재 조직도 주입
 lib/                      공용 모듈(이벤트 스키마, 정본 로더, 경로)
 dashboard/server.mjs      HTTP + SSE 서버 (기본 127.0.0.1:4777)
 dashboard/state.mjs       이벤트 → 화면 상태 리듀서(순수 함수)
@@ -133,8 +135,9 @@ outputs/YYYY-MM-DD/<slug>/  업무 산출물(Git 제외)
   - `outputs/<오늘 KST>/<slug>/brief.md`를 만든다.
   - `.office/tasks.json`에 업무를 등록한다. 필드는 `{id, title, status:"active", created}`이고, id는 `<날짜>/<slug>`다.
   - `task.start` 이벤트를 기록하고, stdout 마지막 줄에 `OFFICE_TASK=<id>`를 출력한다.
-- 훅이 PostToolUse(Bash)의 응답 stdout에서 `OFFICE_TASK=<id>`를 발견하면 `.office/sessions.json`에 `{session: id}`를 기록한다. 이후 그 세션에서 나오는 모든 이벤트(서브에이전트 포함)에 `task`가 붙는다.
-- `office.mjs task status <id> done|blocked|active`로 상태를 바꾼다. 화면에서는 산출물 폴더에 `report.md`와 `reviews/*.md`가 있는지도 함께 보여준다.
+- 훅이 PostToolUse(Bash·PowerShell)의 응답 stdout에서 `OFFICE_TASK=<id>`를 발견하면 `.office/sessions.json`에 `{session: id}`를 기록한다. 이후 그 세션에서 나오는 모든 이벤트(서브에이전트 포함)에 `task`가 붙는다.
+  - 연결 조건(리뷰 반영): 그 도구 호출의 `tool_input.command`가 `node scripts/office.mjs task start …` 단독 실행(chief-guard와 같은 토큰 분리·실제 경로 검사)이고, id가 업무 id 형식(`isTaskId`)이며 tasks.json에 등록돼 있을 때만 연결한다. 테스트 파일을 cat·grep한 출력에 `OFFICE_TASK=`가 보여도 일반 세션이 업무에 연결(→ 가드에 잠김)되지 않게 하려는 것이다.
+- `office.mjs task status <id> blocked|active`로 상태를 바꾼다(전이 규칙은 아래 "리뷰 반영: 업무 흐름·오케스트레이션"). 화면에서는 산출물 폴더에 `report.md`와 `reviews/*.md`가 있는지도 함께 보여준다.
 
 ## Codex 검증 (codex-review.mjs)
 
@@ -233,6 +236,8 @@ node scripts/codex-review.mjs --target outputs/<날짜>/<slug> [--reviewers fact
   - `stop(runId)`
   - `list()`
   - `startReview({target, reviewers, task})`: codex-review.mjs를 백그라운드로 실행하고 runs에 engine `codex`, target `review`로 등록한다(종료 코드 2는 done).
+  - `reply(runId, {prompt, model?})`: 끝난 실행의 세션을 이어서 새 run을 만든다(아래 "이어서 답하기").
+  - `result(runId)`: `{text, source:'file'|'summary', engine, sessionId}`. 답변 전문 파일이 없으면 요약을 준다.
 - **명령 인자:** 배열로 전달하고 셸을 쓰지 않는다(Windows `.cmd` shim만 예외). prompt는 명령 인자가 아니라 stdin으로 넣는다. 오류는 `err.status`(400/404/409)와 한국어 메시지로 던진다.
 - **사전 검사:** agentId는 org에 있는지 확인한다. 휴무 상태면 거부한다.
 - **출력 처리:** stream-json 출력의 마지막 result 요약을 run에 저장한다. stdout 원문은 `.office/runs/<id>.log`에 남긴다.
@@ -243,7 +248,7 @@ node scripts/codex-review.mjs --target outputs/<날짜>/<slug> [--reviewers fact
 
 반환 구조:
 ```
-{ metrics:{active,standby,idle,offline,tasks,reviews,tools},
+{ metrics:{active,standby,idle,offline,tasks,reviews,tools,needsReply},
   departments:[{...dept, members, activeCount, idleCount, progress, live:[agentId]}],
   agents:{[id]:{status:'working'|'standby'|'idle'|'offline'|'off-duty', lastEvent, lastTool, lastSummary, runId}},
   unregistered:[agent], tasks:[...], runs:[...], feed:[최근 200개] }
@@ -269,7 +274,9 @@ node scripts/codex-review.mjs --target outputs/<날짜>/<slug> [--reviewers fact
 | POST /api/agents/:id/duty | `{active:bool}`로 근무 상태 전환 |
 | POST /api/runs | `{agentId?, prompt, model?}` 202 + run |
 | POST /api/runs/:id/stop | 실행 중지 |
+| POST /api/runs/:id/reply | `{prompt, model?}` 202 + 새 run. 실행 중·대기·세션 없음 409, 원래 직원 삭제·휴무·엔진 변경 400, 데모 409 |
 | GET /api/runs/:id/log | 마지막 64KB 텍스트 |
+| GET /api/runs/:id/result | 답변 전문 텍스트(토큰 필요). 파일이 없으면 summary. 헤더 `X-Result-Source: file|summary`, 세션이 있으면 `X-Session-Id` |
 | POST /api/reviews | `{target, reviewers}`로 codex-review.mjs를 백그라운드 실행. runs에 engine codex로 등록 |
 
 - **오류 응답:** `{error:"사람이 읽을 수 있는 한국어 메시지"}`. 검증 실패는 400, 없음은 404, 충돌은 409.
@@ -392,8 +399,21 @@ API 추가:
 - **원격 바인딩 인증:** 루프백이 아닌 `--host`에서는 토큰을 index.html에 그냥 주입하지 않고, 시작 때 출력하는 `?key=` 주소로 HttpOnly·SameSite=Strict 쿠키를 받은 브라우저만 허용한다(나머지 401). 루프백 동작은 그대로다.
 - **읽기 API 토큰:** `GET /api/runs/:id/log`, `GET /api/agents/:id/preview`, `GET /api/company`도 `X-Office-Token`을 요구한다. 실행 로그는 0600, `.office/runs`는 0700으로 만든다.
 - **검토 대상 경로:** `POST /api/reviews`와 `codex-review.mjs --target`은 실제 경로(realpath) 기준으로 `outputs/` 안만 받는다.
-- **실행 결과 보기:** 전체 답변은 로그(stream-json)에서 화면이 assistant 텍스트·최종 result만 추려 보여준다('원문 보기'로 전환). 별도 결과 파일·API는 두지 않았다.
+- **실행 결과 보기:** 전체 답변은 로그(stream-json)에서 화면이 assistant 텍스트·최종 result만 추려 보여준다('원문 보기'로 전환). (2026-10-29 "이어서 답하기"에서 답변 전문 파일 `.office/runs/<id>.result.md`와 `GET /api/runs/:id/result`를 추가했다.)
 - **결정됨(2026-10-29, 요약 유지 — 아래 "요청 요약 저장" 참조):** request 이벤트·runs의 요청 요약(앞 200자/120자, 비밀값 가림)이 "원문 프롬프트는 저장하지 않는다"에 해당하는지. 요약을 없앨지, "앞 N자 요약 저장"으로 정본을 고칠지 정해야 한다.
+
+## 이어서 답하기 (2026-10-29)
+
+대시보드 지시는 `claude -p`로 한 번 실행되고 끝나서, 비서실장이 확인 질문으로 답을 끝내면 대표가 답할 곳이 없었다. 같은 세션을 이어서 실행해 답장할 수 있게 한다.
+
+- **세션 id:** claude는 stream-json의 system(init)·result 줄의 `session_id`, codex는 `thread.started`의 `thread_id`를 `run.sessionId`에 저장한다(runs.json). UUID 형식(`SESSION_PATTERN`)만 받는다. `/api/state`·API 응답의 run에는 값 대신 `canReply`(세션 있음, review 아님)만 싣는다.
+- **run 필드 추가:** `sessionId`, `parentId`(답장 대상), `rootId`(대화 묶음 최상위, 첫 실행은 자기 id), `model`(작업 지정 모델 또는 null), `needsReply`. 이 필드가 없는 예전 run은 `canReply:false`, `rootId:id`, `parentId:null`, `needsReply:false`로 본다.
+- **답변 전문:** 마지막 result 텍스트(없으면 마지막 assistant 텍스트, codex는 마지막 agent_message)를 `.office/runs/<id>.result.md`(0600)에 저장한다. `run.summary`는 기존처럼 200자 요약이다. 검증(`startReview`) run은 저장하지 않는다.
+- **답변 필요(needsReply) 휴리스틱:** done이고 세션이 있으며 답변이 질문으로 끝나면 true. 마지막 단락에 `?`가 있거나, 마지막 단락에 "확인하겠습니다·알려 주세요·알려 주시면·선택해 주세요·말씀해 주세요·답하셔도·기본값으로 진행" 등이 있거나, 번호 목록 질문이 2개 이상(또는 마지막 세 단락 안에 1개 이상)이면 true. "필요하시면 말씀해 주세요" 같은 맺음 인사만 있으면 false. true면 `reply.wait` 이벤트(agent, run, 마지막 단락 요약)를 남긴다. 답장하면 원래 run의 needsReply는 false가 된다. `metrics.needsReply`는 실행 중이 아닌 needsReply run 수다.
+- **reply 검사 순서:** 프롬프트·모델 검증(400) → run 없음 404 → 원 run 또는 같은 대화의 run이 running/queued면 409("이전 실행이 끝난 뒤 답할 수 있습니다.") → 세션 없음·형식 불일치·review면 409 → 원래 직원 삭제·휴무·부서 운영 중지면 400 → 부서 엔진이 원래 run과 다르면 400.
+- **명령:** claude는 `start`와 같은 인자(현재 부서 설정의 권한·도구, `--agent`, 모델은 답장 지정 > 원래 run 모델) 뒤에 `--resume <sessionId>`를 붙이고 답장은 stdin으로 넣는다. codex는 `codex exec -s read-only -C <root> resume --json -m <모델> -c model_reasoning_effort="<강도>" <thread_id> -`이고 stdin에는 답장만 넣는다(검토 지침은 이전 대화에 있다). 새 run은 target·agentId가 같고 parentId·rootId를 가지며 큐·중지·로그·이벤트 처리는 일반 실행과 같다. 새 run의 sessionId는 원 세션으로 시작하고, 출력에 새 세션 id가 오면 그것으로 바꾼다.
+- **화면:** 실행 목록·직원 프로필 최근 실행에 '답변 필요' 배지와 '대화' 버튼, 상단 지표 '답변 필요 N'(0이면 숨김, 누르면 가장 최근 대화), 피드의 "○○님이 답변을 기다립니다". 대화 창은 같은 rootId의 run을 시간순으로 [요청 요약 → 답변 전문] 표시하고, 답변 마크다운은 제목·목록·굵게·코드만 해석해 DOM `textContent`로 그린다(innerHTML에 원문을 넣지 않는다). 하단 답장 입력·모델 선택·보내기는 실행 중·세션 없음·데모 모드에서 비활성이다. 세션 id는 토큰이 필요한 result 응답 헤더로 받아 "저장소 폴더의 터미널에서 이어가기: `claude --resume <id>`(직원 실행은 `--agent <직원 id>` 추가, codex는 `codex exec resume <id>`)"로 보여준다(세션은 실행 폴더 기준으로 저장된다).
+- **수칙:** AGENTS.md·office-task 스킬·직원 공통 머리말에 "헤드리스 실행 가능, 낮은 위험은 `가정:`으로 진행, 큰 결정만 번호 목록 질문 + 권장 기본값, '답장 또는 '기본값으로 진행'이라고 답하면 됩니다.'로 끝냄"을 둔다.
 
 ## 배포 방식 (사용자 확정: 각자 자기 컴퓨터에서 로컬 실행)
 
@@ -438,3 +458,383 @@ API 추가:
   - request 이벤트의 summary와 runs.json의 request에 요청 문장 앞부분을 저장한다(각 200자·120자). 저장 전에 redact로 비밀값을 가린다.
   - 저장 위치는 각자 컴퓨터의 `.office/`뿐이고 Git에서 제외된다.
 - **효력:** 위 "개인정보·비밀값"의 "원문 프롬프트는 저장하지 않는다"는 원문 전체를 저장하지 않는다는 뜻으로 해석한다. 리뷰 반영의 해당 미결 항목은 이 결정으로 닫는다.
+
+## 업무 흐름·실시간 피드 (사용자 확정 2026-10-29)
+
+### 표준 업무 흐름(단계)
+
+```
+요청(사용자→비서실장) → 내용 확인(비서실장) → [회의(필요 시)] → 업무 하달(비서실장→부서)
+→ 업무 전달받음(부서) → 진행 중(부서: 무슨 작업인지) → 작업 완료(부서)
+→ 업무 협조 요청(부서A→부서B, 비서실장 경유) → 업무 확인(부서B) → 진행 중 → 산출물 작성 완료(부서B)
+→ 검토 요청(부서→비서실장) → 검토 통과 → 사용자 확인 대기 → 사용자 승인 → 완료
+                         └ 검토 반려 → 상황에 따라 해당 부서(B 또는 A)로 반려 → 다시 진행
+사용자 반려(피드백) → 비서실장이 재배정
+```
+
+- **lib/flow.mjs의 `deriveFlow(events, org)`**(순수 함수)는 이벤트를 위 단계의 업무 언어 항목으로 바꾼다.
+  - 항목 형식: `{task, ts, stage, from, to, actor, dept, text, detail?, files?}`
+  - `stage`: `request|intake|meeting|assign|accept|progress|done|cooperate|review_request|review_pass|review_reject|deliver|user_approve|user_reject|codex_review|reply_wait` (`reply_wait`는 리뷰 반영으로 추가)
+- **자동 도출 규칙**(훅 이벤트만으로, 비서실장이 CLI를 잊어도 동작):
+
+| 원천 이벤트 | 단계 | 피드 문구 |
+|---|---|---|
+| 메인 세션 request | request | "사용자 → 비서실장: 업무 요청 '…'" |
+| 그 직후 비서실장의 첫 활동, task.start | intake | "비서실장: 요청 내용 확인", "업무 등록 '제목'" |
+| 비서실장 Agent 호출(subagent_type=X, X는 부서 D 소속), 같은 task에서 다른 부서 E의 직원이 앞서 완료됨 | cooperate | "E → D: 업무 협조 요청(비서실장 전달) — description" |
+| 위 조건이 아닌 Agent 호출 | assign | "비서실장 → D: 업무 하달 — description" |
+| description이 `[회의]`로 시작하는 Agent 호출 | meeting | — |
+| description이 `[반려]`로 시작하는 Agent 호출 | review_reject | — |
+| SubagentStart | accept | "D 김팀장: 업무 전달받음" |
+| 서브에이전트 tool 이벤트 | progress | 직원별로 마지막 1줄만 유지(아래 도구 번역 참조) |
+| SubagentStop | done | "D 김팀장: 작업 완료 — 결과 첫 문장". 그 직원의 Write/Edit 파일 basename을 files로 |
+| 비서실장 review.start/review.end, Codex 검토 | codex_review | "검증실: 검토 중 / 판정 PASS·FIX·BLOCK" |
+
+- **도구 번역**(명령어 원문은 숨김):
+
+| 도구 | 문구 |
+|---|---|
+| WebSearch | "자료 검색 '검색어'" |
+| WebFetch | "웹페이지 확인 '도메인'" |
+| Read/Glob/Grep | "자료 확인 '파일명'" |
+| Write/Edit | "문서 작성 '파일명'" |
+| Bash | "데이터 처리 중" (python이면 "분석 스크립트 실행", curl이면 "웹 자료 수집") |
+| Agent | (위 하달·협조 규칙) |
+| Skill | "양식 사용 '스킬명'" |
+
+- **명시 이벤트**(비서실장이 CLI로 기록, 자동 도출보다 우선):
+  - `node scripts/office.mjs flow <task> review-request --from <부서>`
+  - `node scripts/office.mjs flow <task> review --verdict pass|reject --to <부서> --reason "…"`
+  - `node scripts/office.mjs flow <task> deliver`: 사용자 확인 대기. task status는 `review`다.
+  - `node scripts/office.mjs flow <task> cooperate --from A --to B --note "…"`
+  - `node scripts/office.mjs meeting <task> start --attendees a,b --agenda "…"` / `meeting <task> end --summary "…"`
+  - 이벤트 kind는 `flow.*`와 `meeting.*`이고 기존 이벤트 형식을 따른다.
+- **사용자 확인:**
+  - task가 `review` 상태면 화면에 "사용자 확인 대기" 카드를 띄운다. 버튼은 [산출물 보기] [승인] [반려(피드백 입력)].
+  - 승인: `POST /api/tasks/:id/approve`로 status를 done으로 바꾸고 user_approve를 기록한다.
+  - 반려: `POST /api/tasks/:id/reject {feedback}`로 user_reject를 기록하고, 그 업무의 비서실장 run에 이어서 답하기로 피드백을 전달해 재배정한다. 세션이 없으면 새 비서실장 run을 띄운다.
+
+### 실시간 피드 화면
+- **기본은 업무 언어 피드다.** deriveFlow 항목을 업무(task)별로 묶어 시간순으로 보여준다. 항목마다 부서색 칩과 from→to 화살표를 단다. progress는 직원별 한 줄로 갱신한다(누적하지 않음).
+- **"상세 보기" 토글(기본 꺼짐):** 켜면 기존 도구 이벤트를 보여준다. 명령은 가린 요약이다.
+- **업무 카드의 단계 표시줄:** 요청 → 확인 → 하달 → 진행 → 협조 → 검토 → 사용자 확인 → 완료. 반려가 있으면 되돌아간 화살표와 횟수를 표시한다.
+
+### 비서실장 수칙(강화)
+- **직접 실무 금지:** 업무 중(task 연결된 세션)인 비서실장은 웹 수집·스크립트 실행·산출물 작성을 직접 하지 않는다.
+  - 허용: Read/Glob/Grep, Agent, `node scripts/office.mjs …`, `node scripts/codex-review.mjs …`, 그리고 outputs/<task>/의 brief.md·meeting.md·plan.json·report.md·review-notes.md 작성(아래 "강제 장치 구현 결정").
+- **강제 장치:** `hooks/chief-guard.mjs`(PreToolUse)를 둔다.
+  - 판정 대상: agent_type이 없는 메인 세션이 sessions.json에 task가 연결된 상태에서 허용 목록 밖의 도구를 쓰려는 경우다.
+  - 동작: 그 호출을 거부하고 "비서실장은 직접 실무를 하지 않습니다. 담당 직원에게 Agent로 배정하세요"를 사유로 돌려준다(Claude Code PreToolUse의 deny JSON). 그 밖의 경우는 무출력·종료 코드 0이다.
+  - 고정할 형식: `.claude/settings.json`에 exec 형식으로 등록한다. 공식 문서의 hookSpecificOutput.permissionDecision 형식을 확인해서 쓴다.
+- **지시문에 담당이 적혀 있으면 그대로 따른다:** 예: "마케팅이 조사하고 최대리가 HTML 작성, 비서실장이 검토". 이름·부서·직무로 직원을 매칭하고, 매칭이 안 되면 회의로 대체한다.
+- **담당이 없으면 회의:**
+  - 모호하거나 범위가 넓은 요청은 관련 부서 팀장·담당 2~4명을 `[회의]` Agent 호출로 병렬 소집한다. 각자 범위·산출물·분담을 제안하게 한다.
+  - 판정 기준(통합 검증으로 구체화): 지시문에 담당(부서·이름·직무)이 하나도 없고 관련될 수 있는 근무중 부서가 둘 이상이면, 요청이 짧아도 회의를 연다. 근무중 부서가 하나뿐이면 생략한다.
+  - 비서실장이 취합해 `outputs/<task>/meeting.md`(참석자·안건·결정·가정·분담)를 쓴다. 이견이 크면 취합안으로 2차 회의를 연다.
+  - 사용자에게는 비용 발생·외부 발송·법적 판단·되돌리기 어려운 결정만 묻는다.
+- **단계 간 근거 전달:** 협조 요청 때 brief.md 배정표의 "입력(앞 단계 산출물 경로)·출력(이번 산출물 경로)·완료 기준"을 Agent 프롬프트에 그대로 넣는다.
+- **검토 기록:** 검토 결과는 반드시 `flow review`로 기록한다.
+  - 통과하면 report.md를 쓰고 `flow deliver`를 실행한다.
+  - 반려하면 `[반려]` Agent 호출로 해당 부서에 사유와 수정 기준을 전달한다. 원인이 앞 단계면 앞 단계 부서로 보낸다.
+  - 반려는 최대 2회까지다. 그 뒤에도 해결되지 않으면 사용자 확인으로 넘긴다.
+
+### 강제 장치 구현 결정 (2026-10-29)
+
+- **판정 모듈:** 판정은 `lib/chief-guard.mjs`의 `decideChiefGuard(input, {root, sessions, getOrg})`(null = 허용, `{reason}` = 거부)에 두고, 훅은 입력·파일 읽기와 출력만 한다. 정본은 Agent 호출일 때만 읽는다.
+- **출력 형식(공식 문서 확인, 2026-10-29):** 거부 때만 stdout에 `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"…"}}` 하나를 쓰고 종료 코드 0이다. deny 사유는 Claude에게 전달된다. 허용·대상 아님·잘못된 입력·모듈 로드 실패·깨진 정본은 모두 무출력·종료 코드 0(허용)으로 안전하게 끝낸다. 2초 제한은 office-event와 같다(stdin 1.5초, 강제 종료 1.9초).
+- **판정 대상 아님:** `agent_type`이 있는 입력. 서브에이전트뿐 아니라 `--agent <id>`로 실행한 직원 직접 지시 run도 공식 문서상 `agent_type`이 붙으므로 제한하지 않는다.
+- **허용 목록 보강:**
+  - `plan.json` 쓰기: "조직 적응형 오케스트레이션"에서 비서실장이 배정 전에 쓰도록 정해서 허용 파일에 넣었다.
+  - 업무 조율 도구(Skill, ToolSearch, AskUserQuestion, SendMessage, TodoWrite, Task 목록 도구, 계획 모드): 산출물을 만들지 않고 office-task 스킬 사용·진행 관리에 필요하다. 예전 이름 `Task`의 서브에이전트 호출은 Agent와 같게 판정한다.
+- **셸 명령:** Bash·PowerShell은 `node scripts/office.mjs …`/`node scripts/codex-review.mjs …` 단독 실행만 허용한다. 따옴표만 해석하는 토큰 분리 후 따옴표 밖의 `;` `&` `|` `<` `>` `(` `)` `$`·백틱과 줄바꿈, 큰따옴표 안의 `$`·백틱이 있으면 거부한다(`cd …&&`, 리다이렉션, 명령 치환으로 우회하지 못하게). 작은따옴표 밖의 백슬래시 뒤에 영문·숫자·`_` `.` `-`가 아닌 문자가 오거나 줄 끝이면 거부한다(bash는 `\'`를 글자 따옴표로 읽어 이 분리기가 따옴표 안으로 본 `;`가 실제 연산자가 된다). PowerShell이 따옴표로 읽는 유니코드 따옴표(‘ ’ “ ” 등)도 거부한다. office.mjs는 하위 명령 허용 목록(task start·list, task status <id> blocked|active, flow, meeting, plan validate)만 허용하고 org export·import와 task status done·review는 거부한다. 스크립트 경로는 실제 경로(realpath) 기준으로 레포의 두 파일인지 본다. 거부 사유에 "단독으로, 특수문자 값은 작은따옴표"를 안내한다.
+- **파일 쓰기:** Write/Edit/MultiEdit의 `file_path`가 `outputs/<task>/` 바로 아래 허용 파일 이름일 때만 허용한다(실제 경로 기준, Windows는 대소문자 무시). 부서 하위 폴더 산출물은 직원의 일이라 거부한다.
+- **Agent:** `subagent_type`이 근무중 직원(직원·부서가 휴무가 아니고, 부서 engine이 codex가 아님)이 아니면 거부한다. 내장 에이전트(`general-purpose`, `Explore`)와 subagent_type 생략도 거부한다. 사유에 `id(이름 직급 · 부서 · 담당)` 목록을 1500자 안으로 넣고 gaps 안내를 붙인다.
+
+### 조직도 주입 훅 (2026-10-29)
+
+- **파일:** `hooks/session-context.mjs`(SessionStart). office-event 훅은 stdout 무출력 원칙이라 따로 두고, `.claude/settings.json`의 SessionStart에 exec 형식으로 함께 등록한다.
+- **출력(공식 문서 확인, 2026-10-29):** `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"…"}}`. additionalContext가 10,000자를 넘으면 Claude Code가 파일로 돌리고 앞 2,000자만 보여 주므로 9,500자에서 자르고 정본 위치를 안내한다.
+- **내용:** 비서실장 수칙 요약 3줄 + `buildOrgMap(org, {presets})`. orgmap 모듈을 불러오지 못하면 근무중 직원만 담은 최소 조직도로 대신한다. startup·resume·clear·compact 모두 주입한다(compact 뒤에도 조직도가 남게).
+- **생략:** `agent_type`이 있는 세션(직원), 잘못된 입력, 오류는 무출력·종료 코드 0. 대시보드 비서실장 run은 runner가 `--append-system-prompt`로 같은 내용을 넣으므로, runner가 환경변수 `OFFICE_ORGMAP_INJECTED=1`을 주면 중복 주입하지 않는다.
+
+### 개인 데이터 회귀 테스트 기준 (2026-10-29)
+
+- "저장소에 개인 데이터 파일이 없다"·"초기 정본은 빈 회사" 테스트는 파일 존재가 아니라 `git ls-files`(추적 안 함)와 `git check-ignore`(.gitignore 제외)로 검사한다. 사용자가 실제로 쓰는 레포에는 자기 org 파일이 있어도 전체 테스트가 통과해야 하기 때문이다. git 저장소가 아니면 추적 검사만 건너뛴다.
+
+### 사무실·조직·산출물 화면
+- **사무실:**
+  - 비서실(대표실 옆)에 비서실장 자리를 둔다. agent `chief` 상태를 반영한다.
+  - 회의 중(meeting.start~end, 또는 `[회의]` 호출 진행 중)인 참석자는 회의실로 이동한다.
+  - 협조 요청이 오면 두 부서 사이에 서류 전달 연출을 짧게 보여준다.
+- **뷰 탭은 관제 | 사무실 | 조직 | 산출물이다.**
+  - 조직: 언제든 부서 프리셋 그리드, 부서·직원 목록(추가·수정·삭제·근무 전환), 일괄 추가, 회사 설정.
+  - 산출물: 업무별 목록(날짜·제목·상태·검토 판정·참여 부서)과 상세(report·meeting·부서별 파일·reviews·대화 스레드).
+    - 텍스트류(md/txt/csv/json/html 소스)는 미리보기, 그 밖의 파일은 다운로드한다.
+    - html은 sandbox iframe(스크립트 비허용)으로 미리본다. blob 문서 맨 앞(doctype 뒤)에 CSP meta(`default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; form-action 'none'`)를 넣는다(리뷰 반영).
+    - "폴더 열기"는 macOS `open`, Windows `explorer`, Linux `xdg-open`을 인자 배열로 실행한다.
+    - 검색·필터를 둔다.
+  - API: `GET /api/outputs`, `GET /api/outputs/:taskId/files`, `GET /api/outputs/file?path=`(outputs 내부만, realpath 검사, 토큰 필요), `POST /api/outputs/:taskId/open`.
+- **직원 직접 지시 run의 저장 위치:** runner가 `outputs/<날짜>/run-<id>/`를 만들고 task로 등록한다. 프롬프트 끝에 "산출물은 이 폴더에 저장"을 덧붙인다.
+
+## 조직 적응형 오케스트레이션 (사용자 확정 2026-10-29: "내가 만든 부서에 따라 협조가 잘 이뤄져야 한다")
+
+부서명을 하드코딩하지 않는다. 비서실장은 사용자가 만든 현재 조직을 읽고 분담·협조 순서를 계획한다. 이를 구조로 보장한다.
+
+- **조직도 주입:**
+  - `lib/orgmap.mjs`의 `buildOrgMap(org)`가 Markdown을 만든다. 내용은 부서별 summary·capabilities·handoffs, 근무중 직원의 id·이름·직급·직무·담당·모델, 휴무 표시다.
+  - 주입 경로:
+    - 대시보드 비서실장 run: runner가 `--append-system-prompt`로 전달한다. Windows 인자 길이를 고려해, 길면 `--append-system-prompt-file`을 쓰고 지원 여부를 확인한다.
+    - 레포에서 직접 연 `claude` 세션: SessionStart 훅의 additionalContext로 전달한다. 훅 출력 형식은 공식 문서를 확인한다.
+  - 조직이 바뀌면 다음 실행부터 자동으로 반영된다.
+- **부서 역량 필드:**
+  - `capabilities`: 문자열 배열, 예 ["자료조사","HTML·웹 문서","엑셀","검토"]
+  - `handoffs`: 부서 id 배열, 주로 결과를 넘기는 부서
+  - presets에 기본값을 넣는다. 조직 탭과 부서 모달에서 편집한다(태그 입력). validateOrg가 handoffs의 대상 존재를 검사한다. 대상이 없으면 경고만 한다.
+- **작업 계획표:**
+  - 비서실장은 배정 전에 `outputs/<task>/plan.json`을 쓴다.
+    - 형식: `{version:1, task, goal, stages:[{id, title, dept, agent, inputs:[경로|stage id], output, done, dependsOn:[stage id], parallelGroup?}], review:{by:'chief'|'codex'|..., criteria}, gaps:[{need, suggestion}]}`
+  - `node scripts/office.mjs plan validate <task>`가 검사한다.
+    - 검사 항목: 근무중 직원 존재, agent와 dept 일치, 순환 없음, output이 outputs/<task>/ 안인지, 각 inputs가 앞 단계 output이나 존재하는 파일인지.
+    - 통과하면 plan.set 이벤트를 남긴다. 실패하면 사유를 출력하고 종료 코드 1을 반환한다. 비서실장은 고쳐서 다시 실행한다.
+  - deriveFlow와 화면은 plan이 있으면 단계를 plan 기준으로 표시한다.
+    - 단계 상태: 대기, 진행, 완료, 반려
+    - Agent 호출의 subagent_type을 stage.agent와 매칭한다.
+  - 계획에 없는 직원 호출은 경고 이벤트(`flow.offplan`)로 남긴다.
+- **역량 공백:** 필요한 역량을 가진 근무중 부서가 없으면 다음과 같이 처리한다.
+  - plan.gaps에 기록하고 화면에 "역량 공백" 카드를 띄운다. 예: "HTML 작성 가능한 부서 없음 → 개발부 추가 권장". 카드에는 조직 탭으로 가는 링크를 단다.
+  - 비서실장이 그 일을 대신하지 않는다. 가능한 단계만 진행하고, 공백은 보고서에 명시한다.
+- **강제 장치(chief-guard 확장):** Agent 호출의 subagent_type이 근무중 직원이 아니면 거부한다. 사유에 사용 가능한 직원 목록 요약을 넣는다.
+- **검증 요구:**
+  - 단위 테스트: 서로 다른 조직 구성 5가지 이상(마케팅+개발, 리서치+문서+재무, 단일 부서, 휴무 직원 포함, codex 검증실 포함)에서 orgmap, plan validate, deriveFlow가 맞는지 확인한다.
+  - 실제 claude 확인 2건(짧은 주제, 비용 최소화):
+    - ① 마케팅부+개발부: "조사 → 개발부 최대리 HTML → 비서실장 검토 → 사용자 확인 대기"
+    - ② 리서치부+문서부+재무부처럼 다른 구성
+  - 판정 기준: 이벤트 기록에서 계획대로 분담·협조됐는지, 비서실장이 직접 실무를 하지 않았는지, 피드 단계가 올바른지.
+
+## 사용자 의견 필요 아이콘 (사용자 확정 2026-10-29)
+
+- **상태에 추가하는 필드:** `attention:[{kind:'reply'|'approve'|'gap', agent:'chief'|<직원id>, runId?, task?, since, text}]`
+  - 정렬은 since 오름차순이다.
+  - reply: needsReply인 마지막 run의 대상 직원. 비서실장 run이면 chief다.
+  - approve: task가 review 상태(사용자 확인 대기)면 chief.
+  - gap: plan.gaps가 있으면 chief.
+- **사무실 캔버스:**
+  - 해당 캐릭터 머리 위에 아이콘을 띄운다. reply는 💬 말풍선, approve는 📋 결재 서류, gap은 ⚠️다. 이모지 대신 픽셀로 그려 두 테마에서 대비를 확보한다.
+  - 아이콘은 위아래로 튀는 애니메이션과 은은한 발광을 낸다. 배율이 낮아도 읽히도록 크기를 1/z로 보정한다.
+  - 클릭 hit-test는 캐릭터보다 아이콘을 우선한다.
+  - 자동 순찰이 켜져 있으면 attention이 있는 직원의 방으로 먼저 이동한다.
+- **클릭 동작:**
+  - reply: 대화 보기 모달을 연다(스레드와 답장 입력).
+  - approve: 사용자 확인 모달을 연다. report와 산출물 미리보기, [승인]·[반려(피드백)] 버튼이 있다.
+  - gap: 공백 내용과 [조직 탭으로] 버튼을 보여준다.
+- **관제 뷰·목록:** 부서 카드, 직원 행, 프로필에 같은 아이콘을 붙인다. 상단의 "답변 필요 N" 칩은 attention 수를 보여주고, 누르면 가장 오래된 항목부터 연다.
+- **페이지 밖 알림:**
+  - attention이 있으면 `document.title` 앞에 `(N) 답변 필요`를 붙인다.
+  - 브라우저 알림은 기본 꺼짐이다. 설정에서 켜면 Notification API 권한을 요청하고, 새 attention마다 1회 알린다. 선택은 localStorage에 try/catch로 저장한다.
+- **데모 모드:** 시뮬레이터가 가끔 reply·approve attention을 만들어 연출을 보여준다. 데모에서는 답장·승인을 보낼 수 없다.
+
+### 업무 흐름·오케스트레이션 구현 계약 (2026-10-29)
+
+위 세 절(업무 흐름·조직 적응형 오케스트레이션·사용자 의견 필요)을 구현하며 구체화하거나 바꾼 계약과 이유다.
+
+- **Agent 이벤트 구조화 필드:** `normalizeClaudeHook`이 tool이 Agent(Task)인 tool.start/end에 `target`(subagent_type, 형식 검사 통과 시)과 `desc`(description 120자 요약, 비밀값 가림)를 붙인다. summary(`대상: 설명`)는 그대로 둔다(하위 호환). deriveFlow가 문자열 파싱에 의존하지 않게 하려는 것이고, 필드가 없는 예전 이벤트는 summary로 보충한다.
+- **모듈:**
+  - `lib/flow.mjs`: `deriveFlow(events, org, {plans?, tasks?})`는 항목 배열(SPEC 계약 그대로), `deriveTaskFlows(...)`는 `{items, tasks:{[업무]:{steps:[{key,label,state:'done'|'current'|'todo'|'skip'}], current, rejects, userRejects, depts, plan:[단계+status·rejects]|null, goal, gaps}}}`. 항목에 선택 필드 `mode`(meeting|reject), `offplan`, `target`, `files`, `verdict`, `attendees`, `tool`이 붙을 수 있다. `translateTool(tool, summary)`, `isOffplanCall(ev, plan)`도 내보낸다.
+  - `lib/orgmap.mjs`: `buildOrgMap(org, {presets?})`. capabilities·handoffs가 없는 예전 부서는 같은 id의 프리셋 기본값으로 보충하고 "(프리셋 기본값)"을 표시한다. 사용자 입력은 한 줄로 정리하고 120자로 자른다(Markdown 주입 방지).
+  - `lib/plan.mjs`: `validatePlan(plan, {org, taskId, root, fileExists})` → `{ok, errors, warnings, plan(요약)}`, `compactPlan`, `isTaskId`(`YYYY-MM-DD/<slug>`, `..` 금지). `lib/tasks.mjs`: tasks.json 읽기·원자적 저장(office.mjs·서버·runner 공용).
+- **업무 묶기:** 요청 이벤트는 OFFICE_TASK보다 먼저 나오고, 등록 전 이벤트에는 이전 업무가 붙어 있을 수 있다. 그래서 같은 세션의 대화 턴(요청 → 다음 요청) 안에서 마지막으로 보인 업무를 턴 전체의 업무로 본다. session이 `office-`로 시작하는 이벤트(office-cli·office-server·office-runner)는 대화 세션이 아니다.
+- **자동 도출 세부:**
+  - 협조는 대상 부서가 조직에 있을 때만 판정한다. 회의 의견 제출(`[회의]` 호출의 완료)은 '앞선 완료'로 세지 않는다.
+  - SubagentStart는 같은 업무·대상의 가장 최근 Agent 호출과 짝짓는다. chief-guard가 거부한 호출은 SubagentStart가 없어 10분 지나면 버린다.
+  - progress는 실행 인스턴스마다 한 줄이고, 작업 완료(agent.stop)·판정(review.end) 때 지운다. 직원 직접 지시 실행은 turn.end를 작업 완료로 본다.
+  - 명시 이벤트가 먼저 오면 다음 자동 항목(같은 업무·대상 부서)을 건너뛰고, 나중에 오면 최근 20개·10분 안의 자동 항목을 지운다.
+  - plan.json만 있고 plan.set 이벤트가 없으면 단계 상태만 표시하고 계획 밖 경고는 달지 않는다(검사를 통과한 계획만 기준으로 삼는다).
+- **이벤트 kind와 필드:** `flow.review_request{from}`, `flow.review{verdict:'pass'|'reject', to?}`, `flow.deliver`, `flow.cooperate{from,to}`, `flow.user_approve`, `flow.user_reject`, `flow.offplan{target, ref}`, `meeting.start{attendees}`, `meeting.end`, `plan.set{plan(요약)}`. 사유·메모·안건·회의 요약은 summary(200자, redact)다. CLI의 `--from/--to`는 부서 id 또는 직원 id(소속 부서로 바꿈)를 받고, 없는 부서는 종료 코드 1로 있는 부서 목록을 보여준다. 사용자 행동(승인·반려)과 서버 경고 이벤트는 session `office-server`이고 agent를 붙이지 않는다(직원으로 세지 않게).
+- **task status `review`:** review는 `flow deliver`로만 바뀐다. `task status <id> review`는 대표가 터미널에서 `--by-user`를 붙일 때만 받는다(리뷰 반영).
+- **plan validate 세부:** 경로는 레포 기준(`outputs/…`)이나 업무 폴더 기준 상대경로를 받는다. 단계 id는 영문·숫자·`_-` 40자, 최대 30단계. 입력이 뒤 단계 산출물이면 dependsOn 추가를 안내한다. 레포 밖 입력은 거부한다. codex 부서 직원 단계는 output이 `reviews/` 안(검토 단계)이면 경고("codex-review.mjs로 실행")만 하고, 그 밖(생산 단계)이면 오류다(리뷰 반영: 읽기 전용이라 output을 만들 수 없어 단계가 끝나지 않는다). BOM이 있는 파일도 읽는다.
+- **validateOrg:** 반환에 `warnings`를 추가했다(`{ok, errors, warnings}`). capabilities는 40자 이하 문자열 20개 이하, handoffs는 부서 id 20개 이하이고, 없는 대상·자기 부서는 경고만 한다. 부서 API는 body에 handoffs를 보냈을 때만 없는 대상 경고를 응답 `warnings`에 붙인다(프리셋으로 첫 부서를 만들 때 경고가 쏟아지지 않게).
+- **상태(buildState):** 입력에 `plans`(업무 → plan.json 요약)를 추가했다. 출력에 `flow`(최근 300개), `attention`, `metrics.attention`을 더하고, tasks에 `steps`·`stage`·`rejects`·`userRejects`·`depts`·`plan:{goal, stages:[…+status(pending|active|done|rejected)·rejects], gaps}`·`goal`·`gaps`를 붙인다. `metrics.tasks`는 active와 review를 센다. attention.gap은 완료되지 않은 업무만이다.
+- **runner:**
+  - 비서실장 run(답장 포함)에 조직도를 `--append-system-prompt <md>`로 넣고(인자 맨 뒤), 6000자를 넘거나 Windows `.cmd` shim(cmd.exe 경유: 줄바꿈·8191자 제한)이면 `.office/orgmap.md`(0600)에 쓰고 `--append-system-prompt-file <경로>`를 쓴다(claude 2.1.312에서 두 플래그 확인). 이때 환경변수 `OFFICE_ORGMAP_INJECTED=1`을 준다.
+  - 직원 직접 지시(claude 엔진)는 `outputs/<날짜>/run-<id>/`를 만들고 `{id:'<날짜>/run-<id>', title, status:'active', created, run, agent}`로 등록한 뒤 task.start(session `office-runner`, agent 직원)를 남긴다. codex 엔진 직원은 읽기 전용 실행이라 폴더를 만들지 않는다.
+  - run에 `task` 필드를 둔다. 세션 id가 오면 `.office/sessions.json`에 세션 → 업무를 기록해 훅 이벤트에 task가 붙게 한다. `start({..., task?})`, `reply(id, {..., task?})`, `latestForTask(task, sessions)`를 추가했다.
+- **승인·반려 API:** 둘 다 status가 review인 업무만 받는다(아니면 409). 업무 id는 `/api/tasks/<날짜>/<slug>/approve`와 `%2F` 인코딩 모두 받는다. 반려는 그 업무의 가장 최근 실행(run.task 또는 sessions.json으로 연결된 세션)이 이어서 답할 수 있으면 reply, 실행 중이면 409, 세션이 없으면 새 비서실장 run(task 연결)이다. 응답 202 `{ok, task, run, mode:'reply'|'new'}`. 반려 프롬프트는 피드백 원문과 재배정·`flow deliver` 안내이고, 이벤트에는 redact한 요약만 남긴다. 데모 모드는 409.
+- **산출물 API(모두 X-Office-Token 필요):**
+  - `GET /api/outputs`: `{outputs:[{id, date, slug, title, status, hasReport, hasMeeting, hasPlan, verdicts, depts, fileCount, updated, run, agent}]}`(판정은 reviews/*.md 첫 300바이트의 VERDICT).
+  - `GET /api/outputs/:taskId/files`: `{task, dir, files:[{path(outputs 기준), name, dir, group(report|meeting|plan|brief|review-notes|reviews|<부서 폴더>|other), size, mtime, kind(text|html|binary)}], truncated}`. 깊이 6, 2000개까지. 숨김 파일과 outputs 밖을 가리키는 심볼릭 링크는 뺀다.
+  - `GET /api/outputs/file?path=<outputs 기준 경로>[&download=1][&as=text]`: 글자 경로와 realpath 모두 outputs 안이어야 한다(아니면 400). 텍스트류(json 포함)는 `text/plain`, html은 `text/html` + `Content-Security-Policy: sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; form-action 'none'`(as=text면 소스 text/plain), 그 밖과 download=1은 `application/octet-stream` + `Content-Disposition: attachment; filename="<ASCII>"; filename*=UTF-8''<인코딩>`. 미리보기는 5MB까지(넘으면 413), 다운로드는 스트림. iframe은 토큰 헤더를 보낼 수 없으므로 화면은 html을 토큰으로 fetch해서 UTF-8 blob URL을 `sandbox=""` iframe(스크립트·같은 출처 비허용, `referrerpolicy=no-referrer`)에 띄운다. srcdoc은 쓰지 않는다(원문을 DOM 속성에 넣지 않는 화면 규칙). X-Frame-Options DENY는 유지한다.
+  - `POST /api/outputs/:taskId/open`: 상태 변경 API 검사 + realpath 폴더를 `open`/`explorer`/`xdg-open`에 인자 배열로 넘긴다(detached, windowsHide, 셸 없음). 테스트는 `startServer({openFolder})`로 바꿔 넣는다.
+  - `GET /api/orgmap`: 비서실장에게 주입되는 조직도 Markdown(text/plain). /api/state와 같은 정보라 토큰은 요구하지 않는다.
+- **flow.offplan 기록 주체:** 서버가 이벤트를 읽다가 plan.set 이후의 Agent 호출(회의·반려 제외)이 계획 단계의 agent가 아니면 `flow.offplan`을 한 번 남긴다(원 이벤트 ts·instance·대상으로 중복 방지, 데모 제외). 훅은 2초 제한과 무출력 원칙 때문에 계획표를 읽지 않는다.
+- **이번 범위 밖(미구현):** "회의실 연출: 하달 킥오프"의 `kickoff` 항목·`meetings` 상태와 "Codex 전용 모드"는 이 구현 뒤에 추가된 절이라 아직 반영하지 않았다.
+
+### 통합 검증 결정 (2026-10-29)
+
+실제 claude 오케스트레이션 2건(직원 haiku, 비서실장 sonnet, 임시 root)으로 확인하며 바꾼 계약과 이유다.
+
+- **서브에이전트 보고서 이름 차단:** Claude Code(2.1.312)의 Write 도구는 서브에이전트가 이름이 `^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$`(대소문자 무시)인 파일을 쓰면 "Subagents should return findings as text, not write report files."로 거부한다. 시나리오 ②에서 크리에이티브부 단계 산출물 `creative/summary.md`가 두 번 거부돼 단계가 실패했다. 그래서:
+  - `validatePlan`이 단계 output의 파일 이름이 이 형식이면 오류로 거부하고 `<직원id>-<이름>`을 안내한다(`SUBAGENT_BLOCKED_MD`).
+  - 팀장 부서 보고서 이름을 `<부서id>/summary.md`에서 `<부서id>/dept-report.md`로 바꿨다(공통 머리말·AGENTS.md·office-task·brief 배정표·presets 지침).
+  - 직원 공통 머리말에 "`.md` 이름을 report·summary·findings·analysis로 시작하지 않는다. 지시·지침에 그런 이름이 있으면 `<직원id>-` 접두사를 붙여 쓰고 보고에 실제 경로를 적는다"를 넣었다. 사용자가 이미 만든 직원 지침에 `summary.md`가 남아 있어도 동작하게 하려는 것이다.
+  - 비서실장(메인 세션)의 `report.md`는 대상이 아니다.
+- **회의 판정 기준:** 시나리오 ②(담당 없는 짧은 요청)에서 비서실장이 "아주 짧게"를 근거로 회의 없이 혼자 분담했다. "담당이 없으면 회의"를 위 판정 기준으로 구체화해 AGENTS.md·office-task·조직도 머리말(`buildOrgMap`, 대시보드·터미널 공통)에 넣었다.
+- **협조 기록 시점:** `flow cooperate`는 앞 단계가 끝난 뒤 받는 부서에 배정하기 직전에 기록한다. 시나리오 ②에서 앞 단계 배정 전에 기록해 피드 순서가 어긋났다.
+- **비서실장 CLI 권한:** `.claude/settings.json`의 `permissions.allow`에 office.mjs의 `task`·`flow`·`meeting`·`plan` 하위 명령과 `codex-review.mjs`만 Bash·PowerShell 두 형식으로 둔다(예: `Bash(node scripts/office.mjs task *)`, `PowerShell(node scripts/office.mjs flow *)`). 리뷰 반영 전에는 `Bash(node scripts/office.mjs:*)`라 `org import --yes`(조직 정본 덮어쓰기)·`org export <임의 경로> --yes`도 승인 없이 통과했다. PowerShell 규칙 형식은 공식 문서(permissions: PowerShell 규칙은 Bash 규칙과 같은 모양)를 확인했다. 대시보드 비서실장 run은 `--permission-mode acceptEdits`라 Bash 허용 규칙이 없는 컴퓨터에서는 `task start`·`plan validate`·`flow` 명령이 승인 대기 없이 거부된다. chief-guard가 단독 실행만 허용하므로 허용 범위는 이 두 스크립트로 한정된다.
+- **html 미리보기:** 서버 미리보기 URL 대신 blob URL + `sandbox=""` iframe으로 정했다(위 산출물 API 항목).
+- **비서실장 run의 업무 연결:** 비서실장이 실행 중에 `task start`로 만든 업무는 훅이 `.office/sessions.json`에만 기록해 run에 `task`가 없었고, 산출물 탭의 "대화 스레드"가 비었다. runner가 run을 끝낼 때 `task`가 없고 세션이 sessions.json에 연결돼 있으면 그 업무 id를 `run.task`에 남긴다.
+- **같은 slug 재등록:** `task start --slug`가 이미 있는 업무면 오류로 끝나는데, 예전 안내("기존 업무를 쓰거나")를 따라 비서실장이 OFFICE_TASK 없이 기존 업무에 이어 쓰면 세션이 업무에 연결되지 않아 가드·피드 연결이 빠진다(시나리오 ② 재실행에서 확인). 안내를 "`--slug <slug>-N`처럼 다른 slug로 다시 등록, 기존 폴더에 이어 쓰지 말 것"으로 바꿨다.
+- **확인된 동작:** claude 2.1.312 헤드리스(-p)에서 Agent 호출은 비동기로 돌아 비서실장 턴이 먼저 끝나지만(`turn.end`), 프로세스는 직원 완료 알림을 받아 다음 단계를 이어간다. 두 시나리오 모두 deliver까지 한 run 안에서 끝났다.
+
+### 리뷰 반영: 업무 흐름·오케스트레이션 (2026-10-29)
+
+orchestration·security·ux 검토 지적을 재현해 고치며 바꾸거나 구체화한 계약과 이유다.
+
+- **가드가 세션을 영구히 잠그지 않게:** 위 "업무와 세션 연결"의 연결 조건에 더해, chief-guard는 연결된 업무가 tasks.json에 없거나 `done`이면 제한하지 않는다(`decideChiefGuard(..., {getTasks})`). 해제 명령은 따로 두지 않았다. 승인으로 done이 되면 자연히 풀리고, 잘못 연결된 id는 tasks.json에 없어서 풀린다.
+- **대시보드 비서실장 실행의 등록 전 단계:** runner가 비서실장 실행(답장 포함)에 환경변수 `OFFICE_CHIEF_RUN=1`을 주고, 훅은 claude 프로세스의 환경을 물려받는다. 이 값이 있으면 업무 연결 전에도 조회·조율 도구와 허용된 office.mjs 명령만 허용하고, 나머지(Write·Edit·WebSearch·WebFetch·일반 셸·Agent)는 "먼저 `task start`로 등록"을 사유로 거부한다. 터미널에서 연 세션은 지금처럼 연결 전에는 제한하지 않는다(개발 세션을 막지 않게).
+- **task status 전이 규칙(office.mjs):** `--by-user` 없이(비서실장 포함)는 active↔blocked만 바꾼다. done은 대표가 대시보드에서 승인할 때(서버), review는 `flow deliver`로만 바뀌고, review·done 업무를 다른 상태로 바꾸는 것도 대표 몫이다(대시보드 반려 또는 `--by-user`). `--by-user`는 대시보드 없이 터미널만 쓰는 대표를 위한 것이고 `OFFICE_CHIEF_RUN=1`이면 거부한다. `flow deliver`는 active·blocked에서만 되고 review(중복 요청)·done(되돌리기)이면 종료 코드 1이다.
+- **반려 최대 2회 강제:** `countReviewRejects(events, task)`(lib/flow.mjs)가 마지막 `flow.deliver`·`flow.user_reject` 이후의 `flow.review` 반려 수(flows)와 `[반려]` Agent 호출 수(calls)를 센다. 반려 한 번은 보통 기록과 재지시 두 이벤트라 회차는 두 값 중 큰 쪽이다. `flow review --verdict reject`는 `max(flows+1, calls) > 2`면 기록하지 않고 종료 코드 1로 "report.md 확인 필요에 적고 flow deliver"를 안내한다. chief-guard는 `[반려]` Agent 호출일 때만 events.jsonl 끝 4MB를 읽어 `max(flows, calls+1) > 2`면 거부한다. 사용자 반려 뒤에는 다시 센다(재배정을 막지 않게).
+- **org 내보내기·가져오기:** 가드가 거부하고, office.mjs도 `OFFICE_CHIEF_RUN=1`이면 거부한다(이중 방어). 권한 허용 규칙에서도 뺐으므로 일반 세션에서는 Claude Code가 승인을 묻는다.
+- **남는 위험(비서실장 CLI 권한):** 허용된 하위 명령 안에서는 비서실장이 사실과 다른 흐름 기록(예: 검토하지 않고 `flow review --verdict pass`)을 남길 수 있다. 상태 전이·반려 한도·org만 구조로 막고, 기록 내용의 진실성은 이벤트 기록과 사용자 확인(승인·반려)으로 확인한다. codex-review.mjs는 인자를 가리지 않고 허용한다(읽기 전용 검토, 결과는 `outputs/` 안의 reviews/만 쓴다).
+- **명시 반려 단계 지정:** `flow review --verdict reject --to <부서|직원> [--stage <단계 id>]`. `--to`에 직원 id를 주면 이벤트 `to`는 소속 부서, `target`은 그 직원이다. 반려 단계 표시는 stage > target(그 직원의 진행·완료 단계) > 부서(그 부서의 진행·완료 단계가 하나뿐일 때) 순이고, 특정하지 못하면 단계 상태를 바꾸지 않고 이어지는 `[반려]` 호출의 대상 직원 단계에 맡긴다(한 부서에 단계가 여럿일 때 엉뚱한 단계가 반려되고 횟수가 두 배로 세지던 문제).
+- **협조 판정 우선순위(자동 도출 표 보충):** Agent 호출이 계획표(plan.set 또는 plan.json) 단계에 걸리면, 그 단계의 앞 단계(dependsOn 전이)에 다른 부서 단계가 있을 때만 협조이고 요청 부서는 그 앞 단계 부서(가장 최근에 완료한 쪽)다. 계획 단계에 걸리지 않거나 계획이 없으면 기존 규칙(같은 업무에서 다른 부서가 앞서 완료)을 쓴다.
+- **명시 협조 기록과 자동 항목:** `flow cooperate`가 지우는 자동 하달·협조 항목은 그 업무의 마지막 '앞선 완료' 이후의 것만이다. 그보다 앞선 항목(병렬 단계나 반려 전 작업으로 같은 부서에 간 정당한 하달)은 남기고 다음 Agent 호출 항목을 대신한다.
+- **Codex 검증실과 계획:** orgmap의 역량 색인과 '배정 가능' 판정은 claude 부서만 센다. 근무중인 Codex 부서는 "(검토 전용)"으로 따로 적고, 그 부서뿐이면 "배정 가능한 부서가 없습니다"를 안내한다. 계획에 Codex 직원 검토 단계(output `reviews/…`)가 있으면 그 직원의 review.start/review.end가 단계 진행·완료로 반영된다. 검증실 판정(codex-review.mjs `loadReviewers`)은 부서 id가 아니라 `engine === 'codex'`로만 한다(claude 엔진으로 id `verify` 부서를 만들면 Agent 대상이면서 codex 검토자로도 실행되던 문제).
+- **단계 표시줄과 반려:** 마지막 사용자 반려가 마지막 deliver보다 뒤이고 업무가 review·done이 아니면, 하달까지의 지난 도달 기록과 반려 이후 도달한 단계만 남겨 하달(또는 이후 다시 도달한 단계)을 현재로 둔다. 마지막 검토 반려가 마지막 통과·deliver·사용자 반려보다 뒤이면 같은 방식으로 진행을 현재로 둔다. 반려 횟수(rejects·userRejects)는 그대로 센다. 계획 단계 카드 상태는 되돌리지 않는다(재배정되면 그 단계가 진행으로 바뀐다).
+- **작업 완료 문구:** done 항목의 결과 첫 문장은 Markdown 기호·표·코드 표시를 걷어내고 `outputs/…` 경로를 파일 이름만 남기며 앞의 '결과:'를 뗀다(`cleanResultText`). 결과에 끝내지 못했다는 표현("하지 못했", "실패했", "막혔" 등)이 있으면 "작업 종료(확인 필요)"로 쓰고 항목에 `warn: true`를 붙인다. stage는 그대로 done이다.
+- **답변 대기 줄(이어서 답하기 보충):** deriveFlow는 `reply.wait`를 업무 피드 항목 `stage:'reply_wait'`(FLOW_STAGES에 추가, 단계 표시줄에는 넣지 않음, `run` 필드)로 낸다. runner의 reply.wait 이벤트에 run의 `task`를 붙인다. 화면은 아직 답하지 않은 실행이면 [대화 보기] 버튼을 단다.
+- **attention.reply:** 대화(rootId)마다 needsReply인 마지막 run 하나만 올리고, 연결된 업무가 review(approve가 대신 보여준다)·done이면 뺀다. 승인 API는 그 업무에 연결된 run(run.task 또는 sessions.json 세션)의 needsReply를 끈다(`runner.clearNeedsReply(task, sessions)`).
+- **사용자 반려 실행의 표시:** 반려 API가 만드는 run의 `request`는 `사용자 반려: <피드백>`(redact, 120자)이고, 실제 프롬프트는 stdin으로만 보낸다(`start/reply({..., display})`). 예전 run의 `[사용자 반려]` 요청은 화면이 "사용자 반려(피드백 전달)"로 보여준다.
+- **데모 연출:** 시뮬레이터가 업무를 끝낼 때 `flow.review_request → flow.review(pass) → flow.deliver → task.update(review)`를 남기고(처음 열 때 1건), 확인 대기가 둘 이상이면 가장 오래된 것을 승인 이벤트(session `office-server`, agent 없음)로 끝낸다. 가끔 `reply.wait`(run `demo-…`)도 남기고, `buildState({demo:true})`는 최근 3분의 reply.wait를 직원별 reply attention(runId 없음 → 직원 프로필을 연다)으로 만든다. 데모에서 승인·반려·답장은 여전히 보낼 수 없다.
+- **대시보드 CSP:** 정적 html 응답에 `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src blob:; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`을 붙인다(style 속성의 부서색 변수 때문에 style-src만 'unsafe-inline'). html 미리보기 blob 문서에는 맨 앞에 CSP meta를 넣는다. 서버 미리보기 CSP가 blob 문서에 닿지 않아 외부 이미지·CSS 비콘이 나가고, blob URL을 최상위 창으로 열면 sandbox가 풀려 스크립트가 대시보드 출처로 돌던 문제다.
+- **실시간 피드 접기:** 업무 묶음마다 최근 6줄만 보여주고 "이전 N건 보기"로 30줄까지 펼친다(긴 업무의 최신 줄이 상자 아래로 밀려 보이지 않던 문제). 묶음 순서(최근 활동 업무가 위)와 묶음 안 시간순은 그대로다.
+- **프리셋 부서 추가:** 화면은 프리셋 부서를 만들 때 handoffs를 보내지 않는다(서버가 프리셋 기본값으로 채우고, 직접 보낸 handoffs가 아니라 경고를 내지 않는다). 조직에 없는 결과 전달 부서는 id 대신 같은 id의 프리셋 이름과 "(조직에 없음)"으로 보여준다.
+
+## 헤드리스 실행에서 백그라운드 위임 금지 (실사용 버그, 2026-10-29)
+
+- **증상:**
+  - 대시보드 비서실장 run이 마케팅 직원을 백그라운드(Agent `run_in_background: true`)로 띄웠다.
+  - 비서실장은 "분석은 진행 중"이라고 답하고 종료했다.
+  - 직원은 작업을 끝냈지만 다음 단계(개발부 HTML, 비서실장 검토)를 이어갈 주체가 없어 파이프라인이 멈췄다.
+- **규칙:** task가 연결된 세션의 비서실장은 Agent를 백그라운드로 호출하지 않는다. 병렬이 필요하면 한 응답에서 여러 Agent를 동시에 호출하고, 모두 끝날 때까지 기다린다.
+- **강제(chief-guard):** task 연결 세션에서 Agent 호출의 `tool_input.run_in_background`가 true면 거부한다. 거부 사유는 "대시보드 업무에서는 직원 작업이 끝날 때까지 기다려야 다음 단계로 넘길 수 있습니다. run_in_background 없이 호출하세요"다.
+- **수칙:** AGENTS.md와 SKILL.md에 명시한다. 비서실장은 plan의 모든 단계, 검토, deliver가 끝나기 전에 최종 답변으로 종료하지 않는다.
+- **검증:** chief-guard 단위 테스트에 백그라운드 거부 케이스를 둔다. 실제 실행에서는 run이 끝났을 때 모든 plan 단계가 완료됐는지 확인한다.
+
+## Codex 전용 모드 (사용자 확정 2026-10-29: "터미널 로그인이 Codex뿐이어도 직원 구성·작업이 가능해야 한다")
+
+### 모드 결정
+- **판정 기준:** doctor 빠른 점검을 확장해 claude와 codex 각각의 설치·로그인 여부(`claude auth status`, `codex login status`)를 서버 시작 때 비동기로 판정한다.
+  - claude만 있으면 `claude` 모드다.
+  - codex만 있으면 `codex` 모드다.
+  - 둘 다 있으면 `mixed` 모드다(현재 동작: Claude 실행 조직 + Codex 검증실).
+  - 둘 다 없으면 `none` 모드다. 배너로 안내하고 실행 버튼을 끈다.
+- **상태:** `/api/state.mode`와 `tools.{claude,codex}.{installed,loggedIn}`. 사용자는 회사 설정에서 모드를 수동으로 고를 수 있다(`auto` 기본). 저장 위치는 `org/company.json`이고 Git에서 제외한다.
+- **부서 엔진:**
+  - 새 부서의 기본 엔진은 모드를 따른다. codex 모드면 codex다.
+  - codex 모드에서는 claude 엔진 부서를 경고와 함께 실행 불가로 표시하고, 엔진 일괄 전환 버튼을 둔다.
+- **codex 부서 역할 필드:** `codexRole: 'exec'|'review'`. 기본값은 verify 프리셋이면 review, 그 밖은 exec다.
+  - exec: `codex exec -s workspace-write -C <root>`
+  - review: `-s read-only`
+
+### runner 주도 오케스트레이션 (codex 모드 비서실장 run)
+비서실장 Codex는 계획과 검토만 한다. 단계 진행은 runner가 결정론적으로 한다. 별도 모듈은 `dashboard/orchestrator.mjs`다.
+
+1. **계획:**
+   - 비서실장 codex exec(read-only) 프롬프트: orgmap + 요청 + 계획 규칙(SPEC "작업 계획표" 형식).
+   - 최종 응답에서 plan JSON을 추출한다. `codex exec --output-schema` 지원 여부를 `--help`로 확인하고, 되면 쓰고 안 되면 코드 블록 JSON을 파싱한다.
+   - runner가 `outputs/<task>/plan.json`을 쓰고 `plan validate`와 같은 검사를 한다. 실패하면 사유를 붙여 1회 재요청한다.
+   - task 등록은 runner가 직접 한다(office.mjs 로직 재사용).
+2. **회의(선택):**
+   - 계획 단계에서 `needsMeeting:true`이면, 관련 팀장 2~4명에게 "범위·산출물·분담 제안"을 codex exec(read-only)로 병렬 실행한다.
+   - 제안들을 비서실장 계획 프롬프트에 넣어 meeting.md와 plan을 받는다. 이벤트는 meeting.start/end다.
+3. **실행:**
+   - dependsOn 위상 순서로 진행한다. 독립 단계는 runner 동시 실행 한도(기본 4) 안에서 병렬로 돈다.
+   - 단계마다 담당 직원의 지침(sync가 만든 developer_instructions와 같은 조립 결과)에 단계 입력·출력·완료 기준을 붙여 `codex exec --json -s workspace-write`를 실행한다. 프롬프트는 stdin으로 넣는다.
+   - 이벤트는 runner가 직접 남긴다: flow assign/cooperate, accept, progress(--json item), done(마지막 메시지 첫 문장과 출력 파일).
+   - 출력 파일이 없으면 그 단계는 실패로 기록하고 1회 재시도한다.
+4. **검토:**
+   - 비서실장 codex exec(read-only)가 산출물을 검토해 `{verdict:'pass'|'reject', stage?, reason}` JSON을 낸다.
+   - reject면 해당 단계(또는 원인 단계)를 사유와 함께 재실행한다. 최대 2회다.
+   - pass면 report.md를 쓰고(runner가 비서실장 요약으로 작성) deliver한다. task status는 review이고, attention은 approve다.
+   - 검증실(review 역할) 직원이 있으면 codex-review도 함께 돌려 판정에 반영한다.
+5. **중지·답장:**
+   - 중지는 오케스트레이션 전체와 진행 중인 모든 자식 프로세스를 끝낸다.
+   - 사용자 반려(피드백)가 오면 계획을 갱신하고 영향받는 단계만 재실행한다.
+   - needsReply(비서실장이 질문으로 끝난 경우)는 이어서 답하기와 같은 UI로 처리한다.
+6. **동시성·상태:**
+   - 오케스트레이션 하나는 run 하나(target chief)이고, 그 아래 단계 run들이 parentId로 묶인다.
+   - 서버를 재시작하면 진행 중이던 오케스트레이션은 failed로 표시하고 "이어서 재개"를 제공한다. 완료된 단계는 건너뛴다.
+
+### 화면·모델·생성
+- **화면:** 모드 배지(Claude / Codex / Mixed)를 단다. 조직 탭의 부서 모달에 엔진과 codexRole, Codex 모델·추론 강도를 둔다. Claude 전용 필드(tools, Claude 모델)는 codex 부서에서 숨긴다. 피드·단계 표시줄·attention은 엔진과 관계없이 같다.
+- **모델:** codex 기본은 `gpt-6.1-sol`이고 effort는 `max`다(사용자 확정). 부서별로 effort를 조정할 수 있고, 프리셋 제안값은 수집·분류 직무는 medium, 분석·작성은 high, 팀장·검토는 max다. 화면에 "max는 느리고 사용량이 큼" 안내를 둔다.
+- **생성:** codex 엔진 부서의 직원은 모두 `.codex/agents/<id>.toml`을 만든다(exec·review 공통). runner는 이 파일과 같은 조립 함수로 지침을 쓴다.
+- **doctor:** codex만 있으면 종료 코드 0으로 "Codex 전용 모드로 실행됩니다"를 안내한다. 필수 조건을 "claude 또는 codex 중 하나 로그인"으로 바꾼다.
+
+### 검증 요구
+- 단위 테스트: 가짜 CODEX_BIN(.js)으로 계획→회의→다단계 실행→반려 1회→통과→deliver, 중지, 재개, 출력 누락 재시도를 확인한다.
+- 실제 codex 1건(짧은 주제, 비용 최소화를 위해 `--effort low` 덮어쓰기 허용): 마케팅부(codex)+개발부(codex) 조직으로 "조사 → HTML → 검토 → 사용자 확인 대기"를 끝까지 돌린다.
+- claude가 없는 환경 흉내: `CLAUDE_BIN`을 없는 경로로 두고 mode=codex, UI와 doctor 동작을 확인한다.
+
+## 회의실 연출: 하달 킥오프 (사용자 확정 2026-10-29)
+
+- **킥오프:** 업무가 하달되면 해당 인원이 회의실에 모인다.
+  - 트리거는 plan.set이다. plan이 없으면 그 task의 첫 assign/cooperate가 트리거다.
+  - 참석자는 plan의 모든 stage.agent와 비서실장(chief)이다. plan이 없으면 그 시점까지 배정된 직원이다.
+  - 상태: deriveFlow가 `kickoff` 항목을 만들고, state에 `meetings:[{task, kind:'kickoff'|'meeting', attendees, since, until?}]`를 둔다.
+    - kickoff의 until은 since + 8초다(화면 연출 시간).
+    - 진행 중인 실제 회의(meeting.start~end, 또는 `[회의]` Agent 호출 진행 중)는 until이 없다.
+- **사무실 캔버스:**
+  - 참석자가 자기 자리에서 회의실로 걸어간다. 회의실 테이블 주위 좌석에 앉는다. 인원이 좌석보다 많으면 회의실이 커지거나 서 있는 자리를 둔다.
+  - 비서실장은 상석에 앉고, 말풍선에 업무 제목을 표시한다.
+  - kickoff가 끝나면 각자 자리로 돌아가 작업 애니메이션을 시작한다. 실제 회의는 meeting.end까지 머문다.
+  - 회의실이 사용 중이면 다음 회의는 대기했다가 순서대로 연다(큐). 대기 중인 업무는 피드에 "회의실 대기"로 표시한다.
+- **협조 연출:** cooperate가 일어나면 두 부서 담당자가 회의실(또는 두 방 사이 복도)에서 만나 서류를 넘기는 3초 연출을 보여준다.
+- **피드:** kickoff 항목 문구는 "비서실장: ○○ 업무 킥오프 — 참석 김팀장, 최대리"다.
+- **테스트:** deriveFlow의 kickoff·meetings 도출(plan 있음/없음, 동시 업무 큐), office.js의 좌석 배치 순수 함수(참석자 수별)를 테스트한다.
+
+## 비서실장 입력창의 승인·반려 인식 (실사용 피드백, 2026-10-29)
+
+- **증상:** 사용자 확인 대기 업무가 있을 때 사용자가 상단 비서실장 입력창에 "승인"이라고 썼다. 이 입력이 새 비서실장 run으로 전달됐고, 비서실장은 완료 처리 권한이 없어 처리하지 못했다.
+- **규칙:** 화면이 입력을 run으로 보내기 전에 다음과 같이 판정한다.
+  - 입력이 승인 의도면 승인 API로 처리한다. 예: `승인`, `승인해`, `승인합니다`, `통과`, `OK`, `좋아 승인`.
+  - 입력이 반려 의도면 피드백과 함께 반려 API로 처리한다. 예: `반려 …`, `다시 해 …`, `수정해 …`.
+  - review 상태 업무가 1건이면 확인 대화상자("'…' 업무를 승인할까요?")를 거쳐 `POST /api/tasks/:id/approve|reject`로 처리한다. 2건 이상이면 대상 업무를 고르게 한다.
+  - review 업무가 없거나 판정이 애매하면 기존대로 run으로 보낸다.
+  - 판정 함수는 순수 함수로 두고 테스트한다.
+- **비서실장 수칙:** run 안에서 사용자가 승인·반려 의사를 밝히면 다음과 같이 처리한다.
+  - "대시보드의 [승인]·[반려] 버튼이나 입력창에서 처리됩니다"라고 한 줄로 안내한다.
+  - 반려 피드백이면 그 내용을 반영해 재배정한다.
+  - 완료 처리는 하지 않는다(기존 원칙 유지).
+
+## 작업 공간 분리 (사용자 확정 2026-10-29, 별도 PR)
+
+- **문제:**
+  - AI 직원의 작업 폴더(cwd)가 대시보드 프로그램 레포와 같아서, 직원이 프로그램 코드를 고칠 수 있었다. 실사용에서 비서실장이 대시보드 승인 API 수정 업무를 등록했다.
+  - 개인 데이터가 레포 안에 있어 업데이트(git pull)와 충돌하거나 섞일 위험이 있다.
+- **구조:**
+  - **프로그램 레포:** 코드, presets, templates, 훅 스크립트, 수칙 템플릿.
+  - **작업 공간(workspace):** 회사 데이터와 AI 실행 위치. 기본 경로는 `~/AIOffice`(Windows는 `%USERPROFILE%\AIOffice`)다. 바꾸려면 `AI_OFFICE_WORKSPACE` 환경변수나 `npm run office -- --workspace <경로>`를 쓰고, 선택은 프로그램 레포의 Git 제외 파일 `.office-local.json`에 기억한다.
+  - 작업 공간에 두는 것:
+    - 데이터: `org/`(departments.json, roster.json, company.md, company.json), `outputs/`, `.office/`
+    - 생성물: `.claude/agents/`, `.claude/settings.json`, `.codex/agents/`, `CLAUDE.md`, `AGENTS.md`
+- **생성물 처리:**
+  - sync가 작업 공간의 수칙과 설정을 프로그램 레포의 템플릿에서 생성한다.
+  - 훅 명령은 프로그램 레포 훅의 절대경로를 exec 형식 args로 넣는다. 경로에 공백이 있거나 Windows 경로여도 안전해야 한다.
+  - 생성 표식이 있는 파일만 갱신하고, 사용자가 직접 만든 파일은 보존한다.
+- **실행:**
+  - runner, codex-review, office CLI, 오케스트레이터는 모두 cwd를 작업 공간으로 두고 실행한다. codex는 `-C <workspace>`, `-s workspace-write`면 작업 공간 안에서만 쓴다.
+  - 서버는 시작할 때 작업 공간이 없으면 만들고 초기화한다(빈 회사).
+  - doctor와 화면의 회사 설정에 작업 공간 경로를 표시한다. "폴더 열기"도 제공한다.
+- **보호:**
+  - chief-guard를 확장해, 모든 에이전트(직원 포함)의 Write/Edit/MultiEdit가 프로그램 레포 경로를 대상으로 하면 거부한다.
+  - Bash 명령 문자열에 프로그램 레포 절대경로를 쓰는 쓰기 패턴(`>`, `tee`, `rm`, `mv`, `cp` 대상)도 최선 노력으로 거부한다. 이 한계는 README에 밝힌다.
+- **마이그레이션:**
+  - 새 버전 첫 실행에서 프로그램 레포 안에 기존 데이터가 있으면 화면 배너와 `npm run migrate`로 이전을 제안한다. 대상: `org/departments.json`·`roster.json`·`company.md`, `outputs/`, `.office/`, `.claude/agents/`, `.codex/agents/`.
+  - 이전 방식: 복사 → 검증(파일 수·크기) → 원본은 `.office-migrated-<날짜>/`로 옮긴다. 자동 삭제하지 않는다.
+  - 사용자가 확인하기 전에는 이전하지 않는다. 이전하지 않으면 기존 위치를 계속 쓰는 호환 모드로 동작하고, 배너를 계속 띄운다.
+- **테스트:**
+  - 임시 workspace로 전 경로를 확인한다(서버, runner cwd, sync 생성 위치, 훅 절대경로 args, guard 거부, migrate 복사·검증·보존).
+  - Windows 경로는 platform 주입으로 확인한다.
+  - 레포에서 `git status`가 깨끗하게 유지되는지 확인한다.
+- **PR 순서:** ① 현재 묶음 → ②(회의실 킥오프)와 ④(작업 공간 분리)는 파일이 거의 겹치지 않아 병렬로 진행 → ③(Codex 전용 모드)은 ④ 위에서 진행한다. 새 runner·오케스트레이터가 처음부터 작업 공간 기준으로 동작하게 하기 위해서다.

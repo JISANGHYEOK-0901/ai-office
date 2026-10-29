@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="ko" data-theme="neon">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="office-token" content="__OFFICE_TOKEN__">
+  <meta name="color-scheme" content="dark light">
+  <title>AGENT HQ · AI Office</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 rx=%223%22 fill=%22%2338bdf8%22/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+  <div id="app" class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">HQ</span>
+        <div class="brand-text">
+          <strong class="logo">AGENT HQ</strong>
+          <span class="brand-sub" id="brandSub">AI OFFICE · 관제 시스템</span>
+        </div>
+        <span class="demo-badge" id="demoBadge" hidden title="데모 모드: 가상 조직을 보여주며 보기만 가능합니다">DEMO · 보기 전용</span>
+      </div>
+
+      <ul class="metrics" id="metrics" aria-label="조직 지표"></ul>
+
+      <div class="top-right">
+        <time class="clock" id="clock" aria-label="현재 시각">--:--:--</time>
+        <span class="conn" id="conn" role="status" aria-live="polite"><i aria-hidden="true"></i><span>연결 중…</span></span>
+        <button type="button" class="btn btn-sm" id="companyBtn">회사 설정</button>
+        <button type="button" class="btn btn-sm theme-toggle" id="themeToggle" aria-label="화면 테마 전환">
+          <span aria-hidden="true" class="theme-icon"></span><span id="themeLabel">NEON</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="tool-banners" id="toolBanners" role="status" aria-live="polite"></div>
+
+    <div class="commandbar">
+      <form class="chief-form" id="chiefForm" autocomplete="off">
+        <label for="chiefInput" class="chief-label"><span aria-hidden="true">▶</span> 비서실장</label>
+        <input id="chiefInput" name="prompt" type="text" maxlength="4000"
+               placeholder="비서실장에게 업무 지시 — 예: 경쟁사 3곳 가격 정책 조사해서 보고서로 정리해 줘">
+        <select id="chiefModel" class="model-select" aria-label="비서실장 실행 모델">
+          <option value="">모델 기본</option><option value="haiku">haiku</option><option value="sonnet">sonnet</option><option value="opus">opus</option>
+        </select>
+        <button type="submit" class="btn btn-primary" id="chiefSubmit">지시하기</button>
+      </form>
+      <div class="view-tabs" role="tablist" aria-label="화면 보기">
+        <button type="button" role="tab" id="tabControl" aria-controls="viewControl" aria-selected="true" data-view="control">관제</button>
+        <button type="button" role="tab" id="tabOffice" aria-controls="viewOffice" aria-selected="false" data-view="office">사무실</button>
+      </div>
+      <button type="button" class="btn" id="addDeptBtn">+ 부서 추가</button>
+    </div>
+
+    <div class="layout">
+      <aside class="col col-left win" aria-labelledby="orgTitle">
+        <div class="win-bar"><h2 id="orgTitle">조직도</h2><span class="win-ctl" aria-hidden="true"></span></div>
+        <div class="win-body org" id="orgTree"></div>
+      </aside>
+
+      <main class="col col-main" id="main" tabindex="-1">
+        <section class="view" id="viewOnboarding" hidden aria-labelledby="onbTitle"></section>
+
+        <section class="view win" id="viewControl" role="tabpanel" aria-labelledby="tabControl">
+          <div class="win-bar">
+            <h2>ORGANIZATION COMMAND</h2>
+            <span class="win-sub" id="controlSub"></span>
+            <span class="win-ctl" aria-hidden="true"></span>
+          </div>
+          <div class="win-body">
+            <div class="dept-grid" id="deptGrid"></div>
+          </div>
+        </section>
+
+        <section class="view win" id="viewOffice" role="tabpanel" aria-labelledby="tabOffice" hidden>
+          <div class="win-bar">
+            <h2>LIVE OFFICE</h2>
+            <span class="win-sub">드래그 이동 · 휠 확대/축소 · 직원 클릭 시 프로필</span>
+            <span class="win-ctl" aria-hidden="true"></span>
+          </div>
+          <div class="office-stage">
+            <canvas id="officeCanvas" role="img" aria-label="픽셀 사무실 화면. 직원 목록은 왼쪽 조직도에서도 열 수 있습니다."></canvas>
+            <div class="office-tools" role="toolbar" aria-label="사무실 화면 조작">
+              <button type="button" class="btn btn-sm" id="zoomIn" aria-label="확대">＋</button>
+              <button type="button" class="btn btn-sm" id="zoomOut" aria-label="축소">－</button>
+              <button type="button" class="btn btn-sm" id="zoomFit">전체 보기</button>
+              <button type="button" class="btn btn-sm" id="patrolBtn" aria-pressed="false">자동 순찰</button>
+            </div>
+            <p class="office-caption" id="officeCaption" aria-live="polite"></p>
+          </div>
+        </section>
+      </main>
+
+      <aside class="col col-right" aria-label="실시간 정보">
+        <section class="win panel-feed" aria-labelledby="feedTitle">
+          <div class="win-bar"><h2 id="feedTitle">실시간 피드</h2><span class="win-sub" id="feedCount"></span><span class="win-ctl" aria-hidden="true"></span></div>
+          <ol class="win-body feed" id="feed" aria-live="off"></ol>
+        </section>
+        <section class="win panel-tasks" aria-labelledby="tasksTitle">
+          <div class="win-bar"><h2 id="tasksTitle">업무 · 실행</h2><span class="win-ctl" aria-hidden="true"></span></div>
+          <div class="win-body tasks" id="tasks"></div>
+        </section>
+      </aside>
+
+      <aside class="drawer win" id="drawer" hidden aria-labelledby="drawerTitle">
+        <div class="win-bar">
+          <h2 id="drawerTitle">상세</h2>
+          <button type="button" class="icon-btn" id="drawerClose" aria-label="상세 패널 닫기">✕</button>
+        </div>
+        <div class="win-body drawer-body" id="drawerBody"></div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- 부서 생성·수정 -->
+  <dialog id="deptDialog" class="modal win" aria-labelledby="deptDialogTitle">
+    <form method="dialog" id="deptForm" class="modal-form" novalidate>
+      <div class="win-bar"><h2 id="deptDialogTitle">부서 만들기</h2><span class="win-ctl" aria-hidden="true"></span></div>
+      <div class="win-body form-grid">
+        <label class="span-2" id="deptPresetRow">프리셋에서 시작
+          <select name="preset" id="deptPreset"><option value="">직접 입력</option></select>
+        </label>
+        <label><span class="lbl">부서 이름 <span class="req" aria-hidden="true">*</span></span>
+          <input name="name" required maxlength="40" placeholder="예: 리서치부">
+        </label>
+        <label>영문 표기
+          <input name="en" maxlength="40" placeholder="예: RESEARCH">
+        </label>
+        <label>부서 id
+          <input name="id" maxlength="48" pattern="[a-z][a-z0-9-]{1,47}" placeholder="비우면 자동 생성" aria-describedby="deptIdHelp">
+          <small id="deptIdHelp" class="help">영문 소문자·숫자·하이픈. 생성 후 변경할 수 없어요.</small>
+        </label>
+        <fieldset class="color-field">
+          <legend>부서 색</legend>
+          <div class="swatches" id="deptSwatches"></div>
+          <input type="color" name="color" value="#38bdf8" aria-label="부서 색 직접 선택">
+        </fieldset>
+        <label class="span-2">설명
+          <textarea name="summary" rows="2" maxlength="300" placeholder="이 부서가 맡는 일"></textarea>
+        </label>
+        <label class="span-2"><span class="lbl">부서 공통 지침 <small class="help-inline">이 부서 모든 직원의 지침 파일에 들어갑니다(최대 4000자)</small></span>
+          <textarea name="instructions" rows="4" maxlength="4000" placeholder="예: 모든 수치에 출처와 기준일을 단다."></textarea>
+        </label>
+        <fieldset>
+          <legend>엔진</legend>
+          <label class="inline"><input type="radio" name="engine" value="claude" checked> Claude (실행)</label>
+          <label class="inline"><input type="radio" name="engine" value="codex"> Codex (검증·읽기 전용)</label>
+        </fieldset>
+        <div class="codex-fields span-2" id="codexFields" hidden>
+          <label>Codex 모델
+            <input name="codexModel" maxlength="64" pattern="[a-z0-9][a-z0-9.\-]{1,63}" placeholder="gpt-6.1-sol">
+          </label>
+          <label>추론 강도
+            <select name="codexEffort">
+              <option value="">기본(max)</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option><option>ultra</option>
+            </select>
+          </label>
+        </div>
+        <label id="deptModelRow">기본 모델
+          <select name="model">
+            <option value="sonnet">sonnet</option>
+            <option value="opus">opus</option>
+            <option value="haiku">haiku</option>
+            <option value="inherit">inherit (메인 세션과 동일)</option>
+          </select>
+        </label>
+        <fieldset class="span-2">
+          <legend>허용 도구</legend>
+          <label class="inline"><input type="checkbox" name="toolsAll" id="toolsAll"> 제한 없음(모든 도구)</label>
+          <div class="tool-checks" id="toolChecks"></div>
+        </fieldset>
+        <label class="span-2">권한 모드
+          <select name="permission" id="deptPermission">
+            <option value="acceptEdits">acceptEdits — 파일 편집 자동 승인 (기본)</option>
+            <option value="default">default — 매번 확인</option>
+            <option value="bypassPermissions">bypassPermissions — 모든 확인 생략</option>
+          </select>
+        </label>
+        <p class="warn span-2" id="bypassWarn" hidden role="alert">
+          ⚠ bypassPermissions는 이 부서 직원이 확인 없이 명령 실행·파일 삭제까지 할 수 있게 합니다. 신뢰할 수 있는 작업에만 쓰세요.
+        </p>
+        <p class="form-error span-2" id="deptError" role="alert" hidden></p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>취소</button>
+        <button type="submit" class="btn btn-primary" id="deptSubmit" value="default">만들기</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 직원 추가·수정 -->
+  <dialog id="agentDialog" class="modal win" aria-labelledby="agentDialogTitle">
+    <form method="dialog" id="agentForm" class="modal-form" novalidate>
+      <div class="win-bar"><h2 id="agentDialogTitle">직원 추가</h2><span class="win-ctl" aria-hidden="true"></span></div>
+      <div class="win-body form-grid">
+        <label>소속 부서
+          <select name="department" id="agentDept"></select>
+        </label>
+        <label>직무 프리셋
+          <select name="role" id="agentRole"><option value="">직접 입력</option></select>
+        </label>
+        <label><span class="lbl">이름 <span class="req" aria-hidden="true">*</span></span>
+          <input name="name" required maxlength="40" placeholder="예: 김대리">
+        </label>
+        <label>직급
+          <select name="rank">
+            <option>사원</option><option>주임</option><option selected>대리</option><option>과장</option>
+            <option>차장</option><option>부장</option><option>팀장</option>
+          </select>
+        </label>
+        <label class="span-2">담당 업무
+          <input name="specialty" maxlength="120" placeholder="예: 시장 규모·성장률·세그먼트 추정">
+        </label>
+        <label class="span-2"><span class="lbl">호출 설명 <small class="help-inline">비서실장이 이 직원을 언제 부를지 판단하는 문장</small></span>
+          <input name="description" maxlength="300" placeholder="예: 시장 규모를 출처와 함께 조사할 때 사용">
+        </label>
+        <label class="span-2">상세 지침
+          <textarea name="instructions" rows="5" maxlength="4000" placeholder="역할별 핵심 지침 2~6문장"></textarea>
+        </label>
+        <label class="span-2"><span class="lbl">혼잣말 <small class="help-inline">대기 중 말풍선, 줄마다 하나</small></span>
+          <textarea name="thoughts" rows="2" maxlength="300" placeholder="자료 더 찾아볼까…"></textarea>
+        </label>
+        <label>모델
+          <select name="model">
+            <option value="">기본(팀장 opus · 그 외 부서값)</option>
+            <option value="sonnet">sonnet</option>
+            <option value="opus">opus</option>
+            <option value="haiku">haiku</option>
+            <option value="inherit">inherit</option>
+          </select>
+        </label>
+        <label>직원 id
+          <input name="id" maxlength="48" pattern="[a-z][a-z0-9-]{1,47}" aria-describedby="agentIdHelp">
+          <small id="agentIdHelp" class="help">자동 생성됨. 수정 가능(영문 소문자·숫자·하이픈)</small>
+        </label>
+        <div class="span-2 checks-row">
+          <label class="inline"><input type="checkbox" name="lead"> 팀장 (부서 산출물 취합·검토)</label>
+          <label class="inline"><input type="checkbox" name="active" checked> 근무중</label>
+        </div>
+        <p class="warn span-2" id="leadWarn" hidden></p>
+        <p class="form-error span-2" id="agentError" role="alert" hidden></p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>취소</button>
+        <button type="submit" class="btn btn-primary" id="agentSubmit" value="default">추가</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 프리셋 인원 일괄 추가 -->
+  <dialog id="bulkDialog" class="modal win" aria-labelledby="bulkTitle">
+    <form method="dialog" id="bulkForm" class="modal-form">
+      <div class="win-bar"><h2 id="bulkTitle">프리셋 인원 일괄 추가</h2><span class="win-ctl" aria-hidden="true"></span></div>
+      <div class="win-body">
+        <label>직무 프리셋 묶음
+          <select id="bulkPreset"></select>
+        </label>
+        <p class="help">체크한 직무마다 직원 한 명씩 만듭니다. 이름은 성+직급으로 자동 제안되며 나중에 수정할 수 있어요.</p>
+        <div class="bulk-list" id="bulkList"></div>
+        <p class="form-error" id="bulkError" role="alert" hidden></p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>취소</button>
+        <button type="submit" class="btn btn-primary" id="bulkSubmit" value="default">추가</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 작업 지시 -->
+  <dialog id="runDialog" class="modal win" aria-labelledby="runTitle">
+    <form method="dialog" id="runForm" class="modal-form">
+      <div class="win-bar"><h2 id="runTitle">작업 지시</h2><span class="win-ctl" aria-hidden="true"></span></div>
+      <div class="win-body">
+        <label for="runPrompt" id="runLabel">요청 내용</label>
+        <textarea id="runPrompt" rows="6" maxlength="4000" required placeholder="무엇을 해 주면 좋을지 구체적으로 적어 주세요"></textarea>
+        <label class="run-model" id="runModelRow">모델
+          <select id="runModel">
+            <option value="">기본(직원 설정)</option><option value="haiku">haiku</option><option value="sonnet">sonnet</option><option value="opus">opus</option>
+          </select>
+        </label>
+        <p class="form-error" id="runError" role="alert" hidden></p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>취소</button>
+        <button type="submit" class="btn btn-primary" value="default">지시하기</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 회사 설정 -->
+  <dialog id="companyDialog" class="modal win" aria-labelledby="companyTitle">
+    <form method="dialog" id="companyForm" class="modal-form">
+      <div class="win-bar"><h2 id="companyTitle">회사 설정</h2><span class="win-ctl" aria-hidden="true"></span></div>
+      <div class="win-body">
+        <label for="companyRules"><span class="lbl">회사 공통 규칙 <small class="help-inline">모든 직원 지침 파일의 공통 머리말 다음에 들어갑니다(최대 8000자). 비우면 생략</small></span></label>
+        <textarea id="companyRules" rows="12" maxlength="8000" placeholder="예: 보고서는 한국어 존댓말로 쓴다. 금액은 원 단위로 쓴다."></textarea>
+        <p class="help" id="companyCount"></p>
+        <section class="org-backup" aria-labelledby="orgBackupTitle">
+          <h3 class="lbl" id="orgBackupTitle">백업 · 이전</h3>
+          <p class="help">부서·직원·회사 공통 규칙을 JSON 파일 하나로 내려받거나, 내려받아 둔 파일로 현재 회사 구성을 덮어씁니다. 다른 컴퓨터로 옮길 때도 씁니다.</p>
+          <div class="backup-actions">
+            <button type="button" class="btn btn-sm" id="orgExportBtn">회사 구성 내보내기</button>
+            <button type="button" class="btn btn-sm" id="orgImportBtn">가져오기…</button>
+            <input type="file" id="orgImportFile" accept="application/json,.json" hidden>
+          </div>
+        </section>
+        <p class="form-error" id="companyError" role="alert" hidden></p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>취소</button>
+        <button type="submit" class="btn btn-primary" id="companySubmit" value="default">저장</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 확인 -->
+  <dialog id="confirmDialog" class="modal modal-sm win" aria-labelledby="confirmTitle">
+    <form method="dialog" class="modal-form">
+      <div class="win-bar"><h2 id="confirmTitle">확인</h2><span class="win-ctl" aria-hidden="true"></span></div>
+      <div class="win-body"><p id="confirmText"></p></div>
+      <div class="modal-actions">
+        <button type="submit" class="btn" value="cancel">취소</button>
+        <button type="submit" class="btn btn-danger" value="ok" id="confirmOk">확인</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 실행 로그 -->
+  <dialog id="logDialog" class="modal modal-wide win" aria-labelledby="logTitle">
+    <form method="dialog" class="modal-form">
+      <div class="win-bar"><h2 id="logTitle">실행 결과</h2><span class="win-ctl" aria-hidden="true"></span></div>
+      <div class="win-body"><pre class="log" id="logText" tabindex="0"></pre></div>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="logToggle" aria-pressed="false">원문 보기</button>
+        <button type="submit" class="btn" value="close">닫기</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

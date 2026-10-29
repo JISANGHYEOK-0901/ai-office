@@ -1,0 +1,14 @@
+node_modules/
+.office/
+outputs/
+.DS_Store
+.claude/settings.local.json
+
+# 개인 데이터: 회사 구성은 사용자마다 다르다. 백업·이전은 "회사 구성 내보내기"(npm run office → 회사 설정) 또는
+# node scripts/office.mjs org export <파일> 로 한다.
+org/departments.json
+org/roster.json
+org/company.md
+# 정본에서 생성되는 에이전트 파일(직접 만든 개인 에이전트 파일도 이 폴더에 두면 함께 제외된다)
+.claude/agents/
+.codex/agents/

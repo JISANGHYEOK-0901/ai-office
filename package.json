@@ -1,0 +1,15 @@
+{
+  "name": "ai-office",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "office": "node dashboard/server.mjs",
+    "demo": "node dashboard/server.mjs --demo",
+    "sync": "node scripts/sync-agents.mjs --write",
+    "check": "node scripts/check.mjs",
+    "doctor": "node scripts/doctor.mjs"
+  }
+}

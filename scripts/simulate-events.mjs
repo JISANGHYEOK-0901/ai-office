@@ -18,6 +18,11 @@ const RANKS = ['사원', '주임', '대리', '과장', '차장'];
 const LEAD_RANKS = ['팀장', '부장'];
 const CLAUDE_TOOLS = ['Read', 'Read', 'Grep', 'Glob', 'Write', 'Edit', 'WebSearch', 'WebFetch', 'Bash'];
 const CODEX_TOOLS = ['Bash', 'Bash', 'Read'];
+const REPLY_QUESTIONS = [
+  '비교 대상을 국내 3사로 할까요, 해외까지 넓힐까요? 답장 또는 "기본값으로 진행"이라고 답하면 됩니다.',
+  '보고서 분량을 1쪽 요약으로 할까요? 답장 또는 "기본값으로 진행"이라고 답하면 됩니다.',
+  '예산 기준 연도를 2026년으로 잡을까요?',
+];
 const TASK_TITLES = ['경쟁사 가격 정책 조사', '3분기 매출 보고서 정리', '신규 캠페인 카피 초안', '계약서 위험 조항 검토',
   '고객 인터뷰 요약', '랜딩 페이지 개선안', '투자 검토 메모', '주간 운영 지표 점검', '채용 공고 작성', '제품 FAQ 갱신'];
 const SUMMARIES = {
@@ -231,12 +236,40 @@ export function startSimulation({ root = repoRoot(), intervalMs = 1200, org, see
     tick();
   }
 
-  function finishTask() {
+  // 업무 마무리: 검토 요청 → 비서실장 검토 통과 → 사용자 확인 대기(review). 화면의 결재 아이콘·사용자 확인 모달을 보여주려는 것이다.
+  // 데모에서는 승인·반려를 보낼 수 없으므로, 확인 대기가 둘 이상 쌓이면 가장 오래된 것을 대표가 승인한 것처럼 끝낸다
+  function finishTask({ allowBlock = true } = {}) {
+    const waiting = tasks.filter((t) => t.status === 'review');
+    if (waiting.length >= 2) {
+      const w = waiting[0];
+      w.status = 'done';
+      emit({ engine: 'claude', session: 'office-server', instance: 'office-server', kind: 'flow.user_approve', task: w.id, summary: '사용자 승인' });
+      emit({ engine: 'claude', session: 'office-server', instance: 'office-server', kind: 'task.update', task: w.id, status: 'done', summary: `${w.title}: review → done` });
+      return;
+    }
     const active = tasks.filter((t) => t.status === 'active');
     if (active.length < 2) return;
     const t = active[0];
-    t.status = rnd.next() < 0.85 ? 'done' : 'blocked';
-    emit({ engine: 'claude', agent: 'chief', instance: session, kind: 'task.update', task: t.id, status: t.status, summary: `${t.title}: ${t.status}` });
+    if (allowBlock && rnd.next() < 0.15) {
+      t.status = 'blocked';
+      emit({ engine: 'claude', agent: 'chief', instance: session, kind: 'task.update', task: t.id, status: t.status, summary: `${t.title}: active → blocked` });
+      return;
+    }
+    const from = workers.length ? rnd.pick(workers).department : undefined;
+    const cli = { engine: 'claude', session: 'office-cli', instance: 'office-cli', agent: 'chief', task: t.id };
+    emit({ ...cli, kind: 'flow.review_request', ...(from ? { from } : {}) });
+    emit({ ...cli, kind: 'flow.review', verdict: 'pass', summary: '완료 기준 충족' });
+    emit({ ...cli, kind: 'flow.deliver', summary: '결과를 확인해 주세요' });
+    t.status = 'review';
+    emit({ ...cli, kind: 'task.update', status: 'review', summary: `${t.title}: active → review` });
+  }
+
+  // 이어서 답하기 연출: 직원이나 비서실장이 확인 질문으로 답을 끝낸 상황(데모에서는 답장을 보낼 수 없다)
+  function askReply() {
+    const task = currentTask();
+    const who = workers.length && rnd.next() < 0.6 ? rnd.pick(workers).id : 'chief';
+    emit({ engine: 'claude', session: `run-demo-${Date.now().toString(36)}`, instance: `run-demo-${Date.now().toString(36)}`, agent: who, kind: 'reply.wait', run: `demo-${Date.now().toString(36)}`,
+      ...(task ? { task } : {}), summary: rnd.pick(REPLY_QUESTIONS) });
   }
 
   function tick() {
@@ -252,13 +285,18 @@ export function startSimulation({ root = repoRoot(), intervalMs = 1200, org, see
     const roll = rnd.next();
     if (roll < 0.04) newTask();
     else if (roll < 0.1) startReview();
-    else if (roll < 0.12) finishTask();
+    else if (roll < 0.13) finishTask();
+    else if (roll < 0.145) askReply();
   }
 
   emit({ engine: 'claude', agent: 'chief', instance: session, kind: 'session.start', summary: 'demo' });
   newTask();
   newTask();
+  newTask();
   for (let i = 0; i < Math.min(4, workers.length); i++) tick();
+  // 처음 열었을 때도 결재·답장 아이콘이 보이게 한 건씩 미리 만든다
+  finishTask({ allowBlock: false });
+  askReply();
   const timer = setInterval(tick, intervalMs);
 
   const stop = () => {

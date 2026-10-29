@@ -18,6 +18,12 @@ const prompt = readFileSync(0, 'utf8');
 const log = process.env.FAKE_LOG;
 const id = (prompt.match(/\\(([a-z0-9-]+)\\)이다/) || [])[1] || 'unknown';
 appendFileSync(log, JSON.stringify({ id, at: 'start', t: Date.now(), args, prompt }) + '\\n');
+// FAKE_BARRIER=N: 시작 기록이 N개가 될 때까지(최대 5초) 기다린다. 동시 실행 한도 검사가 프로세스 기동 속도에 좌우되지 않게 한다
+const barrier = Number(process.env.FAKE_BARRIER || 0);
+const until = Date.now() + 5000;
+while (barrier && Date.now() < until && readFileSync(log, 'utf8').split('\\n').filter((l) => l.includes('"at":"start"')).length < barrier) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+}
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 if (id === 'broken-1') { process.stderr.write('model error'); process.exit(3); }
 out({ type: 'thread.started', thread_id: 'th-' + id });
@@ -69,7 +75,7 @@ const member = (id) => ({ id, name: `${id} 담당`, department: 'verify', title:
 test('검토자별 codex 실행: 이벤트 변환, 리뷰 파일 저장, BLOCK 이면 종료 코드 2', async () => {
   const env = setup({ departments: [verifyDept], roster: [member('fact-1'), member('blocker-1'), member('vague-1'), member('num-1')] });
   const res = await run(['--target', 'outputs/2026-10-29/scan', '--task', '2026-10-29/scan'],
-    { AI_OFFICE_ROOT: env.root, CODEX_BIN: env.bin, FAKE_LOG: env.log });
+    { AI_OFFICE_ROOT: env.root, CODEX_BIN: env.bin, FAKE_LOG: env.log, FAKE_BARRIER: '3' });
   assert.equal(res.code, 2, res.stderr);
   assert.match(res.stdout, /fact-1: PASS/);
   assert.match(res.stdout, /blocker-1: BLOCK/);
@@ -177,4 +183,16 @@ test('모델·추론 강도: 부서 codexModel/codexEffort < --effort < 환경�
   const bad = await run(['--target', env.target, '--effort', 'turbo'], base);
   assert.equal(bad.code, 1);
   assert.match(bad.stderr, /--effort/);
+});
+
+test('검증실 판정은 engine 기준: claude 엔진의 id "verify" 부서 직원은 codex 검토자가 아니고 Agent 대상이다', async () => {
+  const { loadReviewers } = await import('../scripts/codex-review.mjs');
+  const { onDutyAgents } = await import('../lib/chief-guard.mjs');
+  const env = setup({ departments: [{ id: 'verify', name: '검수부', engine: 'claude' }], roster: [member('verify-1')], presets: { departments: [] } });
+  const org = { departments: [{ id: 'verify', name: '검수부', engine: 'claude' }], roster: [member('verify-1')] };
+  assert.deepEqual(loadReviewers(env.root).reviewers.map((r) => r.id), []);
+  assert.deepEqual(onDutyAgents(org).map((a) => a.id), ['verify-1']);
+  // id가 무엇이든 codex 엔진 부서의 직원은 검토자다
+  const env2 = setup({ departments: [{ id: 'qa', name: '품질실', engine: 'codex' }], roster: [{ ...member('qa-1'), department: 'qa' }] });
+  assert.deepEqual(loadReviewers(env2.root).reviewers.map((r) => r.id), ['qa-1']);
 });

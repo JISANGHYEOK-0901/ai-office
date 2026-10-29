@@ -49,7 +49,8 @@ function parseArgs(argv) {
   return opts;
 }
 
-const isVerifyDept = (d) => d && (d.id === 'verify' || d.engine === 'codex');
+// 검증실 = engine이 codex인 부서(id로 판정하지 않는다: 사용자가 claude 엔진으로 id 'verify' 부서를 만들 수 있다)
+const isVerifyDept = (d) => Boolean(d) && d.engine === 'codex';
 
 // 정본의 검증실 직원을 쓰고, 정본에 없으면 프리셋의 검증실 직무를 대신 쓴다
 export function loadReviewers(root) {

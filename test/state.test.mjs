@@ -160,7 +160,19 @@ test('feed는 최근 200개만 남기고 입력을 변경하지 않는다', () =
 
 test('빈 입력에서도 동작한다', () => {
   const s = buildState({ org: { departments: [], roster: [] }, events: [], now: NOW });
-  assert.deepEqual(s.metrics, { active: 0, standby: 0, idle: 0, offline: 0, tasks: 0, reviews: 0, tools: 0 });
+  assert.deepEqual(s.metrics, { active: 0, standby: 0, idle: 0, offline: 0, tasks: 0, reviews: 0, tools: 0, needsReply: 0, attention: 0 });
   assert.deepEqual(s.departments, []);
   assert.deepEqual(s.feed, []);
+});
+
+test('attention.reply: 대화(rootId)마다 마지막 needsReply 실행 하나, 완료·확인 대기 업무의 실행은 뺀다', () => {
+  const run = (id, o = {}) => ({ id, target: 'chief', agentId: null, status: 'done', needsReply: true, rootId: 'r1', endedAt: `2026-10-29T01:0${id.at(-1)}:00.000Z`, summary: id, ...o });
+  const state = buildState({
+    org: { departments: [], roster: [] },
+    events: [],
+    runs: [run('a1'), run('a2'), run('b3', { rootId: 'r2', task: '2026-10-29/done-one' }), run('c4', { rootId: 'r3', task: '2026-10-29/review-one' })],
+    tasks: [{ id: '2026-10-29/done-one', status: 'done' }, { id: '2026-10-29/review-one', status: 'review', title: '검토' }],
+    now: Date.parse('2026-10-29T02:00:00.000Z'),
+  });
+  assert.deepEqual(state.attention.map((a) => `${a.kind}:${a.runId ?? a.task}`).sort(), ['approve:2026-10-29/review-one', 'reply:a2']);
 });

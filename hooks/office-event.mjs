@@ -45,16 +45,41 @@ function writeSessions(file, map, renameWithRetry) {
   renameWithRetry(tmp, file);
 }
 
-// Bash 응답은 {stdout, stderr, ...} 객체지만 문자열로 오는 경우도 받아 준다
-function bashStdout(response) {
+// Bash·PowerShell 응답은 {stdout, stderr, ...} 객체지만(공식 문서: PowerShell은 Bash와 같은 필드) 문자열로 오는 경우도 받아 준다
+function shellStdout(response) {
   if (typeof response === 'string') return response;
   if (response && typeof response === 'object' && typeof response.stdout === 'string') return response.stdout;
   return '';
 }
 
+const SHELL_TOOLS = ['Bash', 'PowerShell'];
+
+// 세션 → 업무 연결은 이 세션이 실제로 `node scripts/office.mjs task start …`를 단독 실행했고, 출력의 업무 id가
+// 형식에 맞으며 tasks.json에 등록돼 있을 때만 한다. 테스트 파일을 cat·grep한 출력에 OFFICE_TASK=가 보여도 연결하지 않는다
+async function linkedTask(input) {
+  if (!SHELL_TOOLS.includes(input.tool_name) || typeof input.session_id !== 'string') return null;
+  if (input.hook_event_name !== 'PostToolUse' && !('tool_response' in input)) return null;
+  const command = input.tool_input && typeof input.tool_input === 'object' ? input.tool_input.command : null;
+  if (typeof command !== 'string' || !/\btask\b/.test(command)) return null;
+  const { parseOfficeCommand } = await import('../lib/chief-guard.mjs');
+  const cwd = typeof input.cwd === 'string' && input.cwd ? input.cwd : ROOT;
+  const parsed = parseOfficeCommand(command, { root: ROOT, cwd });
+  if (!parsed || parsed.script !== 'office' || parsed.args[0] !== 'task' || parsed.args[1] !== 'start') return null;
+  const { extractOfficeTask } = await import('../lib/events.mjs');
+  const { isTaskId } = await import('../lib/plan.mjs');
+  const { loadTasks } = await import('../lib/tasks.mjs');
+  const taskId = extractOfficeTask(shellStdout(input.tool_response));
+  if (!isTaskId(taskId)) return null;
+  try {
+    return loadTasks(ROOT).some((t) => t && t.id === taskId) ? taskId : null;
+  } catch {
+    return null;
+  }
+}
+
 async function main() {
   // 공용 모듈은 동적으로 불러온다. 모듈 로드 실패도 종료 코드 0으로 끝내기 위해서다
-  const { appendEvent, extractOfficeTask, normalizeClaudeHook } = await import('../lib/events.mjs');
+  const { appendEvent, normalizeClaudeHook } = await import('../lib/events.mjs');
   const { renameWithRetry } = await import('../lib/paths.mjs');
   const raw = await readStdin();
   let input;
@@ -65,13 +90,11 @@ async function main() {
   const sessionsMap = readSessions(sessionsFile);
 
   // office.mjs task start 결과를 세션에 연결해 이후 이벤트(이번 tool.end 포함)에 task 를 붙인다
-  const isPostBash = input.tool_name === 'Bash' && (input.hook_event_name === 'PostToolUse' || 'tool_response' in input);
-  if (isPostBash && typeof input.session_id === 'string') {
-    const taskId = extractOfficeTask(bashStdout(input.tool_response));
-    if (taskId && sessionsMap[input.session_id] !== taskId) {
-      sessionsMap[input.session_id] = taskId;
-      try { writeSessions(sessionsFile, sessionsMap, renameWithRetry); } catch { /* 기록 실패는 무시 */ }
-    }
+  let taskId = null;
+  try { taskId = await linkedTask(input); } catch { /* 연결 실패는 이벤트 기록을 막지 않는다 */ }
+  if (taskId && sessionsMap[input.session_id] !== taskId) {
+    sessionsMap[input.session_id] = taskId;
+    try { writeSessions(sessionsFile, sessionsMap, renameWithRetry); } catch { /* 기록 실패는 무시 */ }
   }
 
   const ev = normalizeClaudeHook(input, { sessionsMap });

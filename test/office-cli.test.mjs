@@ -65,6 +65,8 @@ test('task start: 명시한 slug가 이미 있으면 오류, 형식 오류와 �
   const p = run('task', 'start', '둘째 업무', '--slug', 'dup');
   assert.equal(p.status, 1);
   assert.match(p.stderr, /이미 있는 업무/);
+  // 기존 업무에 이어 쓰지 말고 새 slug를 쓰라고 안내한다(이어 쓰면 세션이 업무에 연결되지 않는다)
+  assert.match(p.stderr, /--slug dup-2/);
   assert.equal(tasksOf(root).length, 1);
 
   assert.equal(run('task', 'start', '업무', '--slug', 'Bad Slug').status, 64);
@@ -86,23 +88,60 @@ test('task status: 상태 변경과 task.update 이벤트, 잘못된 입력 거�
   run('task', 'start', '보고서 작성', '--slug', 'report');
   const id = `${kstDate()}/report`;
 
-  let p = run('task', 'status', id, 'done');
+  let p = run('task', 'status', id, 'blocked');
   assert.equal(p.status, 0, p.stderr);
-  assert.match(p.stderr, /report\.md가 없습니다/);
-  assert.equal(tasksOf(root)[0].status, 'done');
+  assert.equal(tasksOf(root)[0].status, 'blocked');
   const ev = eventsOf(root).at(-1);
   assert.equal(ev.kind, 'task.update');
   assert.equal(ev.task, id);
-  assert.equal(ev.status, 'done');
+  assert.equal(ev.status, 'blocked');
+  assert.equal(run('task', 'status', id, 'active').status, 0);
 
-  assert.equal(run('task', 'status', id, 'blocked').status, 0);
-  assert.equal(tasksOf(root)[0].status, 'blocked');
+  // 대표 직접(--by-user)은 done으로 바꿀 수 있다(대시보드 없이 터미널만 쓰는 경우)
+  p = run('task', 'status', id, 'done', '--by-user');
+  assert.equal(p.status, 0, p.stderr);
+  assert.match(p.stderr, /report\.md가 없습니다/);
+  assert.equal(tasksOf(root)[0].status, 'done');
 
   p = run('task', 'status', id, 'finished');
   assert.equal(p.status, 64);
-  p = run('task', 'status', '2000-01-01/none', 'done');
+  p = run('task', 'status', '2000-01-01/none', 'blocked');
   assert.equal(p.status, 1);
   assert.match(p.stderr, /찾을 수 없습니다/);
+});
+
+test('task status 전이 규칙: done·review는 비서실장이 못 바꾸고, 사용자 확인 대기·완료 업무는 되돌리지 못한다', (t) => {
+  const { root, run } = setup(t);
+  run('task', 'start', '보고서 작성', '--slug', 'report');
+  const id = `${kstDate()}/report`;
+  const status = () => tasksOf(root)[0].status;
+
+  let p = run('task', 'status', id, 'done');
+  assert.equal(p.status, 1);
+  assert.match(p.stderr, /대시보드에서 승인/);
+  p = run('task', 'status', id, 'review');
+  assert.equal(p.status, 1);
+  assert.match(p.stderr, /flow <업무> deliver/);
+  assert.equal(status(), 'active');
+
+  assert.equal(run('flow', id, 'deliver').status, 0);
+  assert.equal(status(), 'review');
+  for (const s of ['active', 'blocked']) {
+    p = run('task', 'status', id, s);
+    assert.equal(p.status, 1, s);
+    assert.match(p.stderr, /승인·반려로만/);
+  }
+  p = run('flow', id, 'deliver');
+  assert.equal(p.status, 1, '이미 사용자 확인 대기');
+  assert.equal(status(), 'review');
+  assert.equal(eventsOf(root).filter((e) => e.kind === 'flow.user_approve').length, 0);
+
+  // 완료된 업무를 deliver로 되돌리지 못한다
+  assert.equal(run('task', 'status', id, 'done', '--by-user').status, 0);
+  p = run('flow', id, 'deliver');
+  assert.equal(p.status, 1);
+  assert.match(p.stderr, /이미 완료된 업무/);
+  assert.equal(status(), 'done');
 });
 
 test('task list: 보고서·리뷰 존재 여부를 함께 보여준다', (t) => {

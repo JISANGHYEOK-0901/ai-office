@@ -5,10 +5,14 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { layoutOffice, routeBetween, hashString, lookFor, openReviewers } from '../dashboard/public/office.js';
+import { layoutOffice, routeBetween, hashString, lookFor, openReviewers, meetingAttendees, iconScale, ATTENTION_ICONS } from '../dashboard/public/office.js';
 import {
   normalizeState, planBulkAgents, agentPayloadFromPlan, kebab, validId, nextAgentId, titleFor,
   timeAgo, esc, findPresetFor, presetList, runAgentId,
+  normalizeFlow, taskSteps, groupFlowFeed, planStages, normalizeAttention, attentionByAgent, attentionKey,
+  titleWithAttention, freshAttention, collectGaps, normalizeOutputs, filterOutputs, fileKind, groupOutputFiles,
+  parseTags, safeColor, stepIndexOf, FLOW_STEPS, VIEWS,
+  withRo, withPreviewCsp, PREVIEW_META_CSP,
 } from '../dashboard/public/app.js';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dashboard', 'public');
@@ -39,11 +43,21 @@ test('app.js: 상태 변경 요청은 토큰과 JSON Content-Type 헤더를 보�
   assert.match(src, /new EventSource\('\/api\/stream'\)/);
 });
 
-test('layoutOffice: 부서 0개면 대표실·회의실만 있다', () => {
+test('layoutOffice: 부서 0개면 대표실·비서실·회의실만 있고, 비서실은 대표실 옆에 비서실장 자리가 있다', () => {
   const l = layoutOffice([]);
-  assert.deepEqual(l.rooms.map((r) => r.kind), ['ceo', 'meeting']);
-  assert.equal(l.seats.size, 0);
+  assert.deepEqual(l.rooms.map((r) => r.kind), ['ceo', 'chief', 'meeting']);
+  assert.equal(l.seats.size, 0, '비서실장 자리는 직원 좌석 맵에 넣지 않는다');
   assert.ok(l.width > 0 && l.height > 0);
+  assert.equal(l.chief.y, l.ceo.y);
+  assert.ok(l.chief.x > l.ceo.x + l.ceo.w, '비서실은 대표실 오른쪽');
+  assert.equal(l.chiefSeat.agentId, 'chief');
+  const s = l.chiefSeat;
+  assert.ok(s.x0 >= l.chief.x && s.x0 + 60 <= l.chief.x + l.chief.w && s.y0 + 66 <= l.chief.y + l.chief.h, '비서실장 자리는 비서실 안');
+  // 좁은 화면(1열)에서는 회의실을 다음 줄로 내려 폭을 줄인다
+  const narrow = layoutOffice([], { maxCols: 1 });
+  assert.ok(narrow.meeting.y > narrow.ceo.y + narrow.ceo.h);
+  assert.ok(narrow.width < l.width);
+  for (const r of narrow.rooms) assert.ok(r.x + r.w <= narrow.width && r.y + r.h <= narrow.height);
 });
 
 test('layoutOffice: 6개 부서 40명 — 좌석 유일, 방 겹침 없음, 격자 3열', () => {
@@ -82,8 +96,8 @@ test('layoutOffice: 부서 수 제한 없음(20개)과 빈 부서의 직원 추�
 test('routeBetween: 목적지에서 끝나고, 세로 통로는 부서 방을 지나지 않는다', () => {
   const l = layoutOffice(makeDepts([8, 3, 5, 2, 9, 1, 4]));
   const depts = l.rooms.filter((r) => r.kind === 'dept');
-  for (const from of depts) {
-    for (const to of [l.ceo, l.meeting, ...depts]) {
+  for (const from of [...depts, l.chief]) {
+    for (const to of [l.ceo, l.chief, l.meeting, ...depts]) {
       const start = from.seats[0] || from.doorIn;
       const dest = to.spots ? to.spots[0] : (to.seats[0] || to.doorIn);
       const pts = routeBetween(start, from, dest, to);
@@ -265,4 +279,291 @@ test('표시용 보조 함수', () => {
   assert.equal(runAgentId({ target: 'b' }), 'b');
   assert.equal(runAgentId({ target: 'review', engine: 'codex' }), null);
   assert.equal(runAgentId({}), null);
+});
+
+test('routeBetween: 1열 배치에서도 윗줄 방 사이 경로에 NaN이 없다', () => {
+  const l = layoutOffice(makeDepts([3, 2]), { maxCols: 1 });
+  for (const [a, b] of [[l.chief, l.meeting], [l.ceo, l.meeting], [l.meeting, l.rooms.at(-1)]]) {
+    const pts = routeBetween(a.doorIn, a, b.doorIn, b);
+    for (const p of pts) assert.ok(Number.isFinite(p.x) && Number.isFinite(p.y), `${a.id}→${b.id}`);
+  }
+});
+
+test('meetingAttendees: meeting.start~end와 [회의] 흐름 항목(완료 전까지)', () => {
+  const now = Date.parse('2026-10-29T05:10:00Z');
+  const feed = [
+    { ts: '2026-10-29T05:00:00Z', kind: 'meeting.start', task: 't1', attendees: ['mkt-1', 'dev-1'] },
+    { ts: '2026-10-29T05:01:00Z', kind: 'meeting.start', task: 't2', attendees: 'res-1, res-2' },
+    { ts: '2026-10-29T05:02:00Z', kind: 'meeting.end', task: 't2' },
+    { ts: '2026-10-29T03:00:00Z', kind: 'meeting.start', task: 'old', attendees: ['stale-1'] },
+  ];
+  const flow = [
+    { ts: '2026-10-29T05:03:00Z', task: 't3', stage: 'meeting', from: 'chief', to: 'finance', target: 'fin-1' },
+    { ts: '2026-10-29T05:03:00Z', task: 't3', stage: 'meeting', from: 'chief', to: 'ops', target: 'ops-1' },
+    { ts: '2026-10-29T05:05:00Z', task: 't3', stage: 'done', actor: 'ops-1' },
+  ];
+  assert.deepEqual([...meetingAttendees(feed, flow, now)].sort(), ['dev-1', 'fin-1', 'mkt-1']);
+  assert.equal(meetingAttendees([], [], now).size, 0);
+});
+
+test('의견 필요 아이콘: 세 종류 비트맵은 행 길이가 같고, 크기는 1/z로 보정된다', () => {
+  for (const [kind, rows] of Object.entries(ATTENTION_ICONS)) {
+    assert.ok(rows.length >= 8, kind);
+    assert.ok(rows.every((r) => r.length === rows[0].length), `${kind} 행 길이`);
+    assert.ok(rows.every((r) => /^[#odk.]+$/.test(r)), `${kind} 문자`);
+  }
+  assert.deepEqual(Object.keys(ATTENTION_ICONS).sort(), ['approve', 'gap', 'reply']);
+  assert.equal(iconScale(1), 1);
+  assert.equal(iconScale(2), 1, '확대 시에는 원래 크기');
+  assert.equal(iconScale(0.5), 2);
+  assert.equal(iconScale(0.1), 3.2, '상한');
+});
+
+// SPEC "업무 흐름" 예시: 마케팅 조사 → 개발부 협조 → 비서실장 검토 통과 → 사용자 확인 대기
+const FLOW_A = [
+  { task: 'A', ts: '2026-10-29T05:00:00Z', stage: 'request', from: 'user', to: 'chief', text: "사용자 → 비서실장: 업무 요청 '랜딩'" },
+  { task: 'A', ts: '2026-10-29T05:00:05Z', stage: 'intake', actor: 'chief', text: '비서실장: 요청 내용 확인' },
+  { task: 'A', ts: '2026-10-29T05:00:10Z', stage: 'assign', from: 'chief', to: 'mkt-1', dept: 'marketing' },
+  { task: 'A', ts: '2026-10-29T05:00:11Z', stage: 'accept', actor: 'mkt-1', dept: 'marketing' },
+  { task: 'A', ts: '2026-10-29T05:00:20Z', stage: 'progress', actor: 'mkt-1', text: "자료 검색 '경쟁사'" },
+  { task: 'A', ts: '2026-10-29T05:00:30Z', stage: 'progress', actor: 'mkt-1', text: "문서 작성 'research.md'" },
+  { task: 'A', ts: '2026-10-29T05:00:40Z', stage: 'done', actor: 'mkt-1', files: ['research.md'] },
+  { task: 'A', ts: '2026-10-29T05:00:50Z', stage: 'cooperate', from: 'marketing', to: 'dev-1', dept: 'dev' },
+  { task: 'A', ts: '2026-10-29T05:01:00Z', stage: 'progress', actor: 'dev-1', text: "문서 작성 'index.html'" },
+  { task: 'A', ts: '2026-10-29T05:01:30Z', stage: 'done', actor: 'dev-1' },
+  { task: 'A', ts: '2026-10-29T05:01:40Z', stage: 'review_request', from: 'dev', to: 'chief' },
+  { task: 'A', ts: '2026-10-29T05:01:50Z', stage: 'review_pass', actor: 'chief' },
+  { task: 'A', ts: '2026-10-29T05:02:00Z', stage: 'deliver', actor: 'chief' },
+];
+
+test('normalizeFlow: 배열·{items}·업무별 맵을 시간순 배열로', () => {
+  const shuffled = [FLOW_A[2], FLOW_A[0], FLOW_A[1]];
+  assert.deepEqual(normalizeFlow(shuffled).map((x) => x.stage), ['request', 'intake', 'assign']);
+  assert.equal(normalizeFlow({ items: FLOW_A }).length, FLOW_A.length);
+  const byTask = normalizeFlow({ B: [{ ts: '2026-10-29T05:00:00Z', stage: 'request' }] });
+  assert.equal(byTask[0].task, 'B');
+  assert.deepEqual(normalizeFlow(null), []);
+  assert.deepEqual(normalizeFlow([null, { ts: 'x' }, 3]), [], 'stage 없는 항목은 버린다');
+});
+
+test('taskSteps: 사용자 확인 대기 업무는 "사용자 확인"이 현재 단계이고 앞 단계는 모두 완료', () => {
+  const st = taskSteps({ id: 'A', status: 'review' }, normalizeFlow(FLOW_A));
+  assert.deepEqual(FLOW_STEPS.map((s) => s.label), ['요청', '확인', '하달', '진행', '협조', '검토', '사용자 확인', '완료']);
+  assert.equal(st.steps[st.current].label, '사용자 확인');
+  assert.deepEqual(st.steps.map((s) => s.state), ['done', 'done', 'done', 'done', 'done', 'done', 'current', 'todo']);
+  assert.equal(st.rejects, 0);
+  assert.equal(st.back, null);
+  const done = taskSteps({ id: 'A', status: 'done' }, normalizeFlow(FLOW_A));
+  assert.ok(done.steps.every((s) => s.state === 'done'));
+});
+
+test('taskSteps: 검토 반려는 진행으로, 사용자 반려는 하달로 되돌리고 횟수를 센다', () => {
+  const flow = normalizeFlow([
+    { task: 'B', ts: '1', stage: 'request' }, { task: 'B', ts: '2', stage: 'assign' }, { task: 'B', ts: '3', stage: 'done' },
+    { task: 'B', ts: '4', stage: 'review_request' }, { task: 'B', ts: '5', stage: 'review_reject', to: 'dev-1' },
+    { task: 'B', ts: '6', stage: 'progress', actor: 'dev-1' },
+  ]);
+  const st = taskSteps({ id: 'B', status: 'active' }, flow);
+  assert.equal(st.rejects, 1);
+  assert.equal(st.steps[st.current].label, '진행');
+  assert.equal(st.back.to, stepIndexOf('progress'));
+  assert.equal(st.back.from, stepIndexOf('review_reject'));
+  assert.equal(st.steps[1].state, 'skip', '거치지 않은 확인 단계');
+  const user = taskSteps({ id: 'C' }, normalizeFlow([{ task: 'C', ts: '1', stage: 'deliver' }, { task: 'C', ts: '2', stage: 'user_reject' }]));
+  assert.equal(user.steps[user.current].label, '하달');
+  assert.equal(user.rejects, 1);
+  assert.equal(taskSteps({ id: 'Z' }, []).current, -1);
+});
+
+test('groupFlowFeed: 업무별 묶음, progress는 직원별 1줄, 완료되면 진행 줄을 지운다', () => {
+  const live = normalizeFlow([...FLOW_A.slice(0, 6), { task: 'X', ts: '2026-10-29T06:00:00Z', stage: 'request' }]);
+  const groups = groupFlowFeed(live);
+  assert.deepEqual(groups.map((g) => g.task), ['X', 'A'], '최근 활동한 업무가 먼저');
+  const a = groups[1];
+  const progress = a.items.filter((x) => x.stage === 'progress');
+  assert.equal(progress.length, 1, '진행은 누적하지 않는다');
+  assert.match(progress[0].text, /research\.md/);
+  const after = groupFlowFeed(normalizeFlow(FLOW_A))[0];
+  assert.equal(after.items.filter((x) => x.stage === 'progress').length, 0);
+  assert.deepEqual(after.items.map((x) => x.stage).slice(-3), ['review_request', 'review_pass', 'deliver']);
+  const capped = groupFlowFeed(normalizeFlow(FLOW_A), { maxItems: 3 })[0];
+  assert.equal(capped.items.length, 3);
+  assert.ok(capped.hidden > 0);
+});
+
+test('planStages: stage.agent 매칭으로 대기·진행·완료·반려를 도출하고, 서버 status는 그대로 쓴다', () => {
+  const plan = { version: 1, stages: [
+    { id: 's1', title: '조사', dept: 'marketing', agent: 'mkt-1' },
+    { id: 's2', title: 'HTML', dept: 'dev', agent: 'dev-1', dependsOn: ['s1'] },
+    { id: 's3', title: '정리', dept: 'ops', agent: 'ops-1' },
+  ] };
+  const flow = normalizeFlow(FLOW_A.slice(0, 9));
+  assert.deepEqual(planStages(plan, flow, 'A').map((s) => s.status), ['done', 'run', 'wait']);
+  const rej = normalizeFlow([...FLOW_A, { task: 'A', ts: '2026-10-29T05:03:00Z', stage: 'review_reject', to: 'dev' }]);
+  assert.equal(planStages(plan, rej, 'A')[1].status, 'reject', '부서 단위 반려');
+  const explicit = { stages: [{ id: 'a', agent: 'x', status: '완료' }, { id: 'b', agent: 'y', status: 'running' }] };
+  assert.deepEqual(planStages(explicit, [], 'A').map((s) => s.status), ['done', 'run']);
+  assert.deepEqual(planStages(null, flow, 'A'), []);
+});
+
+test('attention: since 오름차순, 직원별 대표 아이콘(사용자 확인 > 답변 > 공백), 제목 접두', () => {
+  const list = normalizeAttention([
+    { kind: 'gap', agent: 'chief', task: 'A', since: '2026-10-29T05:00:00Z', text: 'HTML 작성 가능한 부서 없음' },
+    { kind: 'reply', agent: 'dev-1', runId: 'r2', since: '2026-10-29T05:02:00Z', text: '어느 색?' },
+    { kind: 'approve', agent: 'chief', task: 'A', since: '2026-10-29T05:01:00Z', text: '' },
+    { kind: 'weird', agent: 'x' },
+  ]);
+  assert.deepEqual(list.map((a) => a.kind), ['gap', 'approve', 'reply']);
+  const map = attentionByAgent(list);
+  assert.equal(map.get('chief').top.kind, 'approve');
+  assert.equal(map.get('chief').items.length, 2);
+  assert.equal(map.get('dev-1').top.kind, 'reply');
+  assert.equal(titleWithAttention('AGENT HQ', 3), '(3) 답변 필요 · AGENT HQ');
+  assert.equal(titleWithAttention('AGENT HQ', 0), 'AGENT HQ');
+  const seen = new Set([attentionKey(list[0])]);
+  assert.deepEqual(freshAttention(list, seen).map((a) => a.kind), ['approve', 'reply']);
+  // 서버가 attention을 주지 않으면 needsReply run으로 대신한다
+  const fallback = normalizeAttention(undefined, [
+    { id: 'r1', target: 'chief', needsReply: true, status: 'done', endedAt: '2026-10-29T05:00:00Z' },
+    { id: 'r3', agentId: 'dev-1', needsReply: true, status: 'running' },
+  ]);
+  assert.deepEqual(fallback.map((a) => [a.kind, a.agent, a.runId]), [['reply', 'chief', 'r1']]);
+});
+
+test('normalizeState: flow·attention·gaps를 싣는다', () => {
+  const s = normalizeState({
+    flow: FLOW_A,
+    attention: [{ kind: 'approve', agent: 'chief', task: 'A', since: '2026-10-29T05:02:00Z' }],
+    tasks: [{ id: 'A', status: 'review', plan: { stages: [], gaps: [{ need: 'HTML 작성', suggestion: '개발부 추가 권장' }] } }],
+  });
+  assert.equal(s.flow.length, FLOW_A.length);
+  assert.equal(s.hasFlow, true);
+  assert.equal(s.attention.length, 1);
+  assert.deepEqual(s.gaps.map((g) => [g.task, g.need, g.suggestion]), [['A', 'HTML 작성', '개발부 추가 권장']]);
+  assert.equal(normalizeState({}).hasFlow, false);
+  assert.deepEqual(collectGaps({ gaps: ['문자열 공백'], tasks: [{ id: 'B', gaps: [{ need: '문자열 공백' }] }] }).map((g) => g.need), ['문자열 공백', '문자열 공백']);
+});
+
+test('산출물: 목록 정규화·필터, 파일 분류(보고서·회의록·계획·부서별·검토)', () => {
+  const list = normalizeOutputs({ tasks: [
+    { id: '2026-10-28/old', title: '예전 업무', status: 'done', departments: ['research'] },
+    { id: '2026-10-29/landing', title: '랜딩 페이지', status: 'review', departments: ['marketing', 'dev'] },
+  ] });
+  assert.deepEqual(list.map((t) => t.id), ['2026-10-29/landing', '2026-10-28/old']);
+  assert.equal(list[0].date, '2026-10-29');
+  assert.equal(filterOutputs(list, { q: '랜딩' }).length, 1);
+  assert.equal(filterOutputs(list, { dept: 'research' })[0].id, '2026-10-28/old');
+  assert.equal(filterOutputs(list, { status: 'review', date: '2026-10-29' }).length, 1);
+  assert.equal(filterOutputs(list, { date: '2026-10-27' }).length, 0);
+  assert.deepEqual(normalizeOutputs([{ id: 'a' }, null]).map((t) => t.title), ['a']);
+
+  const g = groupOutputFiles({ files: [
+    { path: 'outputs/2026-10-29/landing/report.md', name: 'report.md' },
+    { path: 'outputs/2026-10-29/landing/meeting.md', name: 'meeting.md' },
+    { path: 'outputs/2026-10-29/landing/plan.json', name: 'plan.json' },
+    { path: 'outputs/2026-10-29/landing/brief.md', name: 'brief.md' },
+    { path: 'outputs/2026-10-29/landing/marketing/research.md', name: 'research.md' },
+    { path: 'outputs/2026-10-29/landing/dev/index.html', name: 'index.html' },
+    { path: 'outputs/2026-10-29/landing/reviews/fact-checker.md', name: 'fact-checker.md' },
+    { path: 'outputs/2026-10-29/landing/notes.txt', name: 'notes.txt' },
+    { name: 'chart.png', dept: 'dev' },
+  ] }, '2026-10-29/landing');
+  assert.equal(g.report.name, 'report.md');
+  assert.equal(g.meeting.name, 'meeting.md');
+  assert.equal(g.plan.name, 'plan.json');
+  assert.equal(g.brief.name, 'brief.md');
+  assert.deepEqual(g.reviews.map((f) => f.name), ['fact-checker.md']);
+  assert.deepEqual(g.common.map((f) => f.name), ['notes.txt']);
+  assert.deepEqual(g.depts.map(([d, fs]) => [d, fs.map((f) => f.name)]), [['marketing', ['research.md']], ['dev', ['index.html', 'chart.png']]]);
+  assert.equal(g.depts[1][1][1].path, '2026-10-29/landing/chart.png');
+});
+
+test('fileKind·parseTags·safeColor', () => {
+  assert.equal(fileKind('a.md'), 'markdown');
+  assert.equal(fileKind('A.HTML'), 'html');
+  assert.equal(fileKind('x.json'), 'json');
+  assert.equal(fileKind('t.csv'), 'text');
+  assert.equal(fileKind('p.png'), 'binary');
+  assert.equal(fileKind('noext'), 'binary');
+  assert.deepEqual(parseTags(' 자료조사, HTML·웹 문서,,자료조사\n엑셀 '), ['자료조사', 'HTML·웹 문서', '엑셀']);
+  assert.equal(safeColor('#38bdf8'), '#38bdf8');
+  assert.equal(safeColor('red;background:url(x)'), '#38bdf8');
+  assert.equal(safeColor(undefined, '#000000'), '#000000');
+});
+
+test('index.html: 뷰 탭 4개(관제·사무실·조직·산출물)와 패널·사용자 확인·역량 공백 대화상자', async () => {
+  const html = await readFile(path.join(PUBLIC, 'index.html'), 'utf8');
+  assert.deepEqual(VIEWS, ['control', 'office', 'org', 'outputs']);
+  const tabs = [...html.matchAll(/role="tab"[^>]*data-view="([a-z]+)"[^>]*>([^<]+)</g)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(tabs, [['control', '관제'], ['office', '사무실'], ['org', '조직'], ['outputs', '산출물']]);
+  for (const v of ['viewControl', 'viewOffice', 'viewOrg', 'viewOutputs']) assert.match(html, new RegExp(`id="${v}" role="tabpanel"`));
+  for (const id of ['approveDialog', 'approveOk', 'approveReject', 'approveFeedback', 'gapDialog', 'gapGoOrg', 'feedDetailBtn', 'notifyBtn', 'attnStrip', 'outQ', 'outDate', 'outDept', 'outStatus', 'handoffChecks']) {
+    assert.match(html, new RegExp(`id="${id}"`), id);
+  }
+  assert.match(html, /id="feedDetailBtn" aria-pressed="false"/, '상세 보기는 기본 꺼짐');
+  assert.match(html, /id="notifyBtn" aria-pressed="false"/, '브라우저 알림은 기본 꺼짐');
+  assert.match(html, /<label for="approveFeedback"/);
+});
+
+test('app.js: html 미리보기는 스크립트를 막은 sandbox iframe이고 srcdoc·원문 innerHTML을 쓰지 않는다', async () => {
+  const src = await readFile(path.join(PUBLIC, 'app.js'), 'utf8');
+  assert.match(src, /setAttribute\('sandbox', ''\)/);
+  assert.doesNotMatch(src, /allow-scripts|allow-same-origin/);
+  assert.doesNotMatch(src, /srcdoc/i);
+  assert.doesNotMatch(src, /innerHTML\s*=\s*text\b/);
+  // 마지막 탭·상세 보기·알림 선택은 localStorage(try/catch 래퍼)로만 기억한다
+  assert.match(src, /store\('ai-office-view', ui\.view\)/);
+  assert.match(src, /function store\(key, value\) \{\n {2}try \{/);
+  assert.match(src, /store\('ai-office-notify'/);
+  // 승인·반려 API(SPEC)
+  assert.match(src, /\/api\/tasks\/\$\{encodeURIComponent\(st\.taskId\)\}\/approve/);
+  assert.match(src, /\/api\/tasks\/\$\{encodeURIComponent\(st\.taskId\)\}\/reject`, \{ feedback \}/);
+  assert.match(src, /\/api\/outputs\/file\?path=/);
+});
+
+test('taskSteps: 서버 단계 표시줄(task.steps)을 정본으로 쓰되, 반려 후 다시 진행 중이면 되돌아간 단계를 현재로', () => {
+  const server = ['done', 'done', 'done', 'done', 'done', 'current', 'todo', 'todo'].map((state, i) => ({ key: FLOW_STEPS[i].key, state }));
+  // 피드가 잘려 앞 단계 항목이 없어도 서버 상태를 그대로 쓴다
+  const plain = taskSteps({ id: 'P', status: 'active', steps: server }, []);
+  assert.deepEqual(plain.steps.map((s) => s.state), server.map((s) => s.state));
+  assert.equal(plain.current, 5);
+  const flow = normalizeFlow([
+    { task: 'Q', ts: '1', stage: 'done', actor: 'dev-2' }, { task: 'Q', ts: '2', stage: 'review_reject', to: 'dev' },
+    { task: 'Q', ts: '3', stage: 'accept', actor: 'dev-2' }, { task: 'Q', ts: '4', stage: 'progress', actor: 'dev-2' },
+  ]);
+  const st = taskSteps({ id: 'Q', status: 'active', steps: server, rejects: 1 }, flow);
+  assert.equal(st.steps[st.current].label, '진행');
+  assert.equal(st.steps[5].state, 'done', '이미 거친 검토는 완료로');
+  assert.equal(st.rejects, 1);
+  assert.equal(taskSteps({ id: 'R', stage: 'user' }, []).steps[6].state, 'current', 'task.stage는 단계 key도 받는다');
+});
+
+test('meetingAttendees: 흐름의 명시 회의(attendees·ended)와 [회의] 호출 대상(target)', () => {
+  const now = Date.parse('2026-10-29T05:10:00Z');
+  const flow = [
+    { ts: '2026-10-29T05:00:00Z', task: 'm1', stage: 'meeting', from: 'chief', to: 'chief', attendees: ['mkt-1', 'dev-2'] },
+    { ts: '2026-10-29T05:01:00Z', task: 'm2', stage: 'meeting', from: 'chief', to: 'chief', attendees: ['res-1'] },
+    { ts: '2026-10-29T05:02:00Z', task: 'm2', stage: 'meeting', from: 'chief', to: 'chief', ended: true },
+    { ts: '2026-10-29T05:03:00Z', task: 'm3', stage: 'meeting', from: 'chief', to: 'ops', target: 'ops-1' },
+  ];
+  assert.deepEqual([...meetingAttendees([], flow, now)].sort(), ['dev-2', 'mkt-1', 'ops-1']);
+});
+
+test('planStages: 서버 상태값(pending·active·done·rejected)을 화면 상태로', () => {
+  const plan = { stages: ['pending', 'active', 'done', 'rejected'].map((status, i) => ({ id: `s${i}`, agent: `a${i}`, status })) };
+  assert.deepEqual(planStages(plan, [], 'T').map((s) => s.status), ['wait', 'run', 'done', 'reject']);
+});
+
+test('반려 문구 조사: 받침이 있으면 으로, 없거나 ㄹ 받침이면 로', () => {
+  assert.equal(withRo('진행'), '진행으로');
+  assert.equal(withRo('하달'), '하달로');
+  assert.equal(withRo('사용자 확인'), '사용자 확인으로');
+  assert.equal(withRo('검토'), '검토로');
+});
+
+test('html 미리보기 blob: 맨 앞(doctype 뒤)에 CSP meta를 넣어 외부 요청·스크립트를 막는다', () => {
+  assert.equal(withPreviewCsp('<p>x</p>'), `${PREVIEW_META_CSP}<p>x</p>`);
+  assert.equal(withPreviewCsp('\uFEFF  <!DOCTYPE html><html><img src="http://x/b.png">'), `  <!DOCTYPE html>${PREVIEW_META_CSP}<html><img src="http://x/b.png">`);
+  assert.match(PREVIEW_META_CSP, /default-src 'none'/);
+  assert.doesNotMatch(PREVIEW_META_CSP.replace('http-equiv', ''), /script-src|https?:/);
 });

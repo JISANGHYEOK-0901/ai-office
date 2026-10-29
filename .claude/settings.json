@@ -1,4 +1,18 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(node scripts/office.mjs task *)",
+      "Bash(node scripts/office.mjs flow *)",
+      "Bash(node scripts/office.mjs meeting *)",
+      "Bash(node scripts/office.mjs plan *)",
+      "Bash(node scripts/codex-review.mjs *)",
+      "PowerShell(node scripts/office.mjs task *)",
+      "PowerShell(node scripts/office.mjs flow *)",
+      "PowerShell(node scripts/office.mjs meeting *)",
+      "PowerShell(node scripts/office.mjs plan *)",
+      "PowerShell(node scripts/codex-review.mjs *)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -8,6 +22,14 @@
             "command": "node",
             "args": [
               "${CLAUDE_PROJECT_DIR}/hooks/office-event.mjs"
+            ],
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/hooks/session-context.mjs"
             ],
             "timeout": 5
           }
@@ -37,6 +59,14 @@
             "command": "node",
             "args": [
               "${CLAUDE_PROJECT_DIR}/hooks/office-event.mjs"
+            ],
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/hooks/chief-guard.mjs"
             ],
             "timeout": 5
           }

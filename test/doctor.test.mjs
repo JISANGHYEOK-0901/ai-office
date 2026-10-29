@@ -183,8 +183,10 @@ test('doctor: 사용 중인 포트는 경고(종료 코드는 그대로 0)', asy
 });
 
 test('doctor: 응답 없는 명령은 타임아웃 후 경고로 처리한다', async (t) => {
+  // 제한 시간은 모든 점검 명령에 같이 걸린다. 너무 짧으면 전체 테스트 병렬 실행 중 가짜 바이너리의
+  // 정상 응답(--version 등)까지 시간 초과로 떨어져 간헐 실패하므로 여유를 둔다(멈춘 명령은 어차피 끝까지 기다린다)
   const f = setup(t);
-  const result = await runDoctor({ env: cleanEnv({ CLAUDE_BIN: f.claude, CODEX_BIN: f.codex, FAKE_CLAUDE_AUTH: 'hang' }), port: await freePort(), timeoutMs: 300 });
+  const result = await runDoctor({ env: cleanEnv({ CLAUDE_BIN: f.claude, CODEX_BIN: f.codex, FAKE_CLAUDE_AUTH: 'hang' }), port: await freePort(), timeoutMs: 1500 });
   const auth = byId(result, 'claude-auth');
   assert.equal(auth.status, 'warn');
   assert.match(auth.message, /응답하지 않았습니다/);

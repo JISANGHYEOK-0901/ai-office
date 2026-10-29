@@ -72,7 +72,11 @@ test('index.html에 토큰이 주입되고 GET /api/state가 동작한다', { sk
   assert.ok(m, '토큰 자리표시자가 치환되어야 한다');
   assert.equal(m[1], handle.token);
   assert.ok(!page.text.includes('__OFFICE_TOKEN__'));
-
+  // 화면 자체의 CSP: 같은 출처 스크립트만, 산출물 html 미리보기는 blob: iframe만
+  const csp = page.headers['content-security-policy'] || '';
+  assert.match(csp, /script-src 'self'(;|$)/);
+  assert.match(csp, /frame-src blob:/);
+  assert.match(csp, /connect-src 'self'/);
 
   const state = await request('GET', '/api/state');
   assert.equal(state.status, 200);

@@ -27,6 +27,7 @@
       <div class="top-right">
         <time class="clock" id="clock" aria-label="현재 시각">--:--:--</time>
         <span class="conn" id="conn" role="status" aria-live="polite"><i aria-hidden="true"></i><span>연결 중…</span></span>
+        <button type="button" class="btn btn-sm" id="notifyBtn" aria-pressed="false" title="사용자 의견이 필요할 때 브라우저 알림 받기">알림 꺼짐</button>
         <button type="button" class="btn btn-sm" id="companyBtn">회사 설정</button>
         <button type="button" class="btn btn-sm theme-toggle" id="themeToggle" aria-label="화면 테마 전환">
           <span aria-hidden="true" class="theme-icon"></span><span id="themeLabel">NEON</span>
@@ -49,6 +50,8 @@
       <div class="view-tabs" role="tablist" aria-label="화면 보기">
         <button type="button" role="tab" id="tabControl" aria-controls="viewControl" aria-selected="true" data-view="control">관제</button>
         <button type="button" role="tab" id="tabOffice" aria-controls="viewOffice" aria-selected="false" data-view="office">사무실</button>
+        <button type="button" role="tab" id="tabOrg" aria-controls="viewOrg" aria-selected="false" data-view="org">조직</button>
+        <button type="button" role="tab" id="tabOutputs" aria-controls="viewOutputs" aria-selected="false" data-view="outputs">산출물</button>
       </div>
       <button type="button" class="btn" id="addDeptBtn">+ 부서 추가</button>
     </div>
@@ -69,6 +72,7 @@
             <span class="win-ctl" aria-hidden="true"></span>
           </div>
           <div class="win-body">
+            <div class="attn-strip" id="attnStrip" aria-label="사용자 확인이 필요한 항목"></div>
             <div class="dept-grid" id="deptGrid"></div>
           </div>
         </section>
@@ -90,11 +94,53 @@
             <p class="office-caption" id="officeCaption" aria-live="polite"></p>
           </div>
         </section>
+
+        <section class="view win" id="viewOrg" role="tabpanel" aria-labelledby="tabOrg" hidden>
+          <div class="win-bar">
+            <h2>ORGANIZATION</h2>
+            <span class="win-sub">부서·직원 관리 · 역량과 협조 관계</span>
+            <span class="win-ctl" aria-hidden="true"></span>
+          </div>
+          <div class="win-body org-view" id="orgView"></div>
+        </section>
+
+        <section class="view win" id="viewOutputs" role="tabpanel" aria-labelledby="tabOutputs" hidden>
+          <div class="win-bar">
+            <h2>OUTPUTS</h2>
+            <span class="win-sub" id="outSub">업무별 산출물</span>
+            <span class="win-ctl" aria-hidden="true"></span>
+          </div>
+          <div class="win-body">
+            <form class="out-filters" id="outFilters" role="search" aria-label="산출물 검색·필터" autocomplete="off">
+              <label class="of-q">검색
+                <input type="search" id="outQ" placeholder="업무 제목·id">
+              </label>
+              <label>날짜
+                <select id="outDate"><option value="">전체</option></select>
+              </label>
+              <label>부서
+                <select id="outDept"><option value="">전체</option></select>
+              </label>
+              <label>상태
+                <select id="outStatus">
+                  <option value="">전체</option><option value="active">진행</option><option value="review">사용자 확인</option>
+                  <option value="done">완료</option><option value="blocked">막힘</option>
+                </select>
+              </label>
+            </form>
+            <div class="out-layout" id="outLayout">
+              <ul class="out-list" id="outList" aria-label="업무 목록"></ul>
+              <section class="out-detail" id="outDetail" aria-live="polite" tabindex="-1"></section>
+            </div>
+          </div>
+        </section>
       </main>
 
       <aside class="col col-right" aria-label="실시간 정보">
         <section class="win panel-feed" aria-labelledby="feedTitle">
-          <div class="win-bar"><h2 id="feedTitle">실시간 피드</h2><span class="win-sub" id="feedCount"></span><span class="win-ctl" aria-hidden="true"></span></div>
+          <div class="win-bar"><h2 id="feedTitle">실시간 피드</h2><span class="win-sub" id="feedCount"></span>
+            <button type="button" class="btn btn-sm feed-toggle" id="feedDetailBtn" aria-pressed="false" title="도구 호출 이벤트(명령은 가린 요약)를 봅니다">상세 보기</button>
+            <span class="win-ctl" aria-hidden="true"></span></div>
           <ol class="win-body feed" id="feed" aria-live="off"></ol>
         </section>
         <section class="win panel-tasks" aria-labelledby="tasksTitle">
@@ -142,6 +188,13 @@
         <label class="span-2"><span class="lbl">부서 공통 지침 <small class="help-inline">이 부서 모든 직원의 지침 파일에 들어갑니다(최대 4000자)</small></span>
           <textarea name="instructions" rows="4" maxlength="4000" placeholder="예: 모든 수치에 출처와 기준일을 단다."></textarea>
         </label>
+        <label class="span-2"><span class="lbl">역량 <small class="help-inline">쉼표로 구분 — 비서실장이 분담을 정할 때 씁니다. 예: 자료조사, HTML·웹 문서, 엑셀</small></span>
+          <input name="capabilities" maxlength="600" placeholder="자료조사, 보고서 작성">
+        </label>
+        <fieldset class="span-2" id="handoffField">
+          <legend>결과를 주로 넘기는 부서 <small class="help-inline">협조 순서의 기본값</small></legend>
+          <div class="tool-checks" id="handoffChecks"></div>
+        </fieldset>
         <fieldset>
           <legend>엔진</legend>
           <label class="inline"><input type="radio" name="engine" value="claude" checked> Claude (실행)</label>
@@ -322,6 +375,75 @@
       <div class="modal-actions">
         <button type="submit" class="btn" value="cancel">취소</button>
         <button type="submit" class="btn btn-danger" value="ok" id="confirmOk">확인</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 사용자 확인(승인·반려) -->
+  <dialog id="approveDialog" class="modal modal-wide win" aria-labelledby="approveTitle">
+    <form method="dialog" id="approveForm" class="modal-form">
+      <div class="win-bar"><h2 id="approveTitle">사용자 확인</h2><span class="win-sub" id="approveSub"></span><span class="win-ctl" aria-hidden="true"></span></div>
+      <div class="win-body approve-body">
+        <div id="approveSteps"></div>
+        <div class="approve-grid">
+          <section aria-labelledby="apvReportTitle">
+            <h3 class="sub-title" id="apvReportTitle">보고서 <span>report.md</span></h3>
+            <div class="doc-box" id="approveReport"></div>
+          </section>
+          <section aria-labelledby="apvFilesTitle">
+            <h3 class="sub-title" id="apvFilesTitle">산출물</h3>
+            <ul class="file-list" id="approveFiles"></ul>
+            <div class="file-preview" id="approvePreview"></div>
+          </section>
+        </div>
+        <label for="approveFeedback" class="feedback-label"><span class="lbl">반려 피드백 <small class="help-inline">반려하면 비서실장이 이 내용으로 다시 배정합니다</small></span></label>
+        <textarea id="approveFeedback" rows="3" maxlength="4000" placeholder="예: 경쟁사 2곳을 더 넣고, 표의 기준일을 밝혀 주세요."></textarea>
+        <p class="form-error" id="approveError" role="alert" hidden></p>
+      </div>
+      <div class="modal-actions">
+        <span class="thread-status" id="approveStatus" role="status"></span>
+        <button type="button" class="btn" data-close>닫기</button>
+        <button type="button" class="btn btn-danger" id="approveReject">반려</button>
+        <button type="button" class="btn btn-primary" id="approveOk">승인</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 역량 공백 -->
+  <dialog id="gapDialog" class="modal modal-sm win" aria-labelledby="gapTitle">
+    <form method="dialog" class="modal-form">
+      <div class="win-bar"><h2 id="gapTitle">역량 공백</h2><span class="win-ctl" aria-hidden="true"></span></div>
+      <div class="win-body">
+        <p id="gapText"></p>
+        <p class="help">필요한 역량을 가진 근무중 부서가 없어 이 단계는 진행하지 못했습니다. 비서실장은 대신하지 않고 보고서에 공백을 적습니다.</p>
+      </div>
+      <div class="modal-actions">
+        <button type="submit" class="btn" value="close">닫기</button>
+        <button type="button" class="btn btn-primary" id="gapGoOrg">조직 탭으로</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 대화 보기·이어서 답하기 -->
+  <dialog id="threadDialog" class="modal modal-wide win" aria-labelledby="threadTitle">
+    <form method="dialog" id="threadForm" class="modal-form thread-form">
+      <div class="win-bar"><h2 id="threadTitle">대화</h2><span class="win-sub" id="threadSub"></span><span class="win-ctl" aria-hidden="true"></span></div>
+      <div class="win-body thread-body"><ol class="thread" id="threadList" aria-live="polite"></ol></div>
+      <div class="thread-compose">
+        <label for="threadPrompt" class="thread-label">답장 <span class="help-inline">답변 내용 또는 '기본값으로 진행'</span></label>
+        <textarea id="threadPrompt" rows="3" maxlength="20000" placeholder="질문에 대한 답을 적어 주세요. 예: 1번 전부, 2번 국내, B로 진행"></textarea>
+        <p class="help" id="threadHint" hidden></p>
+        <p class="form-error" id="threadError" role="alert" hidden></p>
+        <div class="thread-row">
+          <label class="run-model" id="threadModelRow">모델
+            <select id="threadModel">
+              <option value="">이전과 같게</option><option value="haiku">haiku</option><option value="sonnet">sonnet</option><option value="opus">opus</option>
+            </select>
+          </label>
+          <span class="thread-status" id="threadStatus" role="status"></span>
+          <button type="button" class="btn" data-close>닫기</button>
+          <button type="submit" class="btn btn-primary" id="threadSend" value="default">보내기</button>
+        </div>
       </div>
     </form>
   </dialog>

@@ -321,6 +321,7 @@ test('shellWriteTarget(최선 노력): 리다이렉션·tee·rm·mv·cp 대상·
     'cd "/Users/kim/ai office"; git commit -am x',
     'node -e "require(\'fs\').writeFileSync(\'/Users/kim/ai office/x\', 1)"',
     'sed -i s/a/b/ "/Users/kim/ai office/x"',
+    'bash -c "rm -rf \'/Users/kim/ai office/lib\'"',
   ]) assert.ok(hit(c), c);
   for (const c of [
     'cat "/Users/kim/ai office/README.md"',
@@ -341,6 +342,8 @@ test('shellWriteTarget: Windows 경로(platform 주입)·PowerShell 명령·대�
   assert.ok(hit('Copy-Item a.txt -Destination "$env:USERPROFILE\\ai office\\b.txt"'));
   assert.ok(hit('echo x > "C:/Users/Kim/ai office/a.txt"'));
   assert.ok(hit('del ..\\"ai office"\\x'));
+  assert.ok(hit('cmd /c "del C:\\Users\\Kim\\ai office\\x"') || hit("cmd /c 'del \"C:\\Users\\Kim\\ai office\\x\"'"));
+  assert.ok(hit('powershell -Command "Remove-Item \'C:\\Users\\Kim\\ai office\\lib\' -Recurse"'));
   assert.equal(hit('Get-Content "C:\\Users\\Kim\\ai office\\README.md"'), null);
   assert.equal(hit('Remove-Item "D:\\ai office\\x"'), null, '다른 드라이브');
   const decision = decideRepoGuard({ tool_name: 'PowerShell', tool_input: { command: 'Out-File -FilePath "C:\\Users\\Kim\\ai office\\x"' }, cwd: o.cwd }, { program: o.program, root: o.cwd, platform: 'win32', home: o.home });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 조직 정본 → 에이전트 파일 생성, 작업 공간 생성물(수칙·설정·스킬·스크립트 연결) 갱신.
-// 사용법: node scripts/sync-agents.mjs --write | --check [--workspace <경로>]
+// 사용법: node scripts/sync-agents.mjs --write | --check [--workspace <경로>]  (--write와 --check를 함께 주면 검사만 한다: npm run sync -- --check)
 import { WorkspaceError, resolveWorkspace } from '../lib/paths.mjs';
 import { syncAgents } from '../lib/sync.mjs';
 import { isWorkspaceInitialized, syncWorkspace } from '../lib/workspace.mjs';
@@ -21,7 +21,9 @@ for (let i = 0; i < args.length; i++) {
     process.exit(64);
   }
 }
-if (write === check || (workspace !== null && !workspace)) {
+// npm run sync(= --write)에 -- --check를 붙이면 검사만 한다
+if (check) write = false;
+if ((!write && !check) || (workspace !== null && !workspace)) {
   console.error(USAGE);
   process.exit(64);
 }

@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { layoutOffice, routeBetween, hashString, lookFor, openReviewers, meetingAttendees, iconScale, ATTENTION_ICONS } from '../dashboard/public/office.js';
+import { layoutOffice, routeBetween, hashString, lookFor, openReviewers, meetingAttendees, iconScale, ATTENTION_ICONS, meetingSeats, activeRoom } from '../dashboard/public/office.js';
 import {
   normalizeState, planBulkAgents, agentPayloadFromPlan, kebab, validId, nextAgentId, titleFor,
   timeAgo, esc, findPresetFor, presetList, runAgentId,
@@ -13,7 +13,9 @@ import {
   titleWithAttention, freshAttention, collectGaps, normalizeOutputs, filterOutputs, fileKind, groupOutputFiles,
   parseTags, safeColor, stepIndexOf, FLOW_STEPS, VIEWS,
   withRo, withPreviewCsp, PREVIEW_META_CSP,
+  classifyChiefInput, chiefInputAction, normalizeMeetings, meetingBadge, STAGE_LABEL, PLAN_STATUS_LABEL,
 } from '../dashboard/public/app.js';
+import { FLOW_STAGES } from '../lib/flow.mjs';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dashboard', 'public');
 
@@ -566,4 +568,130 @@ test('html 미리보기 blob: 맨 앞(doctype 뒤)에 CSP meta를 넣어 외부 
   assert.equal(withPreviewCsp('\uFEFF  <!DOCTYPE html><html><img src="http://x/b.png">'), `  <!DOCTYPE html>${PREVIEW_META_CSP}<html><img src="http://x/b.png">`);
   assert.match(PREVIEW_META_CSP, /default-src 'none'/);
   assert.doesNotMatch(PREVIEW_META_CSP.replace('http-equiv', ''), /script-src|https?:/);
+});
+
+// ───── 회의실 연출(하달 킥오프) ─────
+test('meetingSeats: 참석자 수별 좌석 — 상석은 따로, 11명까지 테이블, 넘치면 방 안에 서고 그다음 복도, 자리보다 많으면 비켜 겹친다', () => {
+  const room = layoutOffice(makeDepts([3])).meeting;
+  const inRoom = (p) => p.x >= room.x && p.x <= room.x + room.w && p.y >= room.y && p.y <= room.y + room.h;
+  const key = (p) => `${p.x},${p.y}`;
+  const zero = meetingSeats(0, room);
+  assert.deepEqual(zero.spots, []);
+  assert.ok(inRoom(zero.head), '상석은 회의실 안');
+  for (const n of [1, 2, 5, 11]) {
+    const { head, spots } = meetingSeats(n, room);
+    assert.equal(spots.length, n);
+    assert.ok(spots.every((p) => p.kind === 'seat' && inRoom(p)), `${n}명: 모두 테이블 좌석`);
+    assert.equal(new Set(spots.map(key)).size, n, `${n}명: 자리가 겹치지 않는다`);
+    assert.ok(!spots.some((p) => key(p) === key(head)), '상석은 비서실장 몫');
+  }
+  // 상석 가까운 자리부터 채운다
+  const two = meetingSeats(2, room).spots;
+  assert.ok(two.every((p) => p.x < room.x + room.w / 2));
+  const { spots: s20, capacity } = meetingSeats(20, room);
+  assert.equal(s20.filter((p) => p.kind === 'seat').length, 11);
+  assert.ok(s20.slice(11).every((p) => p.kind === 'stand' && inRoom(p)), '12번째부터는 방 안에 선다');
+  assert.equal(new Set(s20.map(key)).size, 20);
+  const full = meetingSeats(capacity, room).spots;
+  assert.equal(new Set(full.map(key)).size, capacity, '수용 인원까지는 모두 다른 자리');
+  assert.ok(full.some((p) => p.kind === 'hall' && p.y > room.y + room.h), '방이 차면 문 밖 복도에 선다');
+  const over = meetingSeats(capacity + 3, room).spots;
+  assert.equal(over.length, capacity + 3);
+  assert.notDeepEqual([over[capacity].x, over[capacity].y], [full[0].x, full[0].y], '넘치면 같은 자리를 비켜 선다');
+  // 좁은 화면(회의실이 다음 줄)에서도 같은 규칙
+  const narrow = layoutOffice(makeDepts([3]), { maxCols: 1 }).meeting;
+  assert.ok(meetingSeats(11, narrow).spots.every((p) => p.x >= narrow.x && p.x <= narrow.x + narrow.w));
+});
+
+test('activeRoom: 킥오프는 since~until 사이만(화면 시계), 실제 회의는 진행 중, 대기 수와 비서실장 참석', () => {
+  const t0 = Date.parse('2026-10-29T01:00:00.000Z');
+  const iso = (sec) => new Date(t0 + sec * 1000).toISOString();
+  const meetings = [
+    { task: 'a', kind: 'kickoff', attendees: ['chief', 'm-1', 'd-2'], since: iso(0), until: iso(8), title: '조사' },
+    { task: 'b', kind: 'kickoff', attendees: ['chief', 'm-2'], since: iso(8), until: iso(16), waiting: true, title: 'HTML' },
+  ];
+  assert.deepEqual(activeRoom(meetings, t0 + 1000), { attendees: ['m-1', 'd-2'], chief: true, title: '조사', kind: 'kickoff', waiting: 1 });
+  // 서버 상태가 늦게 와도 화면 시계로 다음 킥오프를 연다
+  assert.deepEqual(activeRoom(meetings, t0 + 9000), { attendees: ['m-2'], chief: true, title: 'HTML', kind: 'kickoff', waiting: 0 });
+  assert.deepEqual(activeRoom(meetings, t0 + 20_000), { attendees: [], chief: false, title: '', kind: null, waiting: 0 });
+  const real = [{ task: 'c', kind: 'meeting', attendees: ['chief', 'm-1'], since: iso(0) }, { task: 'd', kind: 'kickoff', attendees: ['chief', 'x'], since: iso(3), waiting: true }];
+  assert.deepEqual(activeRoom(real, t0 + 60_000), { attendees: ['m-1'], chief: true, title: 'c', kind: 'meeting', waiting: 1 });
+  assert.deepEqual(activeRoom(null, t0), { attendees: [], chief: false, title: '', kind: null, waiting: 0 });
+});
+
+test('normalizeMeetings·meetingBadge: 업무 묶음 머리에 킥오프 중 / 회의실 대기 / 회의 중', () => {
+  const t0 = Date.parse('2026-10-29T01:00:00.000Z');
+  const iso = (sec) => new Date(t0 + sec * 1000).toISOString();
+  const list = normalizeMeetings([
+    { task: 'a', kind: 'kickoff', attendees: ['chief', 'm-1', 3], since: iso(0), until: iso(8) },
+    { task: 'b', kind: 'kickoff', attendees: ['chief'], since: iso(8), until: iso(16), waiting: true },
+    { task: 'c', kind: 'meeting', attendees: ['chief'], since: iso(0) },
+    { task: 'd', kind: 'party', since: iso(0) }, null, { kind: 'kickoff' },
+  ]);
+  assert.equal(list.length, 3);
+  assert.deepEqual(list[0].attendees, ['chief', 'm-1']);
+  assert.equal(meetingBadge(list, 'a', t0 + 1000), '킥오프 중');
+  assert.equal(meetingBadge(list, 'b', t0 + 1000), '회의실 대기');
+  assert.equal(meetingBadge(list, 'b', t0 + 9000), '킥오프 중');
+  assert.equal(meetingBadge(list, 'a', t0 + 9000), '');
+  assert.equal(meetingBadge(list, 'c', t0 + 9000), '회의 중');
+  assert.equal(meetingBadge(list, 'zz', t0), '');
+  assert.deepEqual(normalizeState({ meetings: list }).meetings, list);
+  assert.deepEqual(normalizeState({}).meetings, []);
+});
+
+test('화면 문구: 모든 흐름 단계에 이름표가 있고 킥오프는 하달 단계, 산출물 없는 완료 단계는 경고 상태', () => {
+  for (const st of FLOW_STAGES) assert.ok(STAGE_LABEL[st], st);
+  assert.equal(STAGE_LABEL.kickoff, '하달 킥오프');
+  assert.equal(stepIndexOf('kickoff'), stepIndexOf('assign'));
+  const stages = planStages({ stages: [{ id: 's1', agent: 'a', status: 'done_missing_output' }, { id: 's2', agent: 'b', status: 'done' }] });
+  assert.deepEqual(stages.map((x) => x.status), ['missing', 'done']);
+  assert.equal(PLAN_STATUS_LABEL.missing, '완료(산출물 없음)');
+});
+
+// ───── 비서실장 입력창의 승인·반려 인식 ─────
+test('classifyChiefInput: 승인·반려 표현만 인식하고 질문·부정·혼합은 애매(실행으로)', () => {
+  for (const t of ['승인', '승인해', '승인합니다', '통과', 'OK', 'ok.', '좋아 승인', '승인!', '네, 승인해 주세요', ' 승인해줘 ']) {
+    assert.deepEqual(classifyChiefInput(t), { intent: 'approve' }, t);
+  }
+  assert.deepEqual(classifyChiefInput('반려 표가 틀렸어요'), { intent: 'reject', feedback: '표가 틀렸어요' });
+  assert.deepEqual(classifyChiefInput('다시 해 경쟁사 2곳 추가'), { intent: 'reject', feedback: '경쟁사 2곳 추가' });
+  assert.deepEqual(classifyChiefInput('수정해: 로고 색'), { intent: 'reject', feedback: '로고 색' });
+  assert.deepEqual(classifyChiefInput('다시 해줘 표 기준일 넣어'), { intent: 'reject', feedback: '표 기준일 넣어' });
+  assert.deepEqual(classifyChiefInput('반려합니다. 숫자 확인'), { intent: 'reject', feedback: '숫자 확인' });
+  assert.deepEqual(classifyChiefInput('반려'), { intent: 'reject', feedback: '' });
+  for (const t of ['', '   ', '승인하지 마', '승인 기준이 뭐야?', '반려할까?', '승인 말고 반려', '반려 말고 승인', '반려하지 마', '보고서 승인 요청서 작성해줘',
+    '경쟁사 조사해서 승인 받을 보고서 만들어', '다시하자', '수정해야 할 문서 목록 정리해줘', 'OK 그럼 다음 업무로 마케팅 조사해줘', null, undefined]) {
+    assert.deepEqual(classifyChiefInput(t), { intent: null }, String(t));
+  }
+});
+
+test('chiefInputAction: review 업무 1건이면 그 업무, 여러 건이면 고르기, 없거나 애매하면 기존대로 실행', () => {
+  const one = [{ id: '2026-10-29/a', status: 'review' }, { id: '2026-10-29/b', status: 'active' }];
+  const many = [{ id: '2026-10-29/a', status: 'review' }, { id: '2026-10-29/c', status: 'review' }];
+  assert.deepEqual(chiefInputAction('승인', one), { action: 'approve', taskId: '2026-10-29/a' });
+  assert.deepEqual(chiefInputAction('반려 표 기준일 추가', one), { action: 'reject', feedback: '표 기준일 추가', taskId: '2026-10-29/a' });
+  assert.deepEqual(chiefInputAction('승인', many), { action: 'approve', choices: ['2026-10-29/a', '2026-10-29/c'] });
+  assert.deepEqual(chiefInputAction('반려', many), { action: 'reject', feedback: '', choices: ['2026-10-29/a', '2026-10-29/c'] });
+  assert.deepEqual(chiefInputAction('승인', [{ id: '2026-10-29/b', status: 'active' }]), { action: 'run' }, 'review 업무가 없으면 실행으로');
+  assert.deepEqual(chiefInputAction('승인', []), { action: 'run' });
+  assert.deepEqual(chiefInputAction('경쟁사 가격 조사해줘', one), { action: 'run' }, '승인·반려가 아니면 실행으로');
+  assert.deepEqual(chiefInputAction('승인 기준이 뭐야?', one), { action: 'run' }, '애매하면 실행으로');
+  assert.deepEqual(chiefInputAction('승인', null), { action: 'run' });
+});
+
+test('app.js·index.html: 입력창 승인·반려는 확인 대화상자를 거쳐 승인·반려 API로 보내고, 여러 건이면 대상 업무를 고른다', async () => {
+  const src = await readFile(path.join(PUBLIC, 'app.js'), 'utf8');
+  const html = await readFile(path.join(PUBLIC, 'index.html'), 'utf8');
+  const submit = src.slice(src.indexOf('async function submitChief'), src.indexOf('async function submitChief') + 900);
+  assert.match(submit, /chiefInputAction\(prompt, S\.tasks\)/);
+  assert.ok(submit.indexOf('chiefDecision') < submit.indexOf("'/api/runs'"), '승인·반려 판정이 실행 전송보다 먼저');
+  const decision = src.slice(src.indexOf('async function chiefDecision'), src.indexOf('async function submitChief'));
+  assert.match(decision, /업무를 승인할까요\?/);
+  assert.match(decision, /confirmBox\(/);
+  assert.match(decision, /pickTaskBox\(/);
+  assert.match(decision, /\/approve`/);
+  assert.match(decision, /\/reject`, \{ feedback: act\.feedback \}/);
+  assert.match(html, /<dialog id="pickTaskDialog"/);
+  assert.match(html, /id="pickTaskList"/);
 });

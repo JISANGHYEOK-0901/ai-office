@@ -165,48 +165,105 @@ export function startSimulation({ root = repoRoot(), intervalMs = 1200, org, see
   let stopped = false;
 
   const emit = (ev) => {
+    const { task, ...rest } = ev;
     try {
-      appendEvent(root, { v: 1, ts: new Date().toISOString(), session, ...ev }, { file: DEMO_FILE });
+      // 업무에 묶지 않은 일상 업무는 task 필드를 두지 않는다
+      appendEvent(root, { v: 1, ts: new Date().toISOString(), session, ...rest, ...(task ? { task } : {}) }, { file: DEMO_FILE });
     } catch { /* 데모 기록 실패는 무시 */ }
   };
   const currentTask = () => tasks.filter((t) => t.status === 'active').at(-1)?.id;
+  const sessOf = (id) => tasks.find((t) => t.id === id)?.session ?? session;
+  const planTasks = () => tasks.filter((t) => t.status === 'active' && t.plan);
+  const cli = (task) => ({ engine: 'claude', session: 'office-cli', instance: 'office-cli', agent: 'chief', task });
 
-  function newTask() {
+  // 계획표: 서로 다른 부서 직원 2~3명. 둘째 단계는 첫 단계 결과를 이어받는다(협조 연출), 셋째는 병렬
+  function makePlan(id, title) {
+    const free = workers.filter((a) => !working.has(a.id) && !planTasks().some((t) => t.plan.stages.some((s) => s.agent === a.id && !s.done)));
+    const pool = free.length >= 2 ? free : workers;
+    const picked = [];
+    for (const a of [...pool].sort(() => rnd.next() - 0.5)) {
+      if (picked.length >= 3) break;
+      if (!picked.some((p) => p.department === a.department) || pool.length < 3) picked.push(a);
+    }
+    const count = Math.min(picked.length, rnd.int(2, 3));
+    if (!count) return null;
+    const stages = picked.slice(0, count).map((a, i) => ({
+      id: `s${i + 1}`,
+      title: a.specialty || '업무 처리',
+      dept: a.department,
+      agent: a.id,
+      output: `outputs/${id}/${a.department}/${a.id}-${i + 1}.md`,
+      dependsOn: i === 1 ? ['s1'] : [],
+    }));
+    return { task: id, goal: title, stages, gaps: [] };
+  }
+
+  function newTask({ plan = true } = {}) {
     taskSeq += 1;
     const title = TASK_TITLES[(taskSeq - 1) % TASK_TITLES.length];
     const id = `${kstDate()}/demo-${taskSeq}`;
-    tasks.push({ id, title, status: 'active' });
-    emit({ engine: 'claude', agent: 'chief', instance: session, kind: 'request', summary: `${title} 해줘` });
-    emit({ engine: 'claude', agent: 'chief', instance: session, kind: 'task.start', task: id, summary: title, title });
+    // 업무마다 비서실장 세션을 따로 둔다(실제로도 요청마다 실행이 따로다). 한 세션에 요청이 섞이면 대화 턴 기준 업무 묶기가 뒤 업무로 몰린다
+    const task = { id, title, status: 'active', plan: null, session: `${session}-t${taskSeq}` };
+    tasks.push(task);
+    emit({ engine: 'claude', session: task.session, agent: 'chief', instance: task.session, kind: 'request', summary: `${title} 해줘` });
+    emit({ engine: 'claude', session: task.session, agent: 'chief', instance: task.session, kind: 'task.start', task: id, summary: title, title });
+    if (!plan) return task;
+    const p = makePlan(id, title);
+    if (p) {
+      task.plan = { stages: p.stages.map((s) => ({ ...s, started: false, done: false })) };
+      // plan validate 통과와 같은 이벤트(화면은 이것으로 하달 킥오프를 연다)
+      emit({ ...cli(id), kind: 'plan.set', summary: `계획 확정: 단계 ${p.stages.length}개`, plan: p });
+    }
+    return task;
   }
 
-  function startWork(agent) {
+  // 계획 단계 중 앞 단계가 끝났고 담당이 쉬는 단계를 시작한다(한 번에 하나)
+  function startPlannedStage() {
+    for (const t of planTasks()) {
+      for (const s of t.plan.stages) {
+        if (s.started || working.has(s.agent) || !s.dependsOn.every((d) => t.plan.stages.find((x) => x.id === d)?.done)) continue;
+        const agent = workers.find((a) => a.id === s.agent);
+        if (!agent) continue;
+        s.started = true;
+        startWork(agent, t.id, s);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function startWork(agent, task, stage = null) {
     const instance = `${agent.id}-${Date.now().toString(36)}`;
-    working.set(agent.id, { instance, steps: rnd.int(3, 8), tool: null });
-    emit({ engine: 'claude', agent: 'chief', instance: session, kind: 'tool.start', tool: 'Agent', task: currentTask(),
-      summary: `${agent.id}: ${agent.specialty || '업무 처리'}` });
-    emit({ engine: 'claude', agent: agent.id, instance, kind: 'agent.start', task: currentTask() });
+    working.set(agent.id, { instance, steps: rnd.int(3, 8), tool: null, task, stage });
+    const desc = stage ? stage.title : agent.specialty || '업무 처리';
+    const sess = sessOf(task);
+    emit({ engine: 'claude', session: sess, agent: 'chief', instance: sess, kind: 'tool.start', tool: 'Agent', task, target: agent.id, desc,
+      summary: `${agent.id}: ${desc}` });
+    emit({ engine: 'claude', session: sess, agent: agent.id, instance, kind: 'agent.start', task });
   }
 
   function stepWork(agent) {
     const w = working.get(agent.id);
-    const task = currentTask();
+    const task = w.task;
+    const sess = sessOf(task);
     if (w.tool) {
-      emit({ engine: 'claude', agent: agent.id, instance: w.instance, kind: 'tool.end', tool: w.tool, task, summary: w.summary });
+      emit({ engine: 'claude', session: sess, agent: agent.id, instance: w.instance, kind: 'tool.end', tool: w.tool, task, summary: w.summary });
       w.tool = null;
       w.steps -= 1;
       if (w.steps <= 0) {
         working.delete(agent.id);
-        emit({ engine: 'claude', agent: agent.id, instance: w.instance, kind: 'agent.stop', task,
+        if (w.stage) w.stage.done = true;
+        emit({ engine: 'claude', session: sess, agent: agent.id, instance: w.instance, kind: 'agent.stop', task,
           summary: `${agent.specialty || '담당 업무'} 정리 완료` });
-        emit({ engine: 'claude', agent: 'chief', instance: session, kind: 'tool.end', tool: 'Agent', task,
+        emit({ engine: 'claude', session: sess, agent: 'chief', instance: sess, kind: 'tool.end', tool: 'Agent', task,
           summary: `${agent.id}: 완료` });
       }
       return;
     }
-    w.tool = rnd.pick(CLAUDE_TOOLS);
-    w.summary = rnd.pick(SUMMARIES[w.tool]);
-    emit({ engine: 'claude', agent: agent.id, instance: w.instance, kind: 'tool.start', tool: w.tool, task, summary: w.summary });
+    // 계획 단계의 마지막 작업은 계획한 산출물 파일 작성으로 보여준다
+    w.tool = w.stage && w.steps === 1 ? 'Write' : rnd.pick(CLAUDE_TOOLS);
+    w.summary = w.stage && w.steps === 1 ? w.stage.output : rnd.pick(SUMMARIES[w.tool]);
+    emit({ engine: 'claude', session: sess, agent: agent.id, instance: w.instance, kind: 'tool.start', tool: w.tool, task, summary: w.summary });
   }
 
   function startReview() {
@@ -215,22 +272,22 @@ export function startSimulation({ root = repoRoot(), intervalMs = 1200, org, see
     if (!idle.length || !task) return;
     const r = rnd.pick(idle);
     reviewing.add(r.id);
-    emit({ engine: 'codex', agent: r.id, instance: r.id, kind: 'review.start', task, summary: `검토 시작: outputs/${task}` });
+    emit({ engine: 'codex', session: sessOf(task), agent: r.id, instance: r.id, kind: 'review.start', task, summary: `검토 시작: outputs/${task}` });
     let steps = rnd.int(2, 4);
     const tick = () => {
       if (stopped) return;
       if (steps-- > 0) {
         const tool = rnd.pick(CODEX_TOOLS);
         const summary = tool === 'Bash' ? `rg -n "매출" outputs/${task}` : 'report.md 확인';
-        emit({ engine: 'codex', agent: r.id, instance: r.id, kind: 'tool.start', tool, task, summary });
+        emit({ engine: 'codex', session: sessOf(task), agent: r.id, instance: r.id, kind: 'tool.start', tool, task, summary });
         timers.add(setTimeout(() => {
-          emit({ engine: 'codex', agent: r.id, instance: r.id, kind: 'tool.end', tool, task, summary });
+          emit({ engine: 'codex', session: sessOf(task), agent: r.id, instance: r.id, kind: 'tool.end', tool, task, summary });
           tick();
         }, intervalMs));
         return;
       }
       const verdict = rnd.next() < 0.6 ? 'PASS' : rnd.next() < 0.85 ? 'FIX' : 'BLOCK';
-      emit({ engine: 'codex', agent: r.id, instance: r.id, kind: 'review.end', task, verdict, summary: `${verdict}: reviews/${r.id}.md` });
+      emit({ engine: 'codex', session: sessOf(task), agent: r.id, instance: r.id, kind: 'review.end', task, verdict, summary: `${verdict}: reviews/${r.id}.md` });
       reviewing.delete(r.id);
     };
     tick();
@@ -238,30 +295,30 @@ export function startSimulation({ root = repoRoot(), intervalMs = 1200, org, see
 
   // 업무 마무리: 검토 요청 → 비서실장 검토 통과 → 사용자 확인 대기(review). 화면의 결재 아이콘·사용자 확인 모달을 보여주려는 것이다.
   // 데모에서는 승인·반려를 보낼 수 없으므로, 확인 대기가 둘 이상 쌓이면 가장 오래된 것을 대표가 승인한 것처럼 끝낸다
-  function finishTask({ allowBlock = true } = {}) {
+  function finishTask({ allowBlock = true, task = null } = {}) {
     const waiting = tasks.filter((t) => t.status === 'review');
-    if (waiting.length >= 2) {
+    if (!task && waiting.length >= 2) {
       const w = waiting[0];
       w.status = 'done';
       emit({ engine: 'claude', session: 'office-server', instance: 'office-server', kind: 'flow.user_approve', task: w.id, summary: '사용자 승인' });
       emit({ engine: 'claude', session: 'office-server', instance: 'office-server', kind: 'task.update', task: w.id, status: 'done', summary: `${w.title}: review → done` });
       return;
     }
-    const active = tasks.filter((t) => t.status === 'active');
-    if (active.length < 2) return;
-    const t = active[0];
+    // 계획 단계가 모두 끝난 업무를 마무리한다
+    const t = task ?? planTasks().find((x) => x.plan.stages.every((s) => s.done));
+    if (!t) return;
     if (allowBlock && rnd.next() < 0.15) {
       t.status = 'blocked';
-      emit({ engine: 'claude', agent: 'chief', instance: session, kind: 'task.update', task: t.id, status: t.status, summary: `${t.title}: active → blocked` });
+      emit({ ...cli(t.id), kind: 'task.update', status: t.status, summary: `${t.title}: active → blocked` });
       return;
     }
-    const from = workers.length ? rnd.pick(workers).department : undefined;
-    const cli = { engine: 'claude', session: 'office-cli', instance: 'office-cli', agent: 'chief', task: t.id };
-    emit({ ...cli, kind: 'flow.review_request', ...(from ? { from } : {}) });
-    emit({ ...cli, kind: 'flow.review', verdict: 'pass', summary: '완료 기준 충족' });
-    emit({ ...cli, kind: 'flow.deliver', summary: '결과를 확인해 주세요' });
+    const from = t.plan?.stages.at(-1)?.dept ?? (workers.length ? rnd.pick(workers).department : undefined);
+    const c = cli(t.id);
+    emit({ ...c, kind: 'flow.review_request', ...(from ? { from } : {}) });
+    emit({ ...c, kind: 'flow.review', verdict: 'pass', summary: '완료 기준 충족' });
+    emit({ ...c, kind: 'flow.deliver', summary: '결과를 확인해 주세요' });
     t.status = 'review';
-    emit({ ...cli, kind: 'task.update', status: 'review', summary: `${t.title}: active → review` });
+    emit({ ...c, kind: 'task.update', status: 'review', summary: `${t.title}: active → review` });
   }
 
   // 이어서 답하기 연출: 직원이나 비서실장이 확인 질문으로 답을 끝낸 상황(데모에서는 답장을 보낼 수 없다)
@@ -275,27 +332,29 @@ export function startSimulation({ root = repoRoot(), intervalMs = 1200, org, see
   function tick() {
     // 전체의 20~35% 정도가 일하도록 유지한다
     const target = Math.max(2, Math.round(workers.length * (0.2 + rnd.next() * 0.15)));
-    if (working.size < target && workers.length) {
-      const free = workers.filter((a) => !working.has(a.id));
-      if (free.length) startWork(rnd.pick(free));
+    if (working.size < target && workers.length && !startPlannedStage()) {
+      // 계획 단계가 아닌 직원은 업무에 묶지 않은 일상 업무를 한다(계획 밖 배정 경고·협조 요청이 쌓이지 않게)
+      const planned = new Set(planTasks().flatMap((t) => t.plan.stages.filter((s) => !s.done).map((s) => s.agent)));
+      const free = workers.filter((a) => !working.has(a.id) && !planned.has(a.id));
+      if (free.length) startWork(rnd.pick(free), null);
     }
     for (const id of [...working.keys()]) {
       if (rnd.next() < 0.6) stepWork(workers.find((a) => a.id === id));
     }
     const roll = rnd.next();
-    if (roll < 0.04) newTask();
+    if (roll < 0.04 && planTasks().length < 4) newTask();
     else if (roll < 0.1) startReview();
     else if (roll < 0.13) finishTask();
     else if (roll < 0.145) askReply();
   }
 
   emit({ engine: 'claude', agent: 'chief', instance: session, kind: 'session.start', summary: 'demo' });
-  newTask();
+  // 처음 열었을 때도 결재 아이콘이 보이게 사용자 확인 대기 업무를 한 건 미리 만든다
+  finishTask({ allowBlock: false, task: newTask({ plan: false }) });
+  // 계획표가 있는 업무 둘: 하달 킥오프가 회의실 대기열에 차례로 열린다
   newTask();
   newTask();
   for (let i = 0; i < Math.min(4, workers.length); i++) tick();
-  // 처음 열었을 때도 결재·답장 아이콘이 보이게 한 건씩 미리 만든다
-  finishTask({ allowBlock: false });
   askReply();
   const timer = setInterval(tick, intervalMs);
 

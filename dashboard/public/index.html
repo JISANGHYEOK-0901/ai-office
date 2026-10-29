@@ -379,6 +379,18 @@
     </form>
   </dialog>
 
+  <!-- 입력창 승인·반려: 사용자 확인 대기 업무가 여러 건이면 대상을 고른다 -->
+  <dialog id="pickTaskDialog" class="modal modal-sm win" aria-labelledby="pickTaskTitle">
+    <form method="dialog" class="modal-form">
+      <div class="win-bar"><h2 id="pickTaskTitle">대상 업무 선택</h2><span class="win-ctl" aria-hidden="true"></span></div>
+      <div class="win-body"><p id="pickTaskText"></p><div id="pickTaskList" class="pick-list" role="radiogroup" aria-labelledby="pickTaskText"></div></div>
+      <div class="modal-actions">
+        <button type="submit" class="btn" value="cancel">취소</button>
+        <button type="submit" class="btn btn-primary" value="ok" id="pickTaskOk">선택</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- 사용자 확인(승인·반려) -->
   <dialog id="approveDialog" class="modal modal-wide win" aria-labelledby="approveTitle">
     <form method="dialog" id="approveForm" class="modal-form">

@@ -6,6 +6,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import http from 'node:http';
 import fsModule, { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import path, { dirname, join } from 'node:path';
@@ -25,8 +26,9 @@ const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostTool
 
 function tmp(t, prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
-  // Windows는 runner가 닫는 로그 스트림 등이 잠깐 남아 ENOTEMPTY·EBUSY가 날 수 있어 재시도한다
-  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  // Windows는 runner 로그 스트림이 비동기로 닫히기 전에 지우면 ENOTEMPTY가 난다.
+  // 동기 rmSync 재시도는 이벤트 루프를 막아 핸들이 닫히지 않으므로 비동기 rm으로 재시도한다
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return dir;
 }
 

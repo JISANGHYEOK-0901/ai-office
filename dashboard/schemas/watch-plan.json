@@ -1,0 +1,6 @@
+{
+  "type": "object", "properties": {
+    "agent": {"type": "string"}, "instructions": {"type": "string"},
+    "deliveryPrompt": {"type": "string"}, "question": {"type": "string"}
+  }, "required": ["agent", "instructions", "deliveryPrompt", "question"], "additionalProperties": false
+}

@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -167,13 +168,14 @@ test('validateOrg: capabilities·handoffs 형식 오류는 에러, 없는 handof
   assert.equal(validateOrg({ ...base, departments: [{ id: 'aa', name: 'A', capabilities: Array.from({ length: 21 }, (_, i) => `c${i}`) }] }).ok, false);
 });
 
-test('runner: 비서실장 실행에 조직도 주입, 길면 .office/orgmap.md와 --append-system-prompt-file', (t) => {
+test('runner: 비서실장 실행에 조직도 주입, 길면 .office/orgmap.md와 --append-system-prompt-file', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'ai-office-orgmap-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const writeOrg = (org) => {
     mkdirSync(join(root, 'org'), { recursive: true });
     writeFileSync(join(root, 'org', 'departments.json'), JSON.stringify(org.departments));
     writeFileSync(join(root, 'org', 'roster.json'), JSON.stringify(org.roster));
+    writeFileSync(join(root, 'org', 'company.json'), JSON.stringify({ chief: { engine: 'claude', model: 'sonnet', effort: 'high' } }));
   };
   const calls = [];
   const spawnImpl = (bin, args, opts) => {
@@ -188,6 +190,7 @@ test('runner: 비서실장 실행에 조직도 주입, 길면 .office/orgmap.md�
   const runner = createRunner({ root, spawnImpl });
   writeOrg(ORGS.mktDev);
   runner.start({ prompt: '조사하고 HTML 만들어 줘' });
+  await new Promise((r) => setImmediate(r));
   const i = calls[0].args.indexOf('--append-system-prompt');
   assert.ok(i > 0);
   assert.equal(calls[0].args[i + 1], buildOrgMap(ORGS.mktDev, { presets: loadPresets(root) }));
@@ -198,13 +201,16 @@ test('runner: 비서실장 실행에 조직도 주입, 길면 .office/orgmap.md�
   writeOrg(big);
   assert.ok(buildOrgMap(big).length > ORGMAP_INLINE_MAX);
   runner.start({ prompt: '정리해 줘' });
+  await new Promise((r) => setImmediate(r));
   const j = calls[1].args.indexOf('--append-system-prompt-file');
   assert.ok(j > 0, calls[1].args.join(' '));
   const file = calls[1].args[j + 1];
   assert.equal(file, join(root, '.office', 'orgmap.md'));
   assert.match(readFileSync(file, 'utf8'), /`big-80` · 직원80/);
   assert.ok(!calls[1].args.includes('--append-system-prompt'));
+  const stopping = runner.stopAll({ graceMs: 10 });
   for (const c of calls) { c.child.stdout.end(); c.child.stderr.end(); c.child.emit('close', 0, null); }
+  await stopping;
 });
 
 test('buildOrgMap: 팀장 표시는 직급이 팀장이 아닐 때만 덧붙인다', () => {
@@ -221,4 +227,20 @@ test('buildOrgMap: 팀장 표시는 직급이 팀장이 아닐 때만 덧붙인�
   assert.doesNotMatch(md, /팀장\(팀장\)/);
   // 담당이 없는 요청은 계획 전에 회의로 분담을 정하라는 안내가 조직도 머리에 있다
   assert.match(md, /담당\(부서·이름·직무\)이 하나도 없고.*`\[회의\]`/);
+});
+
+
+test('필수 전달의 누락·자기 참조·순환은 저장 단계에서 거부', () => {
+  const base = { departments: [{ id: 'aaa', name: 'A' }, { id: 'bbb', name: 'B' }], roster: [] };
+  for (const handoffs of [[], ['aaa'], ['missing']]) {
+    const org = structuredClone(base);
+    Object.assign(org.departments[0], { handoffPolicy: 'required', handoffs });
+    assert.equal(validateOrg(org).ok, false);
+  }
+  const cycle = structuredClone(base);
+  Object.assign(cycle.departments[0], { handoffPolicy: 'required', handoffs: ['bbb'] });
+  Object.assign(cycle.departments[1], { handoffPolicy: 'required', handoffs: ['aaa'] });
+  assert.match(validateOrg(cycle).errors.join(' '), /순환/);
+  cycle.departments[1].handoffPolicy = 'suggested';
+  assert.equal(validateOrg(cycle).ok, true, '권장 경로는 필수 순환이 아니다');
 });

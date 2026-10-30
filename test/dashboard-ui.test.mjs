@@ -350,9 +350,9 @@ test('normalizeFlow: 배열·{items}·업무별 맵을 시간순 배열로', () 
 
 test('taskSteps: 사용자 확인 대기 업무는 "사용자 확인"이 현재 단계이고 앞 단계는 모두 완료', () => {
   const st = taskSteps({ id: 'A', status: 'review' }, normalizeFlow(FLOW_A));
-  assert.deepEqual(FLOW_STEPS.map((s) => s.label), ['요청', '확인', '하달', '진행', '협조', '검토', '사용자 확인', '완료']);
-  assert.equal(st.steps[st.current].label, '사용자 확인');
-  assert.deepEqual(st.steps.map((s) => s.state), ['done', 'done', 'done', 'done', 'done', 'done', 'current', 'todo']);
+  assert.deepEqual(FLOW_STEPS.map((s) => s.label), ['요청', '확인', '하달', '진행', '협조', '검토', '완료']);
+  assert.equal(st.steps[st.current].label, '완료');
+  assert.deepEqual(st.steps.map((s) => s.state), ['done', 'done', 'done', 'done', 'done', 'done', 'current']);
   assert.equal(st.rejects, 0);
   assert.equal(st.back, null);
   const done = taskSteps({ id: 'A', status: 'done' }, normalizeFlow(FLOW_A));
@@ -499,12 +499,12 @@ test('index.html: 뷰 탭 4개(관제·사무실·조직·산출물)와 패널·
   const tabs = [...html.matchAll(/role="tab"[^>]*data-view="([a-z]+)"[^>]*>([^<]+)</g)].map((m) => [m[1], m[2]]);
   assert.deepEqual(tabs, [['control', '관제'], ['office', '사무실'], ['org', '조직'], ['outputs', '산출물']]);
   for (const v of ['viewControl', 'viewOffice', 'viewOrg', 'viewOutputs']) assert.match(html, new RegExp(`id="${v}" role="tabpanel"`));
-  for (const id of ['approveDialog', 'approveOk', 'approveReject', 'approveFeedback', 'gapDialog', 'gapGoOrg', 'feedDetailBtn', 'notifyBtn', 'attnStrip', 'outQ', 'outDate', 'outDept', 'outStatus', 'handoffChecks']) {
+  for (const id of ['completionDialog', 'completionReport', 'completionFiles', 'clearHistoryBtn', 'gapDialog', 'gapGoOrg', 'feedDetailBtn', 'notifyBtn', 'attnStrip', 'outQ', 'outDate', 'outDept', 'outStatus', 'handoffChecks']) {
     assert.match(html, new RegExp(`id="${id}"`), id);
   }
   assert.match(html, /id="feedDetailBtn" aria-pressed="false"/, '상세 보기는 기본 꺼짐');
   assert.match(html, /id="notifyBtn" aria-pressed="false"/, '브라우저 알림은 기본 꺼짐');
-  assert.match(html, /<label for="approveFeedback"/);
+  assert.doesNotMatch(html, /id="approveOk"|id="approveFeedback"/);
 });
 
 test('app.js: html 미리보기는 스크립트를 막은 sandbox iframe이고 srcdoc·원문 innerHTML을 쓰지 않는다', async () => {
@@ -517,14 +517,14 @@ test('app.js: html 미리보기는 스크립트를 막은 sandbox iframe이고 s
   assert.match(src, /store\('ai-office-view', ui\.view\)/);
   assert.match(src, /function store\(key, value\) \{\n {2}try \{/);
   assert.match(src, /store\('ai-office-notify'/);
-  // 승인·반려 API(SPEC)
-  assert.match(src, /\/api\/tasks\/\$\{encodeURIComponent\(st\.taskId\)\}\/approve/);
-  assert.match(src, /\/api\/tasks\/\$\{encodeURIComponent\(st\.taskId\)\}\/reject`, \{ feedback \}/);
+  assert.match(src, /\/seen/);
+  assert.match(src, /window\.open\('about:blank', '_blank'\)/);
+  assert.match(src, /tab\.opener = null/);
   assert.match(src, /\/api\/outputs\/file\?path=/);
 });
 
 test('taskSteps: 서버 단계 표시줄(task.steps)을 정본으로 쓰되, 반려 후 다시 진행 중이면 되돌아간 단계를 현재로', () => {
-  const server = ['done', 'done', 'done', 'done', 'done', 'current', 'todo', 'todo'].map((state, i) => ({ key: FLOW_STEPS[i].key, state }));
+  const server = ['done', 'done', 'done', 'done', 'done', 'current', 'todo'].map((state, i) => ({ key: FLOW_STEPS[i].key, state }));
   // 피드가 잘려 앞 단계 항목이 없어도 서버 상태를 그대로 쓴다
   const plain = taskSteps({ id: 'P', status: 'active', steps: server }, []);
   assert.deepEqual(plain.steps.map((s) => s.state), server.map((s) => s.state));
@@ -537,7 +537,7 @@ test('taskSteps: 서버 단계 표시줄(task.steps)을 정본으로 쓰되, 반
   assert.equal(st.steps[st.current].label, '진행');
   assert.equal(st.steps[5].state, 'done', '이미 거친 검토는 완료로');
   assert.equal(st.rejects, 1);
-  assert.equal(taskSteps({ id: 'R', stage: 'user' }, []).steps[6].state, 'current', 'task.stage는 단계 key도 받는다');
+  assert.equal(taskSteps({ id: 'R', stage: 'done' }, []).steps[6].state, 'current', 'task.stage는 단계 key도 받는다');
 });
 
 test('meetingAttendees: 흐름의 명시 회의(attendees·ended)와 [회의] 호출 대상(target)', () => {
@@ -682,32 +682,18 @@ test('classifyChiefInput: 승인·반려 표현만 인식하고 질문·부정·
   assert.deepEqual(classifyChiefInput('반려 book 목록 정리'), { intent: 'reject', feedback: 'book 목록 정리' });
 });
 
-test('chiefInputAction: review 업무 1건이면 그 업무, 여러 건이면 고르기, 없거나 애매하면 기존대로 실행', () => {
-  const one = [{ id: '2026-10-29/a', status: 'review' }, { id: '2026-10-29/b', status: 'active' }];
-  const many = [{ id: '2026-10-29/a', status: 'review' }, { id: '2026-10-29/c', status: 'review' }];
-  assert.deepEqual(chiefInputAction('승인', one), { action: 'approve', taskId: '2026-10-29/a' });
-  assert.deepEqual(chiefInputAction('반려 표 기준일 추가', one), { action: 'reject', feedback: '표 기준일 추가', taskId: '2026-10-29/a' });
-  assert.deepEqual(chiefInputAction('승인', many), { action: 'approve', choices: ['2026-10-29/a', '2026-10-29/c'] });
-  assert.deepEqual(chiefInputAction('반려', many), { action: 'reject', feedback: '', choices: ['2026-10-29/a', '2026-10-29/c'] });
-  assert.deepEqual(chiefInputAction('승인', [{ id: '2026-10-29/b', status: 'active' }]), { action: 'run' }, 'review 업무가 없으면 실행으로');
-  assert.deepEqual(chiefInputAction('승인', []), { action: 'run' });
-  assert.deepEqual(chiefInputAction('경쟁사 가격 조사해줘', one), { action: 'run' }, '승인·반려가 아니면 실행으로');
-  assert.deepEqual(chiefInputAction('승인 기준이 뭐야?', one), { action: 'run' }, '애매하면 실행으로');
-  assert.deepEqual(chiefInputAction('승인', null), { action: 'run' });
+test('chiefInputAction: 승인은 완료 결과 보기로 처리하고 새 실행이나 승인 요청을 만들지 않는다', () => {
+  assert.deepEqual(chiefInputAction('승인', [{ id: 'done-task', status: 'done' }]), { action: 'show-result', taskId: 'done-task' });
+  assert.deepEqual(chiefInputAction('승인', [{ id: 'old-review', status: 'review' }]), { action: 'show-result', taskId: 'old-review' });
+  for (const tasks of [[], null, [{ id: 'active', status: 'active' }]]) assert.deepEqual(chiefInputAction('승인', tasks), { action: 'no-approval' });
+  assert.deepEqual(chiefInputAction('보고서를 다시 정리해 줘', []), { action: 'run' });
 });
 
-test('app.js·index.html: 입력창 승인·반려는 확인 대화상자를 거쳐 승인·반려 API로 보내고, 여러 건이면 대상 업무를 고른다', async () => {
+test('입력창 승인 의사는 결과 모달로 연결하며 승인·반려 API를 호출하지 않는다', async () => {
   const src = await readFile(path.join(PUBLIC, 'app.js'), 'utf8');
   const html = await readFile(path.join(PUBLIC, 'index.html'), 'utf8');
-  const submit = src.slice(src.indexOf('async function submitChief'), src.indexOf('async function submitChief') + 900);
-  assert.match(submit, /chiefInputAction\(prompt, S\.tasks\)/);
-  assert.ok(submit.indexOf('chiefDecision') < submit.indexOf("'/api/runs'"), '승인·반려 판정이 실행 전송보다 먼저');
-  const decision = src.slice(src.indexOf('async function chiefDecision'), src.indexOf('async function submitChief'));
-  assert.match(decision, /업무를 승인할까요\?/);
-  assert.match(decision, /confirmBox\(/);
-  assert.match(decision, /pickTaskBox\(/);
-  assert.match(decision, /\/approve`/);
-  assert.match(decision, /\/reject`, \{ feedback: act\.feedback \}/);
-  assert.match(html, /<dialog id="pickTaskDialog"/);
-  assert.match(html, /id="pickTaskList"/);
+  assert.match(src, /chiefInputAction\(prompt, S\.tasks\)/);
+  assert.match(src, /act.action === 'show-result'/);
+  assert.doesNotMatch(src, /\/api\/tasks\/[^\n]+\/(?:approve|reject)/);
+  assert.doesNotMatch(html, /id="approveOk"|id="pickTaskDialog"/);
 });

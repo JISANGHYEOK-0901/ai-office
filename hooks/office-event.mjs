@@ -5,6 +5,10 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// 실행기가 업무 이벤트를 직접 기록하는 내부 계획·단계 실행은 중복 수집하지 않는다.
+// chief-guard와 repo-guard의 권한 검사는 별도 훅이므로 계속 적용된다.
+if (process.env.OFFICE_ORCHESTRATOR_CHILD === '1') process.exit(0);
+
 const HERE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ENV_ROOT = process.env.CLAUDE_PROJECT_DIR ? resolve(process.env.CLAUDE_PROJECT_DIR) : null;
 // 데이터 위치: CLAUDE_PROJECT_DIR가 AI Office 작업 공간(표식 .ai-office-workspace)이거나 예전 방식의 레포(hooks/가 있음)면 그곳,

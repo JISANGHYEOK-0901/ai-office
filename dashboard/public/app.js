@@ -1,6 +1,7 @@
 // AGENT HQ 대시보드. 바닐라 ES 모듈, 빌드 없이 서버가 그대로 제공한다.
 // 순수 함수는 export 해서 Node 테스트에서 쓰고, DOM 코드는 브라우저에서만 실행한다.
 import { createOffice, avatarDataURL, ATTENTION_ICONS, meetingAttendees } from './office.js';
+import { installSelects } from './select.js';
 
 export const RANKS = ['사원', '주임', '대리', '과장', '차장', '부장', '팀장'];
 export const TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'WebSearch', 'WebFetch', 'NotebookEdit', 'TodoWrite'];
@@ -155,9 +156,15 @@ export function normalizeState(raw = {}) {
     meetings: normalizeMeetings(raw.meetings),
     gaps: collectGaps(raw),
     tasks: Array.isArray(raw.tasks) ? raw.tasks : [],
+    schedules: Array.isArray(raw.schedules) ? raw.schedules : [],
     presets: presetList(raw.presets),
     demo: !!raw.demo,
     tools: raw.tools && typeof raw.tools === 'object' ? raw.tools : {},
+    settings: raw.settings || { mode: 'auto', chief: { engine: 'codex', model: 'gpt-6.1-sol', effort: 'max' } },
+    models: raw.models || { codex: [{ id: 'gpt-6.1-sol', label: 'gpt-6.1-sol', efforts: CODEX_EFFORTS }],
+      claude: ['haiku', 'sonnet', 'opus'].map((id) => ({ id, label: id, efforts: ['low', 'medium', 'high', 'xhigh', 'max'] })) },
+    mode: raw.mode || 'none',
+    connectionStatus: raw.connectionStatus || { connected: 0, needsLogin: 0 },
     workspace: raw.workspace && typeof raw.workspace === 'object' ? raw.workspace : {},
   };
 }
@@ -179,8 +186,8 @@ export function workspaceBanners(workspace, { demo = false } = {}) {
 export function toolBanners(tools, { demo = false } = {}) {
   if (demo || !tools) return [];
   const out = [];
-  if (tools.claude?.installed === false) out.push({ key: 'claude', text: 'claude(Claude Code)가 설치되지 않아 직원·비서실장 작업을 실행할 수 없습니다 — npm run doctor로 확인하세요' });
-  if (tools.codex?.installed === false) out.push({ key: 'codex', text: 'codex가 설치되지 않아 검증실을 실행할 수 없습니다 — npm run doctor로 확인하세요' });
+  if (tools.claude?.installed === false) out.push({ key: 'claude', text: 'Claude가 설치되지 않았습니다. Codex 직원은 사용할 수 있어요 — npm run doctor로 확인하세요' });
+  if (tools.codex?.installed === false) out.push({ key: 'codex', text: 'Codex가 설치되지 않았습니다. 비서실장 제공자를 Claude로 바꿔 사용하세요 — npm run doctor로 확인하세요' });
   return out;
 }
 
@@ -248,14 +255,14 @@ function runResult(run) { return run.summary ?? run.result ?? run.lastOutput ?? 
 function runStart(run) { return run.startedAt ?? run.createdAt ?? run.started ?? run.created ?? null; }
 function runWho(run) {
   const id = runAgentId(run);
-  if (!id && (run.target === 'review' || run.engine === 'codex')) return '검증실 리뷰';
+  if (!id && run.target === 'review') return '검증실 리뷰';
   return agentName(id);
 }
 
 // 같은 대화(rootId) 묶음을 시간순으로. 예전 run(rootId 없음)은 자기 자신이 묶음의 시작이다
 export function threadOf(runs, runId) {
-  const list = Array.isArray(runs) ? runs : [];
-  const run = list.find((r) => r?.id === runId);
+  const list = Array.isArray(runs) ? runs.filter((r) => !r.phase) : [];
+  const run = (Array.isArray(runs) ? runs : []).find((r) => r?.id === runId);
   if (!run) return [];
   const root = run.rootId || run.id;
   return list.filter((r) => r && (r.rootId || r.id) === root)
@@ -369,18 +376,18 @@ export function safeColor(value, fallback = '#38bdf8') {
 export const FLOW_STEPS = [
   { key: 'request', label: '요청' }, { key: 'intake', label: '확인' }, { key: 'assign', label: '하달' },
   { key: 'progress', label: '진행' }, { key: 'cooperate', label: '협조' }, { key: 'review', label: '검토' },
-  { key: 'user', label: '사용자 확인' }, { key: 'done', label: '완료' },
+  { key: 'done', label: '완료' },
 ];
 const STAGE_STEP = {
   request: 'request', intake: 'intake', meeting: 'intake', kickoff: 'assign', assign: 'assign', accept: 'progress',
   progress: 'progress', done: 'progress', cooperate: 'cooperate',
   review_request: 'review', review_pass: 'review', review_reject: 'review', codex_review: 'review',
-  deliver: 'user', user_reject: 'user', user_approve: 'done',
+  deliver: 'done', user_reject: 'assign', user_approve: 'done',
 };
 export const STAGE_LABEL = {
   request: '업무 요청', intake: '내용 확인', meeting: '회의', kickoff: '하달 킥오프', assign: '업무 하달', accept: '업무 전달받음',
   progress: '진행 중', done: '작업 완료', cooperate: '업무 협조 요청', review_request: '검토 요청',
-  review_pass: '검토 통과', review_reject: '검토 반려', deliver: '사용자 확인 대기', user_approve: '사용자 승인',
+  review_pass: '검토 통과', review_reject: '검토 반려', deliver: '업무 완료', user_approve: '사용자 승인',
   user_reject: '사용자 반려', codex_review: '검증실 검토', reply_wait: '답변 대기',
 };
 const STEP_INDEX = Object.fromEntries(FLOW_STEPS.map((s, i) => [s.key, i]));
@@ -442,7 +449,7 @@ export function taskSteps(task = {}, flow = []) {
   // 명시 단계(서버가 준 task.stage: 단계 key 또는 흐름 stage)가 더 앞서 있으면 그것을 쓴다
   const hinted = STEP_INDEX[task.stage] ?? stepIndexOf(task.stage);
   if (hinted > cur) { cur = hinted; visited.add(hinted); }
-  if (task.status === 'review') { cur = Math.max(cur, STEP_INDEX.user); visited.add(STEP_INDEX.user); }
+  if (task.status === 'review') { cur = Math.max(cur, STEP_INDEX.done); visited.add(STEP_INDEX.done); }
   const finished = task.status === 'done';
   if (finished) { cur = STEP_INDEX.done; visited.add(cur); }
   const serverRejects = (Number.isInteger(task.rejects) ? task.rejects : 0) + (Number.isInteger(task.userRejects) ? task.userRejects : 0);
@@ -468,7 +475,7 @@ export function taskSteps(task = {}, flow = []) {
       cur = localCur;
     }
   }
-  return { steps, current: cur, rejects, back: rejects ? back || (task.userRejects ? { from: STEP_INDEX.user, to: STEP_INDEX.assign } : { from: STEP_INDEX.review, to: STEP_INDEX.progress }) : null };
+  return { steps, current: cur, rejects, back: rejects ? back || (task.userRejects ? { from: STEP_INDEX.done, to: STEP_INDEX.assign } : { from: STEP_INDEX.review, to: STEP_INDEX.progress }) : null };
 }
 
 // 실시간 피드(업무 언어): 업무별로 묶고, progress는 직원별 마지막 1줄만 남긴다.
@@ -578,20 +585,17 @@ export function classifyChiefInput(text) {
   return { intent: null };
 }
 
-// 입력창 → 처리 방법. review 업무가 없거나 판정이 애매하면 {action:'run'}(기존대로 비서실장 실행).
-// review 업무가 1건이면 taskId, 여러 건이면 choices(사용자가 고른다)
+// 승인이라는 답변은 추가 실행이나 상태 변경 없이 완료 결과를 연다.
 export function chiefInputAction(text, tasks = []) {
-  const review = (Array.isArray(tasks) ? tasks : []).filter((t) => t && t.status === 'review' && typeof t.id === 'string');
-  const c = classifyChiefInput(text);
-  if (!c.intent || !review.length) return { action: 'run' };
-  const base = c.intent === 'reject' ? { action: 'reject', feedback: c.feedback } : { action: 'approve' };
-  return review.length === 1 ? { ...base, taskId: review[0].id } : { ...base, choices: review.map((t) => t.id) };
+  if (classifyChiefInput(text).intent !== 'approve') return { action: 'run' };
+  const result = (Array.isArray(tasks) ? tasks : []).find((task) => ['done', 'review'].includes(task?.status));
+  return result ? { action: 'show-result', taskId: result.id } : { action: 'no-approval' };
 }
 
 // ───────────────────── 사용자 의견 필요(attention) ─────────────────────
-export const ATTENTION_KINDS = ['reply', 'approve', 'gap'];
-const ATTN_PRIORITY = { approve: 0, reply: 1, gap: 2 };
-export const ATTENTION_LABEL = { reply: '답변 필요', approve: '사용자 확인', gap: '역량 공백' };
+export const ATTENTION_KINDS = ['reply', 'approve', 'gap', 'complete'];
+const ATTN_PRIORITY = { approve: 0, reply: 1, gap: 2, complete: 3 };
+export const ATTENTION_LABEL = { reply: '답변 필요', approve: '완료 결과', complete: '업무 완료', gap: '역량 공백' };
 
 // state.attention(since 오름차순). 서버가 아직 주지 않으면 needsReply run으로 reply 항목을 만든다
 export function normalizeAttention(raw, runs = []) {
@@ -622,8 +626,8 @@ export function attentionByAgent(list = []) {
   return map;
 }
 
-export function titleWithAttention(base, count) {
-  return count > 0 ? `(${count}) 답변 필요 · ${base}` : base;
+export function titleWithAttention(base, count, completed = 0) {
+  return count > 0 ? `(${count}) 답변 필요 · ${base}` : completed > 0 ? `(${completed}) 업무 완료 · ${base}` : base;
 }
 
 // 처음 본 attention만 고른다(브라우저 알림은 항목마다 1회)
@@ -729,13 +733,81 @@ function pad3(n) { return String(Math.max(0, Number(n) || 0)).padStart(3, '0'); 
 const $ = (id) => document.getElementById(id);
 const ui = {
   view: 'control', theme: 'neon', drawer: null, patrol: false, previewOpen: null, dismissedBanners: new Set(),
-  feedDetail: false, notify: false, approve: null, feedOpen: new Set(),
+  feedDetail: false, notify: false, completion: null, feedOpen: new Set(),
   out: { list: null, loading: false, error: '', sel: null, sig: '', loadedAt: 0, files: new Map() },
 };
 let S = normalizeState({});
 let office = null;
 let token = '';
 let lastRaw = null;
+let chiefSaveQueue = Promise.resolve();
+let chiefSaving = 0;
+
+function fillModels(select, engine, selected = '', placeholder = null) {
+  const choices = [...(S.models[engine] || [])];
+  if (selected && !choices.some((m) => m.id === selected)) choices.push({ id: selected, label: `${selected} (현재 설정)` });
+  const html = (placeholder === null ? '' : `<option value="">${esc(placeholder)}</option>`)
+    + choices.map((m) => `<option value="${esc(m.id)}">${esc(m.label || m.id)}</option>`).join('');
+  if (select.innerHTML !== html) select.innerHTML = html;
+  select.value = selected || (placeholder === null ? choices[0]?.id || '' : '');
+}
+
+function fillEfforts(select, engine, model, selected = '', placeholder = null) {
+  const levels = S.models[engine]?.find((m) => m.id === model)?.efforts || (engine === 'codex' ? CODEX_EFFORTS : ['low', 'medium', 'high', 'xhigh', 'max']);
+  const html = (placeholder === null ? '' : `<option value="">${esc(placeholder)}</option>`)
+    + levels.map((level) => `<option value="${esc(level)}">${esc(level)}</option>`).join('');
+  if (select.innerHTML !== html) select.innerHTML = html;
+  select.value = levels.includes(selected) ? selected : placeholder !== null ? '' : levels.includes('max') ? 'max' : levels[0];
+}
+
+function renderChiefSettings() {
+  $('schedulesBtn').disabled = S.demo;
+  $('companySchedulesBtn').disabled = S.demo;
+  $('schedulesBtn').textContent = `반복 예약${S.schedules.length ? ` ${S.schedules.filter((item) => item.enabled).length}` : ''}`;
+  $('clearHistoryBtn').disabled = S.demo || !S.runs.some((run) => !['running', 'queued'].includes(run.status)) && !S.tasks.some((task) => task.status === 'done');
+  $('connectionsBtn').disabled = S.demo;
+  $('connectionsBtn').textContent = S.connectionStatus.needsLogin ? `계정 재연결 ${S.connectionStatus.needsLogin}` : '계정 연결';
+  $('modeBadge').textContent = { codex: 'Codex', claude: 'Claude', mixed: 'Claude + Codex', none: 'AI 로그인 확인' }[S.mode] || S.mode;
+  if (chiefSaving) return;
+  const chief = S.settings.chief;
+  $('chiefEngine').value = chief.engine;
+  fillModels($('chiefModel'), chief.engine, chief.model);
+  fillEfforts($('chiefEffort'), chief.engine, chief.model, chief.effort);
+  const available = S.tools[chief.engine];
+  $('chiefSubmit').disabled = S.demo || available?.installed === false || available?.loggedIn === false;
+}
+
+function saveChiefSelection(event) {
+  const engine = $('chiefEngine').value;
+  if (event.target.id === 'chiefEngine') {
+    fillModels($('chiefModel'), engine, engine === 'codex' ? 'gpt-6.1-sol' : 'sonnet');
+    fillEfforts($('chiefEffort'), engine, $('chiefModel').value, engine === 'codex' ? 'max' : 'high');
+  } else if (event.target.id === 'chiefModel') {
+    fillEfforts($('chiefEffort'), engine, $('chiefModel').value, $('chiefEffort').value);
+  }
+  const chief = { engine, model: $('chiefModel').value, effort: $('chiefEffort').value };
+  chiefSaving++;
+  $('chiefSettingsStatus').textContent = '실행 설정 저장 중…';
+  chiefSaveQueue = chiefSaveQueue.catch(() => {}).then(async () => {
+    const settings = await api('PUT', '/api/settings', { chief });
+    S.settings = settings;
+    $('chiefSettingsStatus').textContent = `${chief.engine === 'codex' ? 'Codex' : 'Claude'} · ${chief.model} · ${chief.effort} 저장됨`;
+  }).catch((err) => {
+    $('chiefSettingsStatus').textContent = err.message;
+    throw err;
+  }).finally(() => {
+    chiefSaving--;
+    if (!chiefSaving) renderChiefSettings();
+  });
+  chiefSaveQueue.catch(() => {});
+}
+
+export function usageLabel(run) {
+  const usage = run?.usage;
+  if (!usage) return '';
+  const tokens = (n) => Number.isFinite(n) ? n.toLocaleString('ko-KR') : '미측정';
+  return `입력 ${tokens(usage.input)} · 출력 ${tokens(usage.output)} 토큰 · ${Number.isFinite(usage.costUsd) ? `API 환산 $${usage.costUsd.toFixed(4)}` : '금액 미측정'}`;
+}
 
 function store(key, value) {
   try { if (value === undefined) return localStorage.getItem(key); localStorage.setItem(key, value); } catch { /* 저장 불가 환경은 무시 */ }
@@ -864,7 +936,7 @@ function deptOf(id) { return S.departments.find((d) => d.id === id); }
 
 // 데모 모드에서는 서버가 쓰기를 거부하므로 쓰기 버튼을 미리 끈다(폼을 다 채운 뒤 409를 받지 않게)
 const WRITE_ACTS = new Set(['new-dept', 'add-preset', 'add-agent', 'bulk', 'edit-agent', 'edit-dept', 'run-agent', 'stop-run', 'duty-agent', 'duty-dept', 'del-agent', 'del-dept',
-  'approve-task', 'reject-task', 'cap-del', 'handoff-del']);
+  'cap-del', 'handoff-del']);
 const DEMO_HINT = '데모 모드에서는 보기만 가능해요.';
 function applyDemoLock() {
   if (!S.demo) return;
@@ -872,7 +944,7 @@ function applyDemoLock() {
     if (WRITE_ACTS.has(b.dataset.act) && !b.disabled) { b.disabled = true; b.title = DEMO_HINT; }
   }
   for (const el of document.querySelectorAll('[data-cap-input], [data-handoff-add]')) if (!el.disabled) { el.disabled = true; el.title = DEMO_HINT; }
-  for (const id of ['addDeptBtn', 'chiefSubmit', 'chiefInput', 'chiefModel', 'threadSend', 'threadPrompt', 'threadModel']) {
+  for (const id of ['addDeptBtn', 'chiefSubmit', 'chiefInput', 'chiefEngine', 'chiefModel', 'chiefEffort', 'threadSend', 'threadPrompt', 'threadModel', 'threadEffort']) {
     const el = $(id);
     if (el && !el.disabled) { el.disabled = true; el.title = DEMO_HINT; }
   }
@@ -882,6 +954,7 @@ function applyDemoLock() {
 // ───── 렌더링 ─────
 function render() {
   renderTop();
+  renderChiefSettings();
   const empty = S.departments.length === 0;
   const v = ui.view;
   // 부서가 없으면 관제·사무실 자리에 온보딩을 보여준다. 조직·산출물 탭은 그대로 쓸 수 있다
@@ -898,9 +971,10 @@ function render() {
   if (v === 'outputs') renderOutputs();
   renderFeed();
   renderTasks();
+  if ($('schedulesDialog').open) renderSchedules();
   renderDrawer();
   if (ui.thread) renderThread();
-  if (ui.approve) renderApprove();
+  if (ui.completion) renderCompletion();
   if (office) {
     office.update({
       departments: S.departments, feed: S.feed, chief: S.agents.chief || null,
@@ -944,7 +1018,7 @@ function handoffList() {
 }
 
 function updateTitle() {
-  const title = titleWithAttention(BASE_TITLE, S.attention.length);
+  const title = titleWithAttention(BASE_TITLE, S.attention.filter((a) => !['complete', 'approve'].includes(a.kind)).length, S.attention.filter((a) => ['complete', 'approve'].includes(a.kind)).length);
   if (document.title !== title) document.title = title;
 }
 
@@ -953,7 +1027,7 @@ const svgCache = {};
 // 캔버스와 같은 픽셀 비트맵으로 SVG 아이콘을 만든다(이모지 대신, 두 테마에서 같은 모양)
 function attnSvg(kind) {
   if (svgCache[kind]) return svgCache[kind];
-  const bmp = ATTENTION_ICONS[kind] || ATTENTION_ICONS.reply;
+  const bmp = ATTENTION_ICONS[kind === 'complete' ? 'approve' : kind] || ATTENTION_ICONS.reply;
   let rects = '';
   bmp.forEach((row, y) => {
     for (let x = 0; x < row.length; x++) {
@@ -972,7 +1046,7 @@ function clipText(text, max) {
 
 function attnLabel(a) {
   const who = agentName(a.agent);
-  if (a.kind === 'approve') return `사용자 확인 대기: ${taskTitle(a.task)}`;
+  if (a.kind === 'complete' || a.kind === 'approve') return `업무 완료: ${taskTitle(a.task)}`;
   if (a.kind === 'gap') return `역량 공백: ${clipText(a.text, 80)}`;
   return `${who}님이 답변을 기다립니다${a.text ? ` — ${clipText(a.text, 80)}` : ''}`;
 }
@@ -995,9 +1069,9 @@ function openAttention(a) {
     if (a.runId && S.runs.some((r) => r.id === a.runId)) return openThread(a.runId);
     return a.agent === 'chief' ? openDrawer('chief', 'chief') : openDrawer('agent', a.agent);
   }
-  if (a.kind === 'approve') {
+  if (a.kind === 'complete' || a.kind === 'approve') {
     const id = a.task || S.tasks.find((t) => t.status === 'review')?.id;
-    return id ? openApprove(id) : toast('확인할 업무를 찾지 못했어요.', { type: 'warn' });
+    return id ? openCompletion(id) : toast('확인할 업무를 찾지 못했어요.', { type: 'warn' });
   }
   return openGap(a);
 }
@@ -1016,6 +1090,8 @@ function notifyAttention() {
   const fresh = freshAttention(S.attention, seenAttention);
   for (const a of fresh) seenAttention.add(attentionKey(a));
   if (!attentionSeeded) { attentionSeeded = lastRaw !== null; return; }
+  for (const item of fresh.filter((item) => item.kind === 'complete')) completionQueue.push(item.task);
+  queueMicrotask(openNextCompletion);
   if (!ui.notify || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   for (const a of fresh.slice(0, 3)) {
     try {
@@ -1049,7 +1125,7 @@ function renderTop() {
   const chips = [['active', 'ACTIVE'], ['standby', 'STANDBY'], ['idle', 'IDLE'], ['off', 'OFF'], ['tasks', 'TASKS'], ['reviews', 'REVIEWS'], ['tools', 'TOOLS']];
   const n = S.attention.length;
   // '답변 필요' 칩: attention 수. 누르면 가장 오래 기다린 항목부터 연다
-  const replyChip = n ? `<li class="metric m-reply"><button type="button" class="metric-btn" data-act="attn" data-attn="${esc(attentionKey(S.attention[0]))}" data-key="m-reply" title="가장 오래 기다린 항목 열기: ${esc(attnLabel(S.attention[0]))}"><span class="metric-label">답변 필요</span><b class="metric-val">${esc(n)}</b></button></li>` : '';
+  const replyChip = n ? `<li class="metric m-reply"><button type="button" class="metric-btn" data-act="attn" data-attn="${esc(attentionKey(S.attention[0]))}" data-key="m-reply" title="가장 오래 기다린 항목 열기: ${esc(attnLabel(S.attention[0]))}"><span class="metric-label">${S.attention.every((a) => ['complete', 'approve'].includes(a.kind)) ? '완료 결과' : '알림'}</span><b class="metric-val">${esc(n)}</b></button></li>` : '';
   setHTML($('metrics'), replyChip + chips.map(([k, label]) =>
     `<li class="metric m-${k}"><span class="metric-label">${label}</span><b class="metric-val">${pad3(m[k])}</b></li>`).join(''));
   $('demoBadge').hidden = !S.demo;
@@ -1134,6 +1210,7 @@ function renderOrg() {
 
 // 직원의 현재 상태 한 줄. 대기열 실행이 있으면 함께 알린다
 function statusLine(a) {
+  if (a.monitor && a.status !== 'working') return `${a.monitor.status === 'checking' ? '지속 감시 확인 중' : '새 자료 감시 대기'}${a.monitor.nextAt ? ` · ${new Date(a.monitor.nextAt).toLocaleTimeString('ko-KR')} 다음 확인` : ''}`;
   let text;
   if (a.status === 'working') text = [a.lastTool, a.lastSummary].filter(Boolean).join(' · ') || '작업 중';
   else if (a.status === 'idle' || a.status === 'off-duty') text = STATUS_LABEL[a.status];
@@ -1154,16 +1231,15 @@ function attentionCards() {
   for (const a of S.attention) {
     if (a.kind === 'gap') continue;
     const k = attentionKey(a);
-    if (a.kind === 'approve') {
+    if (a.kind === 'complete' || a.kind === 'approve') {
       const task = S.tasks.find((t) => t.id === a.task);
       cards.push(`<article class="attn-card ac-approve">
-        <div class="ac-head">${attnSvg('approve')}<b>사용자 확인 대기</b><time>${esc(timeAgo(a.since))}</time></div>
+        <div class="ac-head">${attnSvg('approve')}<b>업무 완료</b><time>${esc(timeAgo(a.since))}</time></div>
         <p class="ac-title">${esc(task?.title || a.task || '업무')}</p>
         ${a.text ? `<p class="ac-text">${esc(clipText(a.text, 140))}</p>` : ''}
         <div class="ac-actions">
           <button type="button" class="btn btn-sm" data-act="out-show" data-task="${esc(a.task || '')}" data-key="aco-${esc(k)}">산출물 보기</button>
-          <button type="button" class="btn btn-sm btn-primary" data-act="approve-task" data-task="${esc(a.task || '')}" data-key="aca-${esc(k)}">승인</button>
-          <button type="button" class="btn btn-sm btn-danger" data-act="reject-task" data-task="${esc(a.task || '')}" data-key="acr-${esc(k)}">반려(피드백)</button>
+          <button type="button" class="btn btn-sm btn-primary" data-act="open-completion" data-task="${esc(a.task || '')}" data-key="aca-${esc(k)}">완료 결과 보기</button>
         </div></article>`);
     } else {
       cards.push(`<article class="attn-card ac-reply">
@@ -1204,12 +1280,12 @@ function renderControl() {
         <span class="dc-icon" aria-hidden="true">${esc((d.en || d.name || '?').slice(0, 1))}</span>
         <div class="dc-title">
           <h3 id="dc-${esc(d.id)}"><button type="button" class="link" data-act="open-dept" data-id="${esc(d.id)}" data-key="dct-${esc(d.id)}">${esc(d.name)}</button></h3>
-          <span class="dc-en">UNIT ${esc(d.en || d.id)} · ${esc(d.engine || 'claude')}${d.model ? ' · ' + esc(d.model) : ''}</span>
+          <span class="dc-en">UNIT ${esc(d.en || d.id)} · ${esc(d.engine || 'claude')}${d.engine === 'codex' ? ' · ' + esc(d.codexModel || 'gpt-6.1-sol') : d.model ? ' · ' + esc(d.model) : ''}</span>
         </div>
         ${attnButton(topDept, `dch-${d.id}`)}
         <span class="dc-total" aria-label="인원 ${d.memberCount}명">${d.memberCount}</span>
       </header>
-      <div class="dc-badges">${d.active ? '' : '<span class="badge badge-off">휴무</span>'}${d.permission === 'bypassPermissions' ? '<span class="badge badge-warn" title="모든 확인 생략 모드">⚠ bypass</span>' : ''}${d.engine === 'codex' ? '<span class="badge">읽기 전용 검증</span>' : ''}</div>
+      <div class="dc-badges">${d.active ? '' : '<span class="badge badge-off">휴무</span>'}${d.engine !== 'codex' && d.permission === 'bypassPermissions' ? '<span class="badge badge-warn" title="모든 확인 생략 모드">⚠ bypass</span>' : ''}${d.engine === 'codex' ? `<span class="badge">${d.codexRole === 'exec' ? '산출물 작성' : '읽기 전용 검증'}</span>` : ''}</div>
       <div class="dc-stats">
         <div><b>${d.memberCount}</b><span>인원</span></div>
         <div><b class="c-work">${d.activeCount}</b><span>활동</span></div>
@@ -1378,12 +1454,13 @@ function missingOutputsHtml(task) {
 }
 
 function renderTasks() {
-  const tasks = [...S.tasks].sort((a, b) => (b.status === 'review') - (a.status === 'review')).slice(0, 30);
-  const runs = [...S.runs].sort((a, b) => String(runStart(b) || '').localeCompare(String(runStart(a) || ''))).slice(0, 30);
+  const tasks = S.tasks.filter((task) => task.status !== 'done').slice(0, 30);
+  const completed = S.tasks.filter((task) => task.status === 'done');
+  const runs = S.runs.filter((r) => !r.phase).sort((a, b) => String(runStart(b) || '').localeCompare(String(runStart(a) || ''))).slice(0, 30);
   const taskHtml = tasks.map((t) => {
     const reviews = taskReviews(t);
     const hasReport = t.report ?? t.hasReport;
-    const approve = S.attention.find((a) => a.kind === 'approve' && a.task === t.id);
+    const approve = S.attention.find((a) => ['complete', 'approve'].includes(a.kind) && a.task === t.id);
     return `<li class="task task-${esc(t.status || 'active')}">
       <div class="task-top"><span class="tag t-${esc(t.status)}">${esc(TASK_LABEL[t.status] || t.status || '진행')}</span><b>${esc(t.title || t.id)}</b>${attnButton(approve, `ta-${t.id}`)}</div>
       ${stepperHtml(t, true)}
@@ -1394,28 +1471,39 @@ function renderTasks() {
         ${reviews.map((r) => `<span class="verdict v-${esc(String(r.verdict || 'none').toLowerCase())}" title="${esc(agentName(r.reviewer))}">${esc(agentName(r.reviewer).replace(/ \(미등록\)$/, ''))} ${esc(r.verdict || '…')}</span>`).join('')}
       </div>
       <div class="run-actions">
-        ${t.status === 'review' ? `<button type="button" class="btn btn-sm btn-primary" data-act="open-approve" data-task="${esc(t.id)}" data-key="tap-${esc(t.id)}">사용자 확인</button>` : ''}
+        ${t.status === 'review' ? `<button type="button" class="btn btn-sm btn-primary" data-act="open-completion" data-task="${esc(t.id)}" data-key="tap-${esc(t.id)}">완료 결과 보기</button>` : ''}
         <button type="button" class="btn btn-sm btn-ghost" data-act="out-show" data-task="${esc(t.id)}" data-key="tos-${esc(t.id)}">산출물</button>
       </div></li>`;
   }).join('');
-  const runHtml = runs.map((r) => {
+  const runRows = (list) => list.map((r) => {
     const live = r.status === 'running' || r.status === 'queued';
     const who = runWho(r);
     return `<li class="run run-${esc(r.status)}${r.needsReply ? ' run-needs-reply' : ''}">
       <div class="task-top"><span class="tag r-${esc(r.status)}">${esc(RUN_LABEL[r.status] || r.status)}</span><b>${esc(who)}</b>${r.engine === 'codex' ? '<span class="engine engine-codex">codex</span>' : ''}${replyBadge(r, `rb-${r.id}`)}<time>${esc(timeAgo(runStart(r)))}</time></div>
       <p class="run-text">${r.parentId ? '<span class="reply-mark" title="이어서 답한 실행">↳ 답장</span> ' : ''}${esc(runText(r))}</p>
+      ${r.model ? `<p class="run-usage">${esc(r.model)}${r.effort ? ` · ${esc(r.effort)}` : ''}</p>` : ''}
+      ${r.continuous ? `<p class="run-monitor">${esc({ checking: '자료 확인 중', waiting: '새 자료 대기', retrying: '확인 재시도 대기', needs_decision: '감시 결정 대기', suspended: '감시 재개 대기', stopped: '감시 중지', finished: '감시 종료' }[r.monitor?.status] || '지속 감시 준비')} · ${r.monitor?.deadlineAt ? `${esc(new Date(r.monitor.deadlineAt).toLocaleString('ko-KR'))}까지` : '중지할 때까지'} · 새 자료 ${r.monitor?.discoveries || 0}건 · 보고 ${r.monitor?.deliveries || 0}건${r.monitor?.nextAt && live ? `<br>다음 확인 ${esc(new Date(r.monitor.nextAt).toLocaleTimeString('ko-KR'))}` : ''}${r.monitor?.error ? `<br>최근 오류: ${esc(r.monitor.error)}` : ''}</p>` : ''}
+      ${usageLabel(r) ? `<p class="run-usage">${esc(usageLabel(r))}</p>` : ''}
       ${runResult(r) && !live ? `<p class="run-result">${esc(String(runResult(r)).slice(0, 160))}</p>` : ''}
       <div class="run-actions">
+        ${r.continuous && r.needsReply && !live ? `<button type="button" class="btn btn-sm btn-danger" data-act="stop-run" data-run="${esc(r.id)}">감시 중지</button>` : ''}
         ${live ? `<button type="button" class="btn btn-sm btn-danger" data-act="stop-run" data-run="${esc(r.id)}" data-key="rs-${esc(r.id)}">중지</button>` : ''}
         ${r.canReply || r.parentId ? `<button type="button" class="btn btn-sm" data-act="open-thread" data-run="${esc(r.id)}" data-key="rt-${esc(r.id)}">대화</button>` : ''}
         <button type="button" class="btn btn-sm btn-ghost" data-act="log-run" data-run="${esc(r.id)}" data-key="rl-${esc(r.id)}">로그</button>
       </div></li>`;
   }).join('');
+  const pending = (run) => ['running', 'queued'].includes(run.status)
+    || run.needsReply && S.tasks.find((task) => task.id === run.task)?.status !== 'done';
+  const runHtml = runRows(runs.filter(pending));
+  const pastRunHtml = runRows(runs.filter((run) => !pending(run)));
+  const completedHtml = completed.slice(0, 30).map((task) => `<li class="task task-done"><div class="task-top"><span class="tag t-done">완료</span><b>${esc(task.title || task.id)}</b></div><button type="button" class="btn btn-sm" data-act="open-completion" data-task="${esc(task.id)}">완료 결과 보기</button></li>`).join('');
   setHTML($('tasks'), `
-    <h3 class="sub-title">업무 <span>${S.tasks.length}</span></h3>
+    <h3 class="sub-title">업무 <span>${tasks.length}</span></h3>
     ${taskHtml ? `<ul class="task-list">${taskHtml}</ul>` : '<p class="empty">등록된 업무가 없어요.</p>'}
     <h3 class="sub-title">실행 <span>진행 ${S.runs.filter((r) => r.status === 'running').length}건${S.runs.some((r) => r.status === 'queued') ? ` · 대기 ${S.runs.filter((r) => r.status === 'queued').length}건` : ''}</span></h3>
-    ${runHtml ? `<ul class="task-list">${runHtml}</ul>` : '<p class="empty">실행 기록이 없어요. 위 입력창이나 직원 프로필에서 작업을 지시해 보세요.</p>'}`);
+    ${runHtml ? `<ul class="task-list">${runHtml}</ul>` : '<p class="empty">진행 중이거나 답변을 기다리는 실행이 없어요.</p>'}
+    ${completedHtml ? `<details class="task-history"><summary>완료된 업무 ${completed.length}건</summary><ul class="task-list">${completedHtml}</ul></details>` : ''}
+    ${pastRunHtml ? `<details class="task-history"><summary>종료된 실행 내역</summary><ul class="task-list">${pastRunHtml}</ul></details>` : ''}`);
 }
 
 // '답변 필요' 배지(누르면 대화 보기)
@@ -1480,7 +1568,7 @@ function agentProfile(a) {
       <dt>담당</dt><dd>${esc(a.specialty || '—')}</dd>
       <dt>현재</dt><dd>${esc(a.status === 'working' || a.queued ? statusLine(a) : STATUS_LABEL[a.status] || a.status)}</dd>
       <dt>마지막 활동</dt><dd>${esc(timeAgo(lastTs))}${a.lastSummary && a.status !== 'working' ? ` · ${esc(a.lastSummary)}` : ''}</dd>
-      <dt>모델</dt><dd>${esc(dept?.engine === 'codex' ? `${dept.codexModel || 'gpt-6.1-sol'} (Codex)` : a.model || (a.lead ? 'opus (팀장 기본)' : dept?.model ? `${dept.model} (부서 기본)` : 'sonnet (기본)'))}</dd>
+      <dt>모델</dt><dd>${esc(dept?.engine === 'codex' ? `${a.codexModel || dept.codexModel || 'gpt-6.1-sol'} · ${a.codexEffort || dept.codexEffort || 'max'} (Codex)` : a.model || (a.lead ? 'opus (팀장 기본)' : dept?.model ? `${dept.model} (부서 기본)` : 'sonnet (기본)'))}</dd>
       <dt>id</dt><dd><code>${esc(a.id)}</code></dd>
     </dl>
     <div class="profile-actions">
@@ -1541,7 +1629,7 @@ function attentionSection(agentId) {
 }
 
 function chiefProfile(a) {
-  const runs = S.runs.filter((r) => !runAgentId(r) && r.target !== 'review' && r.engine !== 'codex')
+  const runs = S.runs.filter((r) => !r.phase && (r.target === 'chief' || !runAgentId(r) && r.target !== 'review'))
     .sort((x, y) => String(runStart(y) || '').localeCompare(String(runStart(x) || ''))).slice(0, 5);
   return `
   <div class="profile" style="--dept:#fbbf24">
@@ -1556,6 +1644,7 @@ function chiefProfile(a) {
     ${attentionSection('chief')}
     <dl class="kv">
       <dt>현재</dt><dd>${esc(a.status === 'working' ? statusLine(a) : STATUS_LABEL[a.status] || a.status)}</dd>
+      <dt>실행 설정</dt><dd>${esc(S.settings.chief.engine)} · ${esc(S.settings.chief.model)} · ${esc(S.settings.chief.effort)}</dd>
       <dt>마지막 활동</dt><dd>${esc(timeAgo(a.lastEvent?.ts || a.lastEvent))}</dd>
       <dt>역할</dt><dd>업무를 나눠 부서에 하달하고, 협조 순서를 조율하고, 결과를 검토해 보고합니다. 직접 실무는 하지 않습니다.</dd>
     </dl>
@@ -1594,8 +1683,8 @@ function deptDetail(d) {
       ${d.engine === 'codex'
         ? `<dt>Codex 모델</dt><dd>${esc(d.codexModel || 'gpt-6.1-sol')} · 추론 ${esc(d.codexEffort || 'max')}</dd>`
         : `<dt>기본 모델</dt><dd>${esc(d.model || 'sonnet')}</dd>`}
-      <dt>권한 모드</dt><dd>${esc(d.permission || 'acceptEdits')}</dd>
-      <dt>허용 도구</dt><dd>${Array.isArray(d.tools) && d.tools.length ? d.tools.map((t) => `<code>${esc(t)}</code>`).join(' ') : '제한 없음'}</dd>
+      ${d.engine === 'codex' ? `<dt>역할</dt><dd>${d.codexRole === 'exec' ? '산출물 작성 (workspace-write)' : '읽기 전용 검토 (read-only)'}</dd>`
+        : `<dt>권한 모드</dt><dd>${esc(d.permission || 'acceptEdits')}</dd><dt>허용 도구</dt><dd>${Array.isArray(d.tools) && d.tools.length ? d.tools.map((t) => `<code>${esc(t)}</code>`).join(' ') : '제한 없음'}</dd>`}
       <dt>역량</dt><dd class="tags">${tagList(d.capabilities)}</dd>
       <dt>결과 전달</dt><dd class="tags">${Array.isArray(d.handoffs) && d.handoffs.length ? d.handoffs.map((h) => (deptOf(h) ? partyChip(h) : `<span class="pchip" title="조직에 없는 부서">${esc(deptLabel(h))} (조직에 없음)</span>`)).join('') : '<span class="muted">없음</span>'}</dd>
       <dt>id</dt><dd><code>${esc(d.id)}</code></dd>
@@ -1646,8 +1735,9 @@ function fillDeptForm(values) {
   f.summary.value = values.summary || '';
   f.instructions.value = values.instructions || '';
   f.engine.value = values.engine === 'codex' ? 'codex' : 'claude';
-  f.codexModel.value = values.codexModel || '';
-  f.codexEffort.value = CODEX_EFFORTS.includes(values.codexEffort) ? values.codexEffort : '';
+  fillModels(f.codexModel, 'codex', values.codexModel || '', '기본(gpt-6.1-sol)');
+  fillEfforts(f.codexEffort, 'codex', values.codexModel || 'gpt-6.1-sol', values.codexEffort || '', '기본(max)');
+  f.codexRole.value = values.codexRole || (deptEditing?.engine === 'codex' || values.id === 'verify' ? 'review' : 'exec');
   f.model.value = ['sonnet', 'opus', 'haiku', 'inherit'].includes(values.model) ? values.model : 'sonnet';
   f.permission.value = values.permission || 'acceptEdits';
   const tools = Array.isArray(values.tools) && values.tools.length ? values.tools : null;
@@ -1655,6 +1745,7 @@ function fillDeptForm(values) {
   for (const box of $('toolChecks').querySelectorAll('input')) { box.checked = tools ? tools.includes(box.value) : false; box.disabled = !tools; }
   if (!deptEditing) f.id.value = values.id && validId(values.id) ? values.id : kebab(values.en);
   f.capabilities.value = (Array.isArray(values.capabilities) ? values.capabilities : []).join(', ');
+  f.handoffPolicy.value = values.handoffPolicy || 'suggested';
   // 협조 대상: 지금 있는 다른 부서만 체크박스로 보이고, 아직 없는 부서(프리셋 기본값)는 그대로 보존한다
   const handoffs = Array.isArray(values.handoffs) ? values.handoffs : [];
   const others = S.departments.filter((d) => d.id !== (deptEditing?.id || f.id.value));
@@ -1672,6 +1763,8 @@ function syncDeptUi() {
   const codex = f.engine.value === 'codex';
   $('codexFields').hidden = !codex;
   $('deptModelRow').hidden = codex;
+  $('deptToolsField').hidden = codex;
+  $('deptPermissionRow').hidden = codex;
   for (const b of $('deptSwatches').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.color === f.color.value));
 }
 
@@ -1704,7 +1797,7 @@ async function submitDept(ev) {
   if (!name) return fail('부서 이름을 입력해 주세요.', f.name);
   if (!deptEditing && id && !validId(id)) return fail('부서 id는 영문 소문자로 시작하고 소문자·숫자·하이픈 2~48자여야 해요.', f.id);
   const tools = $('toolsAll').checked ? null : [...$('toolChecks').querySelectorAll('input:checked')].map((b) => b.value);
-  if (tools && !tools.length) return fail('허용 도구를 하나 이상 고르거나 "제한 없음"을 선택해 주세요.', $('toolsAll'));
+  if (f.engine.value !== 'codex' && tools && !tools.length) return fail('허용 도구를 하나 이상 고르거나 "제한 없음"을 선택해 주세요.', $('toolsAll'));
   const codexModel = f.codexModel.value.trim();
   if (f.engine.value === 'codex' && codexModel && !/^[a-z0-9][a-z0-9.-]{1,63}$/.test(codexModel)) {
     return fail('Codex 모델 이름은 영문 소문자·숫자·점·하이픈 2~64자여야 해요.', f.codexModel);
@@ -1715,13 +1808,14 @@ async function submitDept(ev) {
     engine: f.engine.value, model: f.model.value, permission: f.permission.value,
   };
   // 빈 값은 서버에서 필드 삭제(기본값 사용)로 처리된다
-  if (f.engine.value === 'codex') Object.assign(body, { codexModel, codexEffort: f.codexEffort.value });
+  if (f.engine.value === 'codex') Object.assign(body, { codexModel, codexEffort: f.codexEffort.value, codexRole: f.codexRole.value });
   else if (deptEditing && (deptEditing.codexModel || deptEditing.codexEffort)) Object.assign(body, { codexModel: '', codexEffort: '' });
   if (!deptEditing && !body.instructions) delete body.instructions;
   const capabilities = parseTags(f.capabilities.value);
   const handoffs = [...new Set([...$('handoffChecks').querySelectorAll('input:checked')].map((b) => b.value).concat(deptHandoffExtra))];
   if (deptEditing || capabilities.length) body.capabilities = capabilities;
   if (deptEditing || handoffs.length) body.handoffs = handoffs;
+  body.handoffPolicy = f.handoffPolicy.value;
   // 서버 검증은 tools: null을 거부한다. 빈 배열은 sync에서 '제한 없음'으로 처리된다.
   if (tools) body.tools = tools; else if (deptEditing && Array.isArray(deptEditing.tools) && deptEditing.tools.length) body.tools = [];
   const btn = $('deptSubmit');
@@ -1793,6 +1887,12 @@ function refreshAgentDeptUi() {
   const f = $('agentForm');
   const deptId = f.department.value;
   const roles = rolesFor(deptId);
+  const dept = deptOf(deptId);
+  const codex = dept?.engine === 'codex';
+  $('agentModelRow').hidden = codex;
+  $('agentCodexFields').hidden = !codex;
+  fillModels(f.codexModel, 'codex', agentEditing?.codexModel || '', `부서 기본(${dept?.codexModel || 'gpt-6.1-sol'})`);
+  fillEfforts(f.codexEffort, 'codex', agentEditing?.codexModel || dept?.codexModel || 'gpt-6.1-sol', agentEditing?.codexEffort || '', `부서 기본(${dept?.codexEffort || 'max'})`);
   $('agentRole').innerHTML = '<option value="">직접 입력</option>' + roles.map((r, i) => `<option value="${i}">${esc(r.name || r.key)}${r.lead ? ' (팀장)' : ''}</option>`).join('');
   if (!agentEditing) {
     if (!f.id.dataset.touched) f.id.value = nextAgentId(deptId, takenIds());
@@ -1881,6 +1981,7 @@ async function submitAgent(ev) {
     active: f.active.checked,
   };
   if (f.model.value) body.model = f.model.value; else if (agentEditing?.model) body.model = null;
+  if (deptOf(f.department.value)?.engine === 'codex') Object.assign(body, { codexModel: f.codexModel.value, codexEffort: f.codexEffort.value });
   if (agentRoleKey) body.role = agentRoleKey;
   const btn = $('agentSubmit');
   btn.disabled = true;
@@ -1987,7 +2088,11 @@ function openRunDialog(agentId) {
   $('runPrompt').value = '';
   $('runModel').value = '';
   // codex 엔진(검증실) 직원은 Claude 모델 선택 대상이 아니다
-  $('runModelRow').hidden = deptOf(a?.department)?.engine === 'codex';
+  const engine = deptOf(a?.department)?.engine || S.settings.chief.engine;
+  $('runModelRow').hidden = false;
+  $('runEffortRow').hidden = false;
+  fillModels($('runModel'), engine, '', '기본(직원 설정)');
+  fillEfforts($('runEffort'), engine, a?.codexModel || deptOf(a?.department)?.codexModel || S.settings.chief.model, '', '기본(직원 설정)');
   $('runError').hidden = true;
   $('runDialog').showModal();
   $('runPrompt').focus();
@@ -1999,7 +2104,8 @@ async function submitRun(ev) {
   if (!prompt) { $('runError').textContent = '요청 내용을 입력해 주세요.'; $('runError').hidden = false; return; }
   try {
     const model = $('runModelRow').hidden ? '' : $('runModel').value;
-    await api('POST', '/api/runs', { agentId: runTarget, prompt, ...(model ? { model } : {}) });
+    const effort = $('runEffort').value;
+    await api('POST', '/api/runs', { agentId: runTarget, prompt, ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
     $('runDialog').close();
     toast(`${agentName(runTarget)}에게 작업을 지시했어요.`);
     await refresh();
@@ -2008,76 +2114,23 @@ async function submitRun(ev) {
   }
 }
 
-// 대상 업무 고르기(사용자 확인 대기 업무가 여러 건일 때). 고른 업무 id, 취소하면 null
-function pickTaskBox(text, ids, okLabel) {
-  const dlg = $('pickTaskDialog');
-  $('pickTaskText').textContent = text;
-  $('pickTaskOk').textContent = okLabel;
-  const list = $('pickTaskList');
-  list.replaceChildren(...ids.map((id, i) => {
-    const label = el('label', 'pick-item');
-    const radio = document.createElement('input');
-    radio.type = 'radio'; radio.name = 'pickTask'; radio.value = id; radio.checked = i === 0;
-    label.append(radio, el('b', '', taskTitle(id)), el('code', '', id));
-    return label;
-  }));
-  dlg.returnValue = '';
-  dlg.showModal();
-  return new Promise((resolve) => dlg.addEventListener('close', () => {
-    const picked = list.querySelector('input:checked');
-    resolve(dlg.returnValue === 'ok' && picked ? picked.value : null);
-  }, { once: true }));
-}
-
-// 입력창의 승인·반려: 확인 대화상자를 거쳐 승인·반려 API로 보낸다. 처리했으면 true(입력을 비운다)
-async function chiefDecision(act) {
-  const verb = act.action === 'approve' ? '승인' : '반려';
-  let taskId = act.taskId;
-  if (!taskId) {
-    taskId = await pickTaskBox(`사용자 확인 대기 업무가 ${act.choices.length}건이에요. 어느 업무를 ${verb}할까요?`, act.choices, verb);
-    if (!taskId) return false;
-  }
-  if (act.action === 'reject' && !act.feedback) {
-    openApprove(taskId, { focusFeedback: true });
-    toast('무엇을 고쳐야 하는지 반려 피드백을 적어 주세요. 비서실장이 이 내용으로 다시 배정합니다.');
-    return true;
-  }
-  const title = taskTitle(taskId);
-  const question = act.action === 'approve' ? `'${title}' 업무를 승인할까요? 완료로 바뀝니다.` : `'${title}' 업무를 반려할까요? 비서실장에게 전달할 피드백: ${act.feedback}`;
-  if (!(await confirmBox(question, verb))) return false;
-  if (act.action === 'approve') {
-    await api('POST', `/api/tasks/${encodeURIComponent(taskId)}/approve`);
-    toast(`'${title}' 업무를 승인했어요. 완료로 바꿨어요.`);
-  } else {
-    await api('POST', `/api/tasks/${encodeURIComponent(taskId)}/reject`, { feedback: act.feedback });
-    toast('반려 피드백을 비서실장에게 전달했어요. 다시 배정합니다.');
-  }
-  await refresh();
-  return true;
-}
-
 async function submitChief(ev) {
   ev.preventDefault();
   const input = $('chiefInput');
   const prompt = input.value.trim();
   if (!prompt) { input.focus(); return; }
-  // 사용자 확인 대기 업무가 있으면 "승인"·"반려 …"는 새 실행이 아니라 승인·반려로 처리한다
+  // 승인 요청 없이 완료 결과를 확인한다.
   const act = chiefInputAction(prompt, S.tasks);
-  if (act.action !== 'run') {
-    try {
-      if (await chiefDecision(act)) input.value = '';
-    } catch (e) {
-      toast(e.message, { type: 'error' });
-    }
-    return;
-  }
+  if (act.action === 'show-result') { input.value = ''; openCompletion(act.taskId); return; }
+  if (act.action === 'no-approval') { input.value = ''; toast('비서실장 검토가 끝나면 승인 없이 자동으로 완료됩니다.'); return; }
   try {
+    await chiefSaveQueue;
     const model = $('chiefModel').value;
-    await api('POST', '/api/runs', { prompt, ...(model ? { model } : {}) });
+    const result = await api('POST', '/api/runs', { prompt, engine: $('chiefEngine').value, model, effort: $('chiefEffort').value });
     input.value = '';
     // 데스크톱에서는 상세 패널이 실행 목록 자리를 가리므로 닫아서 시작된 실행을 바로 보이게 한다
     if (ui.drawer) closeDrawer({ restoreFocus: false });
-    toast('비서실장에게 업무를 전달했어요. 업무를 나눠 직원들에게 배정합니다.');
+    toast(result.scheduled ? `매일 ${result.schedule.time}에 업무를 시작하도록 예약했어요. 반복 예약에서 관리할 수 있습니다.` : '비서실장에게 업무를 전달했어요. 업무를 나눠 직원들에게 배정합니다.');
     await refresh();
   } catch (e) {
     toast(e.message, { type: 'error' });
@@ -2233,7 +2286,12 @@ function renderThread() {
 
   // 답장 입력 상태
   const codex = latest?.engine === 'codex';
-  $('threadModelRow').hidden = codex;
+  $('threadModelRow').hidden = false;
+  if ($('threadModel').dataset.run !== latest?.id) {
+    fillModels($('threadModel'), codex ? 'codex' : 'claude', '', '이전과 같게');
+    fillEfforts($('threadEffort'), codex ? 'codex' : 'claude', latest?.model || 'gpt-6.1-sol', '', '이전과 같게');
+    $('threadModel').dataset.run = latest?.id || '';
+  }
   let status = '';
   if (S.demo) status = DEMO_HINT;
   else if (!latest) status = '';
@@ -2271,7 +2329,8 @@ async function submitThread(ev) {
   renderThread();
   try {
     const model = $('threadModelRow').hidden ? '' : $('threadModel').value;
-    await api('POST', `/api/runs/${encodeURIComponent(latest.id)}/reply`, { prompt, ...(model ? { model } : {}) });
+    const effort = $('threadEffort').value;
+    await api('POST', `/api/runs/${encodeURIComponent(latest.id)}/reply`, { prompt, ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
     $('threadPrompt').value = '';
     toast(`${runWho(latest)}에게 답장을 보냈어요.`);
     await refresh();
@@ -2283,12 +2342,66 @@ async function submitThread(ev) {
   }
 }
 
+// ───── 계정 연결 ─────
+let connectionBusy = false;
+let connectionEditing = null;
+let connectionCache = [];
+const CONNECTION_LABEL = { disconnected: '연결 전', connecting: '로그인 창 열림', connected: '연결됨', needs_login: '재연결 필요' };
+async function refreshConnections() {
+  const response = await fetch('/api/connections', { headers: { 'X-Office-Token': token } });
+  const data = await response.json(); if (!response.ok) throw new Error(data.error || '연결 계정을 불러오지 못했습니다.');
+  connectionCache = data.connections;
+  $('connectionList').innerHTML = data.connections.length ? data.connections.map((c) => `<article class="connection-card">
+    <div><strong>${esc(c.label)}</strong><p class="help">${esc(data.providers.find((p) => p.id === c.provider)?.name || c.provider)} · ${esc(CONNECTION_LABEL[c.status] || c.status)}${c.hasCredentials ? ' · 자동 로그인 저장됨' : ''}</p></div>
+    <div class="connection-actions"><button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="open">${c.status === 'needs_login' ? '재연결' : '로그인 창 열기'}</button>
+    <button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="credentials">${c.hasCredentials ? '로그인 정보 변경' : '자동 로그인 설정'}</button>
+    ${c.status === 'connecting' ? `<button type="button" class="btn btn-sm btn-primary" data-connection="${esc(c.id)}" data-connection-action="confirm">연결 완료</button>` : ''}
+    <button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="remove">연결 해제</button></div></article>`).join('') : '<p class="help">연결한 계정이 없습니다. 업무에 사용할 계정을 한 번 연결해 주세요.</p>';
+}
+async function connectionAction(action) {
+  if (connectionBusy) return;
+  connectionBusy = true; $('connectionError').hidden = true; $('connectionSubmit').disabled = true;
+  try { await action(); }
+  catch (error) { $('connectionError').textContent = error.message; $('connectionError').hidden = false; }
+  finally { connectionBusy = false; $('connectionSubmit').disabled = false; await refreshConnections().catch(() => {}); }
+}
+async function openConnections() {
+  $('connectionError').hidden = true;
+  $('connectionsDialog').showModal();
+  try { await refreshConnections(); } catch (error) { $('connectionError').textContent = error.message; $('connectionError').hidden = false; }
+}
+async function submitConnection(event) {
+  event.preventDefault();
+  await connectionAction(async () => {
+    const form = $('connectionForm');
+    const body = { provider: form.provider.value, label: form.label.value, remember: form.remember.checked };
+    if (body.remember) Object.assign(body, { username: form.username.value, password: form.password.value });
+    // 네트워크 응답·로그인 창을 기다리는 동안에도 로그인 값은 폼에 남기지 않는다.
+    form.username.value = ''; form.password.value = '';
+    const connection = connectionEditing ? await api('PUT', `/api/connections/${encodeURIComponent(connectionEditing)}`, body) : await api('POST', '/api/connections', body);
+    resetConnectionForm();
+    await api('POST', `/api/connections/${encodeURIComponent(connection.id)}/open`);
+    toast('열린 브라우저에서 로그인·추가 인증을 마친 뒤 연결 완료를 눌러 주세요.');
+  });
+}
+function resetConnectionForm() {
+  connectionEditing = null;
+  const form = $('connectionForm'); form.reset();
+  form.username.value = ''; form.password.value = '';
+  form.username.disabled = true; form.password.disabled = true;
+  form.provider.disabled = false; form.label.disabled = false; form.remember.disabled = false;
+  $('connectionSubmit').textContent = '계정 추가·로그인 창 열기'; $('connectionCancelEdit').hidden = true;
+}
+
 // ───── 회사 설정 ─────
 async function openCompany() {
   $('companyError').hidden = true;
   $('companyRules').value = '';
   $('companyRules').disabled = true;
-  $('companySubmit').disabled = S.demo;
+  $('finalOutputParent').disabled = true;
+  $('finalOutputParent').value = '';
+  $('finalOutputPath').textContent = '불러오는 중…';
+  $('companySubmit').disabled = true;
   $('orgImportBtn').disabled = S.demo;
   $('orgImportBtn').title = S.demo ? DEMO_HINT : '';
   $('workspacePath').textContent = '불러오는 중…';
@@ -2302,11 +2415,15 @@ async function openCompany() {
     const ws = data.workspace || {};
     $('workspacePath').textContent = ws.path || '알 수 없음';
     $('workspaceSource').textContent = ws.label ? `(${ws.label})` : '';
+    $('finalOutputParent').value = data.finalOutputs?.parent || '';
+    $('finalOutputPath').textContent = data.finalOutputs?.directory || '';
+    $('companyRules').disabled = false;
+    $('finalOutputParent').disabled = S.demo;
+    $('companySubmit').disabled = S.demo;
   } catch (e) {
     $('companyError').textContent = `불러오지 못했어요: ${e.message}`;
     $('companyError').hidden = false;
   } finally {
-    $('companyRules').disabled = false;
     updateCompanyCount();
     $('companyRules').focus();
   }
@@ -2322,10 +2439,10 @@ async function submitCompany(ev) {
   const btn = $('companySubmit');
   btn.disabled = true;
   try {
-    const out = await api('PUT', '/api/company', { rules: $('companyRules').value });
+    const out = await api('PUT', '/api/company', { rules: $('companyRules').value, finalOutputParent: $('finalOutputParent').value });
     previewCache.clear();
     $('companyDialog').close();
-    toast(`회사 공통 규칙을 저장했어요. 에이전트 파일 ${out?.sync?.changed?.length ?? 0}개를 갱신했어요.`);
+    toast(`회사 규칙과 최종산출물 저장 위치를 저장했어요. 에이전트 파일 ${out?.sync?.changed?.length ?? 0}개를 갱신했어요.`);
   } catch (e) {
     $('companyError').textContent = e.message;
     $('companyError').hidden = false;
@@ -2550,7 +2667,7 @@ async function loadTaskFiles(taskId, force = false) {
   o.files.set(taskId, entry);
   o.sig = '';
   if (ui.view === 'outputs') renderOutputs();
-  if (ui.approve?.taskId === taskId) { ui.approve.sig = ''; renderApprove(); }
+  if (ui.completion?.taskId === taskId) { ui.completion.sig = ''; renderCompletion(); }
   return entry;
 }
 
@@ -2561,7 +2678,7 @@ function outputTask(id) {
 function renderOutputs() {
   const o = ui.out;
   if (!o.list && !o.loading) loadOutputs(true);
-  const list = o.list || [];
+  const list = (o.list || []).filter((task) => $('outScope').value !== 'final' || task.finalOutput);
   // 필터 선택지
   const dates = [...new Set(list.map((t) => t.date).filter(Boolean))];
   const dateSel = $('outDate');
@@ -2573,7 +2690,7 @@ function renderOutputs() {
   const deptHtml = '<option value="">전체</option>' + S.departments.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('');
   if (deptSel._html !== deptHtml) { deptSel.innerHTML = deptHtml; deptSel._html = deptHtml; deptSel.value = S.departments.some((d) => d.id === keepDept) ? keepDept : ''; }
   const filtered = filterOutputs(list, { q: $('outQ').value, date: dateSel.value, dept: deptSel.value, status: $('outStatus').value });
-  $('outSub').textContent = o.list ? `업무 ${list.length}건${filtered.length !== list.length ? ` · ${filtered.length}건 표시` : ''}` : '불러오는 중…';
+  $('outSub').textContent = o.list ? `${$('outScope').value === 'final' ? '최종산출물' : '전체 업무 자료'} ${list.length}건${filtered.length !== list.length ? ` · ${filtered.length}건 표시` : ''}` : '불러오는 중…';
   setHTML($('outList'), (o.error ? `<li class="help out-note">${esc(o.error)}</li>` : '') + (filtered.length ? filtered.map((t) => {
     const task = S.tasks.find((x) => x.id === t.id) || t;
     const reviews = taskReviews({ ...t, ...task, verdicts: { ...(t.verdicts || {}), ...(task.verdicts || {}) } });
@@ -2581,7 +2698,7 @@ function renderOutputs() {
       <span class="oi-top"><span class="tag t-${esc(task.status || t.status)}">${esc(TASK_STATUS_LABEL[task.status || t.status] || task.status || t.status)}</span><b>${esc(t.title)}</b></span>
       <span class="oi-meta"><time>${esc(t.date || '')}</time>${t.departments.map((d) => partyChip(d)).join('')}${reviews.map((r) => `<span class="verdict v-${esc(String(r.verdict || 'none').toLowerCase())}">${esc(r.verdict || '…')}</span>`).join('')}</span>
     </button></li>`;
-  }).join('') : `<li class="empty">${o.list ? (list.length ? '조건에 맞는 업무가 없어요.' : '아직 산출물이 없어요. 업무를 지시하면 outputs 폴더에 쌓여요.') : '불러오는 중…'}</li>`));
+  }).join('') : `<li class="empty">${o.list ? (list.length ? '조건에 맞는 업무가 없어요.' : '아직 전달된 결과가 없어요. 작업 중 자료는 ‘전체 업무 자료’에서 볼 수 있어요.') : '불러오는 중…'}</li>`));
   $('outLayout').classList.toggle('has-sel', !!o.sel);
   renderOutDetail();
 }
@@ -2590,14 +2707,14 @@ function renderOutDetail() {
   const o = ui.out;
   const box = $('outDetail');
   if (!o.sel) {
-    if (box._sig !== 'none') { box.replaceChildren(el('p', 'empty', '왼쪽 목록에서 업무를 고르면 보고서·회의록·부서별 파일·검토 결과를 볼 수 있어요.')); box._sig = 'none'; }
+    if (box._sig !== 'none') { box.replaceChildren(el('p', 'empty', '왼쪽 목록에서 업무를 고르면 최종 전달 파일과 비서실장 보고를 볼 수 있어요.')); box._sig = 'none'; }
     return;
   }
   const t = outputTask(o.sel);
   const files = o.files.get(o.sel);
   if (!files) loadTaskFiles(o.sel);
   const runs = S.runs.filter((r) => r.task === o.sel || r.taskId === o.sel);
-  const sig = JSON.stringify([o.sel, t.status, t.title, !!files?.loading, files?.error, files?.data ? 1 : 0, runs.map((r) => [r.id, r.status, r.needsReply]),
+  const sig = JSON.stringify([o.sel, t.status, t.title, !!files?.loading, files?.error, files?.data?.final?.updated, files?.data ? 1 : 0, runs.map((r) => [r.id, r.status, r.needsReply]),
     taskSteps(t, S.flow).current, t.plan ? planStages(t.plan, S.flow, t.id).map((s) => s.status) : 0, ui.view]);
   if (box._sig === sig) return;
   box._sig = sig;
@@ -2615,9 +2732,9 @@ function renderOutDetail() {
   const openBtn = el('button', 'btn btn-sm', '폴더 열기');
   openBtn.type = 'button'; openBtn.dataset.act = 'out-folder'; openBtn.dataset.task = t.id; openBtn.dataset.key = 'od-folder';
   acts.append(openBtn);
-  if (t.status === 'review') {
-    const ap = el('button', 'btn btn-sm btn-primary', '사용자 확인(승인·반려)');
-    ap.type = 'button'; ap.dataset.act = 'open-approve'; ap.dataset.task = t.id; ap.dataset.key = 'od-approve';
+  if (t.status === 'done' || t.status === 'review') {
+    const ap = el('button', 'btn btn-sm btn-primary', '완료 결과 보기');
+    ap.type = 'button'; ap.dataset.act = 'open-completion'; ap.dataset.task = t.id; ap.dataset.key = 'od-approve';
     acts.append(ap);
   }
   frag.append(head, meta, acts);
@@ -2695,6 +2812,21 @@ function renderOutDetail() {
   } else conv.append(el('p', 'muted-text', '이 업무에 연결된 대화가 없어요.'));
   frag.append(conv);
   frag.append(preview);
+  const delivered = files?.data?.final;
+  if (delivered) {
+    const section = el('section', 'od-sec');
+    const location = el('p', 'workspace-path'); location.append(el('code', '', delivered.directory));
+    section.append(el('h4', 'sub-title', '최종산출물'), location);
+    const report = delivered.files.find((f) => f.name.startsWith('비서실장-보고') && f.name.endsWith('.md'));
+    const reportBox = el('div', 'doc-box');
+    if (report) { section.append(reportBox); renderFileInto(reportBox, report, { compact: true }); }
+    section.append(fileButtons(delivered.files.filter((f) => f !== report), preview));
+    const intermediate = el('details', 'od-sec');
+    intermediate.append(el('summary', 'sub-title', '중간 작업·계획·대화 보기'));
+    while (acts.nextSibling && acts.nextSibling !== preview) intermediate.append(acts.nextSibling);
+    frag.insertBefore(section, preview); frag.insertBefore(intermediate, preview);
+    openBtn.textContent = '최종산출물 폴더 열기';
+  }
   revokeBlobs(box);
   box.replaceChildren(frag);
 }
@@ -2711,12 +2843,18 @@ function fileButtons(list, preview, badge) {
     if (v) b.append(el('span', `verdict v-${String(v).toLowerCase()}`, v));
     if (Number.isFinite(f.size)) b.append(el('small', '', formatSize(f.size)));
     b.addEventListener('click', () => {
-      for (const x of ul.closest('.od-sec, .approve-grid, .out-detail')?.querySelectorAll('.file-btn.is-sel') || []) x.classList.remove('is-sel');
+      for (const x of ul.closest('.od-sec, .completion-grid, .out-detail')?.querySelectorAll('.file-btn.is-sel') || []) x.classList.remove('is-sel');
       b.classList.add('is-sel');
       renderFileInto(preview, f);
       preview.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
-    li.append(b);
+    if (fileKind(f.name) === 'html') {
+      const actions = el('div', 'file-actions');
+      const open = el('button', 'btn btn-sm', '새 탭에서 열기');
+      open.type = 'button'; open.setAttribute('aria-label', `${f.name} 새 탭에서 열기`);
+      open.addEventListener('click', () => openHtmlTab(f));
+      actions.append(b, open); li.append(actions);
+    } else li.append(b);
     ul.append(li);
   }
   return ul;
@@ -2768,6 +2906,17 @@ async function downloadFile(file) {
 }
 
 const PREVIEW_MAX = 400000;
+async function openHtmlTab(file) {
+  const tab = window.open('about:blank', '_blank');
+  if (!tab) { toast('브라우저에서 새 탭 열기를 허용해 주세요.', { type: 'error' }); return; }
+  tab.opener = null;
+  try {
+    const { text } = await fetchFileText(file.path);
+    const url = URL.createObjectURL(new Blob([withPreviewCsp(text)], { type: 'text/html;charset=utf-8' }));
+    tab.location.replace(url);
+    const timer = setInterval(() => { if (tab.closed) { URL.revokeObjectURL(url); clearInterval(timer); } }, 1000);
+  } catch (error) { tab.close(); toast(`HTML을 열지 못했어요: ${error.message}`, { type: 'error' }); }
+}
 // html 미리보기 blob 문서 맨 앞에 CSP를 넣는다. 서버 미리보기 CSP는 blob 문서에 닿지 않고, blob URL을 최상위 창으로 열면
 // sandbox도 풀리기 때문이다(외부 이미지·CSS 비콘과 스크립트 실행을 함께 막는다). <!doctype>이 있으면 그 뒤에 넣어 표준 모드를 지킨다
 export const PREVIEW_META_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; form-action 'none'">`;
@@ -2789,6 +2938,10 @@ async function renderFileInto(box, file, { compact = false } = {}) {
   const body = el('div', 'fp-body');
   if (!compact) box.replaceChildren(head, body); else box.replaceChildren(body);
   if (!compact) head.append(dl);
+  if (kind === 'html' && !compact) {
+    const open = el('button', 'btn btn-sm', '새 탭에서 열기'); open.type = 'button';
+    open.addEventListener('click', () => openHtmlTab(file)); head.append(open);
+  }
   if (kind === 'binary') {
     body.append(el('p', 'muted-text', '미리보기를 지원하지 않는 형식이에요. 내려받아 확인해 주세요.'));
     if (compact) { const b = dl; body.append(b); }
@@ -2855,105 +3008,153 @@ async function openWorkspaceFolder() {
 
 async function openFolder(taskId) {
   try {
-    await api('POST', outputUrl(taskId, '/open'));
+    await api('POST', outputUrl(taskId, '/open'), { final: Boolean(ui.out.files.get(taskId)?.data?.final || outputTask(taskId).finalOutput) });
     toast('산출물 폴더를 열었어요.');
   } catch (e) { toast(e.message, { type: 'error' }); }
 }
 
-// ───── 사용자 확인(승인·반려) ─────
-function openApprove(taskId, { focusFeedback = false } = {}) {
+// ───── 매일 반복 예약 ─────
+let scheduleItems = [];
+let scheduleBusy = false;
+function setScheduleBusy(value) {
+  scheduleBusy = value;
+  for (const id of ['scheduleSave', 'scheduleTime', 'schedulePrompt', 'scheduleCancelEdit']) $(id).disabled = value;
+  for (const button of $('scheduleList').querySelectorAll('button')) button.disabled = value;
+}
+const scheduleStatus = { queued: '대기', running: '진행 중', done: '종료', failed: '실패', stopped: '중지', needs_reply: '답변 필요', starting: '시작 중' };
+function scheduleStamp(value) {
+  return value ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value)) : '—';
+}
+function renderSchedules() {
+  const items = S.schedules;
+  setHTML($('scheduleList'), items.length ? items.map((item) => `<li class="schedule-item" data-schedule="${esc(item.id)}">
+    <b>매일 ${esc(item.time)} · ${item.enabled ? '예약 중' : '일시중지'}</b><p>${esc(item.prompt)}</p>
+    <p class="help">다음 시작: ${item.enabled ? esc(scheduleStamp(item.nextAt)) : '일시중지'}${item.lastRun ? ` · 최근: ${esc(scheduleStatus[item.lastRun.status] || item.lastRun.status)}` : ''}</p>
+    ${item.lastRun?.summary ? `<p class="help">${esc(item.lastRun.summary)}</p>` : ''}
+    ${item.lastSkipped ? `<p class="help">${esc(scheduleStamp(item.lastSkipped.at))} · ${esc(item.lastSkipped.reason)}</p>` : ''}
+    <div class="run-actions"><button type="button" class="btn btn-sm" data-schedule-action="toggle">${item.enabled ? '일시중지' : '다시 켜기'}</button><button type="button" class="btn btn-sm" data-schedule-action="edit">수정</button>${item.lastRun?.id ? '<button type="button" class="btn btn-sm" data-schedule-action="result">최근 결과</button>' : ''}<button type="button" class="btn btn-sm btn-danger" data-schedule-action="delete">삭제</button></div></li>`).join('') : '<li class="empty">등록된 예약이 없습니다. 상단 지시창에 “매일 오전 11시에 …”라고 입력해도 예약됩니다.</li>');
+  setScheduleBusy(scheduleBusy);
+}
+function resetScheduleForm() {
+  $('scheduleForm').reset(); $('scheduleId').value = '';
+  $('scheduleFormTitle').textContent = '예약 추가'; $('scheduleSave').textContent = '매일 예약하기';
+  $('scheduleCancelEdit').hidden = true; $('scheduleError').hidden = true;
+}
+async function loadSchedules() {
+  const response = await authedGet('/api/schedules'); const data = await response.json();
+  if (!response.ok) throw new Error(data.error || '예약을 불러오지 못했습니다.');
+  scheduleItems = data.schedules; await refresh(); renderSchedules();
+}
+async function openSchedules() {
+  resetScheduleForm(); setScheduleBusy(true); $('schedulesDialog').showModal();
+  try { await loadSchedules(); } catch (error) { $('scheduleError').textContent = error.message; $('scheduleError').hidden = false; }
+  finally { setScheduleBusy(false); }
+}
+async function saveSchedule(event) {
+  event.preventDefault();
+  if (scheduleBusy) return;
+  const id = $('scheduleId').value, previous = scheduleItems.find((item) => item.id === id);
+  const body = { prompt: $('schedulePrompt').value.trim(), time: $('scheduleTime').value,
+    chief: previous?.chief || { engine: $('chiefEngine').value, model: $('chiefModel').value, effort: $('chiefEffort').value } };
+  setScheduleBusy(true); $('scheduleError').hidden = true;
+  try {
+    await api(id ? 'PUT' : 'POST', `/api/schedules${id ? `/${encodeURIComponent(id)}` : ''}`, body);
+    resetScheduleForm(); await loadSchedules(); toast(id ? '예약을 수정했어요.' : `매일 ${body.time}에 시작하도록 예약했어요.`);
+  } catch (error) { $('scheduleError').textContent = error.message; $('scheduleError').hidden = false; }
+  finally { setScheduleBusy(false); }
+}
+async function scheduleAction(event) {
+  const button = event.target.closest('[data-schedule-action]');
+  if (!button || scheduleBusy) return;
+  const id = button.closest('[data-schedule]').dataset.schedule;
+  const item = scheduleItems.find((item) => item.id === id) || S.schedules.find((item) => item.id === id);
+  if (!item) return;
+  const action = button.dataset.scheduleAction;
+  if (action === 'edit') {
+    setScheduleBusy(true);
+    try {
+      await loadSchedules(); const full = scheduleItems.find((item) => item.id === id);
+      if (!full) return;
+      $('scheduleId').value = id; $('scheduleTime').value = full.time; $('schedulePrompt').value = full.prompt;
+      $('scheduleFormTitle').textContent = '예약 수정'; $('scheduleSave').textContent = '수정 저장'; $('scheduleCancelEdit').hidden = false;
+      $('schedulePrompt').focus(); return;
+    } catch (error) { toast(error.message, { type: 'error' }); return; }
+    finally { setScheduleBusy(false); }
+  }
+  if (action === 'result') {
+    $('schedulesDialog').close();
+    if (S.tasks.find((task) => task.id === item.lastRun.task)?.status === 'done') return openCompletion(item.lastRun.task);
+    if (S.runs.some((run) => run.id === item.lastRun.id)) return openThread(item.lastRun.id);
+    return openOutputs(item.lastRun.task);
+  }
+  setScheduleBusy(true);
+  try {
+    if (action === 'delete') {
+      if (!await confirmBox('이 반복 예약을 삭제할까요? 진행 중인 업무와 기존 산출물·영상 게시 기록은 유지됩니다.', '예약 삭제')) return;
+      await api('DELETE', `/api/schedules/${encodeURIComponent(id)}`);
+      if ($('scheduleId').value === id) resetScheduleForm();
+    } else if (action === 'toggle') await api('PUT', `/api/schedules/${encodeURIComponent(id)}`, { enabled: !item.enabled });
+    await loadSchedules();
+    toast(action === 'delete' ? '예약을 삭제했어요. 영상 게시 기록은 유지됩니다.' : item.enabled ? '다음 예약부터 일시중지했어요. 진행 중인 업무는 업무·실행에서 중지할 수 있습니다.' : '예약을 다시 켰어요.');
+  } catch (error) { toast(error.message, { type: 'error' }); }
+  finally { setScheduleBusy(false); }
+}
+
+// ───── 완료 결과 ─────
+const completionQueue = [];
+function openNextCompletion() {
+  if (document.querySelector('dialog[open]') || ui.completion) return;
+  while (completionQueue.length) {
+    const id = completionQueue.shift();
+    if (S.attention.some((item) => item.kind === 'complete' && item.task === id)) { openCompletion(id); break; }
+  }
+}
+
+function openCompletion(taskId) {
   if (!taskId) return;
-  ui.approve = { taskId, sig: '', busy: false };
-  $('approveFeedback').value = '';
-  $('approveError').hidden = true;
-  const dlg = $('approveDialog');
+  ui.completion = { taskId, sig: '', ready: false };
+  const dlg = $('completionDialog');
   if (!dlg.open) dlg.showModal();
   loadTaskFiles(taskId, true);
-  renderApprove();
-  (focusFeedback ? $('approveFeedback') : $('approveOk')).focus();
+  renderCompletion();
 }
 
-function renderApprove() {
-  const st = ui.approve;
-  const dlg = $('approveDialog');
-  if (!st || !dlg.open) return;
-  const t = outputTask(st.taskId);
-  const files = ui.out.files.get(st.taskId);
-  $('approveTitle').textContent = `사용자 확인 · ${t.title || t.id}`;
-  $('approveSub').textContent = t.id;
-  setHTML($('approveSteps'), stepperHtml(t) + (t.plan ? planHtml(t, t.plan) : '') + missingOutputsHtml(t));
-  const waiting = t.status === 'review';
-  const status = S.demo ? '데모 모드에서는 승인·반려를 보낼 수 없어요.' : st.busy ? '보내는 중…' : waiting ? '' : `이 업무는 지금 '${TASK_STATUS_LABEL[t.status] || t.status}' 상태예요.`;
-  $('approveStatus').textContent = status;
-  $('approveOk').disabled = S.demo || st.busy || !waiting;
-  $('approveReject').disabled = S.demo || st.busy || !waiting;
-  $('approveFeedback').disabled = S.demo || !waiting;
-  const sig = JSON.stringify([st.taskId, !!files?.loading, files?.error, files?.data ? 1 : 0]);
-  if (st.sig === sig) return;
-  st.sig = sig;
-  const g = files?.groups || groupOutputFiles([], st.taskId);
-  const report = $('approveReport');
-  revokeBlobs($('approvePreview'));
-  if (files?.loading || !files) report.replaceChildren(el('p', 'muted-text', '불러오는 중…'));
-  else if (g.report) renderFileInto(report, g.report, { compact: true });
-  else report.replaceChildren(el('p', 'muted-text', files.error ? `불러오지 못했어요: ${files.error}` : '아직 report.md가 없어요.'));
-  const all = [g.meeting, g.brief, g.notes, ...g.common, ...g.depts.flatMap(([, l]) => l), ...g.reviews].filter(Boolean);
-  const preview = $('approvePreview');
-  preview.replaceChildren(el('p', 'help', all.length ? '파일을 누르면 여기에서 미리 봅니다.' : ''));
-  const list = $('approveFiles');
-  list.replaceChildren(...(all.length ? [...fileButtons(all, preview).children] : [el('li', 'muted-text', files?.loading ? '불러오는 중…' : '산출물 파일이 없어요.')]));
+function renderCompletion() {
+  const state = ui.completion;
+  if (!state || !$('completionDialog').open) return;
+  const task = outputTask(state.taskId), files = ui.out.files.get(state.taskId);
+  $('completionTitle').textContent = `업무 완료 · ${task.title || task.id}`;
+  $('completionSub').textContent = '비서실장의 최종 검토를 마쳤습니다.';
+  const sig = JSON.stringify([state.taskId, !!files?.loading, files?.error, files?.data?.final?.updated]);
+  if (state.sig === sig) return;
+  state.sig = sig;
+  const final = files?.data?.final;
+  const reportFile = final?.files.find((file) => file.name.startsWith('비서실장-보고') && file.name.endsWith('.md')) || files?.groups?.report;
+  const report = $('completionReport'), preview = $('completionPreview');
+  revokeBlobs(preview); revokeBlobs(report);
+  preview.replaceChildren();
+  if (files?.loading || !files) report.replaceChildren(el('p', 'help', '완료 결과를 불러오는 중…'));
+  else if (reportFile) renderFileInto(report, reportFile, { compact: true });
+  else report.replaceChildren(el('p', 'help', files?.error || '완료 보고서를 찾을 수 없습니다.'));
+  const deliverables = (final?.files || []).filter((file) => file !== reportFile);
+  const list = $('completionFiles');
+  list.replaceChildren(...(deliverables.length ? [...fileButtons(deliverables, preview).children]
+    : [el('li', 'help', files?.loading ? '불러오는 중…' : final ? '별도 최종 첨부 파일은 없습니다.' : '최종 산출물을 확인할 수 없습니다.')]));
+  $('completionFolder').disabled = !final;
+  state.ready = Boolean(final && reportFile && !files?.error);
 }
 
-async function submitApprove() {
-  const st = ui.approve;
-  if (!st || st.busy || S.demo) return;
-  st.busy = true;
-  renderApprove();
+async function clearHistory() {
+  if (S.demo) return;
+  if (!await confirmBox('완료된 업무와 종료된 실행을 목록에서 지우고 대화·실행 로그를 정리할까요? 최종 산출물, 계정, 발송 증표, 진행 중이거나 답변을 기다리는 업무는 보존합니다.', '내역 초기화')) return;
+  $('clearHistoryBtn').disabled = true;
   try {
-    await api('POST', `/api/tasks/${encodeURIComponent(st.taskId)}/approve`);
-    toast(`'${taskTitle(st.taskId)}' 업무를 승인했어요. 완료로 바꿨어요.`);
-    $('approveDialog').close();
+    const result = await api('DELETE', '/api/history');
+    resultCache.clear(); threadSig = '';
     await refresh();
-  } catch (e) {
-    $('approveError').textContent = e.message; $('approveError').hidden = false;
-  } finally {
-    if (ui.approve) { ui.approve.busy = false; renderApprove(); }
-  }
-}
-
-async function submitReject() {
-  const st = ui.approve;
-  if (!st || st.busy || S.demo) return;
-  const feedback = $('approveFeedback').value.trim();
-  if (!feedback) {
-    $('approveError').textContent = '무엇을 고쳐야 하는지 피드백을 적어 주세요. 비서실장이 이 내용으로 다시 배정합니다.';
-    $('approveError').hidden = false;
-    $('approveFeedback').focus();
-    return;
-  }
-  st.busy = true;
-  renderApprove();
-  try {
-    await api('POST', `/api/tasks/${encodeURIComponent(st.taskId)}/reject`, { feedback });
-    toast('반려 피드백을 비서실장에게 전달했어요. 다시 배정합니다.');
-    $('approveDialog').close();
-    await refresh();
-  } catch (e) {
-    $('approveError').textContent = e.message; $('approveError').hidden = false;
-  } finally {
-    if (ui.approve) { ui.approve.busy = false; renderApprove(); }
-  }
-}
-
-// 관제 카드의 [승인]: 확인 후 바로 보낸다
-async function quickApprove(taskId) {
-  if (!taskId) return;
-  if (!(await confirmBox(`'${taskTitle(taskId)}' 업무를 승인하고 완료로 바꿀까요?`, '승인'))) return;
-  try {
-    await api('POST', `/api/tasks/${encodeURIComponent(taskId)}/approve`);
-    toast('승인했어요. 업무를 완료로 바꿨어요.');
-    await refresh();
-  } catch (e) { toast(e.message, { type: 'error' }); }
+    toast(`업무 ${result.removedTasks}건 · 실행 ${result.removedRuns}건의 내역을 정리했어요.`);
+  } catch (error) { toast(error.message, { type: 'error' }); }
+  finally { renderChiefSettings(); }
 }
 
 // ───── 역량 공백 ─────
@@ -2985,9 +3186,7 @@ async function act(btn) {
       case 'open-agent': return id === 'chief' ? openDrawer('chief', 'chief') : openDrawer('agent', id);
       case 'open-chief': return openDrawer('chief', 'chief');
       case 'attn': return openAttentionByKey(btn.dataset.attn);
-      case 'open-approve': return openApprove(task);
-      case 'approve-task': return quickApprove(task);
-      case 'reject-task': return openApprove(task, { focusFeedback: true });
+      case 'open-completion': return openCompletion(task);
       case 'out-show': return openOutputs(task);
       case 'out-open': ui.out.sel = task; renderOutputs(); loadTaskFiles(task); $('outDetail').focus({ preventScroll: true }); return undefined;
       case 'out-back': { const sel = ui.out.sel; ui.out.sel = null; renderOutputs(); document.querySelector(`[data-key="oi-${CSS.escape(sel || '')}"]`)?.focus(); return undefined; }
@@ -3145,9 +3344,45 @@ function init() {
   $('themeToggle').addEventListener('click', () => setTheme(ui.theme === 'neon' ? 'pastel' : 'neon'));
   $('addDeptBtn').addEventListener('click', () => openDeptDialog());
   $('companyBtn').addEventListener('click', openCompany);
+  $('connectionsBtn').addEventListener('click', openConnections);
+  $('schedulesBtn').addEventListener('click', openSchedules);
+  $('companySchedulesBtn').addEventListener('click', openSchedules);
+  $('scheduleForm').addEventListener('submit', saveSchedule);
+  $('scheduleCancelEdit').addEventListener('click', resetScheduleForm);
+  $('scheduleList').addEventListener('click', scheduleAction);
+  $('connectionsClose').addEventListener('click', () => $('connectionsDialog').close());
+  $('connectionsDialog').addEventListener('close', () => {
+    resetConnectionForm();
+  });
+  $('connectionCancelEdit').addEventListener('click', resetConnectionForm);
+  $('connectionForm').addEventListener('submit', submitConnection);
+  $('connectionRemember').addEventListener('change', (event) => {
+    $('connectionUsername').disabled = !event.target.checked; $('connectionPassword').disabled = !event.target.checked;
+    if (!event.target.checked) { $('connectionUsername').value = ''; $('connectionPassword').value = ''; }
+  });
+  $('connectionList').addEventListener('click', (event) => {
+    if (connectionBusy) return;
+    const button = event.target.closest('[data-connection-action]'); if (!button) return;
+    const { connection: id, connectionAction: action } = button.dataset;
+    if (action === 'credentials') {
+      const record = connectionCache.find((c) => c.id === id); if (!record) return;
+      const form = $('connectionForm'); connectionEditing = id;
+      form.provider.value = record.provider; form.label.value = record.label;
+      form.provider.disabled = true; form.label.disabled = true; form.remember.disabled = true;
+      form.remember.checked = true; form.username.disabled = false; form.password.disabled = false;
+      $('connectionSubmit').textContent = '자동 로그인 정보 저장·연결'; $('connectionCancelEdit').hidden = false;
+      form.username.focus(); return;
+    }
+    if (action === 'remove' && !window.confirm('이 계정의 저장된 로그인 연결을 해제할까요?')) return;
+    connectionAction(() => api(action === 'remove' ? 'DELETE' : 'POST', `/api/connections/${encodeURIComponent(id)}${action === 'remove' ? '' : '/' + action}`));
+  });
   $('workspaceOpenBtn').addEventListener('click', openWorkspaceFolder);
   $('companyForm').addEventListener('submit', submitCompany);
   $('companyRules').addEventListener('input', updateCompanyCount);
+  $('finalOutputParent').addEventListener('input', () => {
+    const parent = $('finalOutputParent').value.trim() || $('workspacePath').textContent;
+    $('finalOutputPath').textContent = `${parent.replace(/[\\/]$/, '')}${parent.includes('\\') ? '\\' : '/'}최종산출물`;
+  });
   $('orgExportBtn').addEventListener('click', exportOrgFile);
   $('orgImportBtn').addEventListener('click', () => $('orgImportFile').click());
   $('orgImportFile').addEventListener('change', importOrgFile);
@@ -3165,17 +3400,33 @@ function init() {
     if (d.open && !orgmapCache) loadOrgmap(d);
   }, true);
   $('chiefForm').addEventListener('submit', submitChief);
+  for (const id of ['chiefEngine', 'chiefModel', 'chiefEffort']) $(id).addEventListener('change', saveChiefSelection);
+  $('runModel').addEventListener('change', () => {
+    const engine = deptOf(S.agents[runTarget]?.department)?.engine || S.settings.chief.engine;
+    fillEfforts($('runEffort'), engine, $('runModel').value || S.settings.chief.model, $('runEffort').value, '기본(직원 설정)');
+  });
+  $('threadModel').addEventListener('change', () => {
+    const latest = threadOf(S.runs, ui.thread?.rootId).at(-1);
+    fillEfforts($('threadEffort'), latest?.engine || 'codex', $('threadModel').value || latest?.model, $('threadEffort').value, '이전과 같게');
+  });
   $('notifyBtn').addEventListener('click', toggleNotify);
   $('feedDetailBtn').addEventListener('click', () => {
     ui.feedDetail = !ui.feedDetail;
     store('ai-office-feed-detail', ui.feedDetail ? '1' : '0');
     renderFeed();
   });
-  $('approveOk').addEventListener('click', submitApprove);
-  $('approveReject').addEventListener('click', submitReject);
-  $('approveDialog').addEventListener('close', () => { ui.approve = null; revokeBlobs($('approvePreview')); revokeBlobs($('approveReport')); });
+  $('clearHistoryBtn').addEventListener('click', clearHistory);
+  $('completionFolder').addEventListener('click', () => openFolder(ui.completion?.taskId));
+  $('completionDialog').addEventListener('close', () => {
+    const current = ui.completion;
+    ui.completion = null;
+    revokeBlobs($('completionPreview')); revokeBlobs($('completionReport'));
+    if (current?.ready && !S.demo) api('POST', `/api/tasks/${encodeURIComponent(current.taskId)}/seen`).then(refresh).catch((error) => toast(error.message, { type: 'error' }));
+    setTimeout(openNextCompletion, 0);
+  });
+  document.addEventListener('close', () => setTimeout(openNextCompletion, 0), true);
   $('gapGoOrg').addEventListener('click', () => { $('gapDialog').close(); goOrg(); });
-  for (const id of ['outQ', 'outDate', 'outDept', 'outStatus']) $(id).addEventListener(id === 'outQ' ? 'input' : 'change', () => renderOutputs());
+  for (const id of ['outQ', 'outDate', 'outDept', 'outStatus', 'outScope']) $(id).addEventListener(id === 'outQ' ? 'input' : 'change', () => renderOutputs());
   $('outFilters').addEventListener('submit', (ev) => ev.preventDefault());
   // 조직 탭: 역량 태그(Enter·쉼표로 추가), 결과 전달 부서(선택 즉시 추가)
   document.addEventListener('keydown', (ev) => {
@@ -3213,6 +3464,7 @@ function init() {
   df.en.addEventListener('input', () => { if (!deptEditing && !df.id.dataset.touched) df.id.value = kebab(df.en.value); });
   df.id.addEventListener('input', () => { df.id.dataset.touched = '1'; });
   df.permission.addEventListener('change', syncDeptUi);
+  df.codexModel.addEventListener('change', () => fillEfforts(df.codexEffort, 'codex', df.codexModel.value || 'gpt-6.1-sol', df.codexEffort.value, '기본(max)'));
   for (const r of df.querySelectorAll('input[name="engine"]')) r.addEventListener('change', syncDeptUi);
   df.color.addEventListener('input', syncDeptUi);
   $('deptSwatches').addEventListener('click', (ev) => {
@@ -3226,6 +3478,7 @@ function init() {
   const af = $('agentForm');
   af.addEventListener('submit', submitAgent);
   af.department.addEventListener('change', refreshAgentDeptUi);
+  af.codexModel.addEventListener('change', () => fillEfforts(af.codexEffort, 'codex', af.codexModel.value || deptOf(af.department.value)?.codexModel || 'gpt-6.1-sol', af.codexEffort.value, '부서 기본'));
   $('agentRole').addEventListener('change', applyRole);
   af.lead.addEventListener('change', syncLeadWarn);
   af.id.addEventListener('input', () => { af.id.dataset.touched = '1'; });
@@ -3251,4 +3504,4 @@ function init() {
   refresh().then(connect);
 }
 
-if (typeof document !== 'undefined' && document.getElementById('app')) init();
+if (typeof document !== 'undefined' && document.getElementById('app')) { init(); installSelects(); }

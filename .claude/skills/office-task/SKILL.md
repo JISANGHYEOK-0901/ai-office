@@ -1,6 +1,6 @@
 ---
 name: office-task
-description: 비서실장(메인 세션)이 사무 업무 요청을 받아 업무 등록 → 담당 확인(없으면 [회의]) → plan.json 작성·검사 → 계획대로 직원(서브에이전트) 병렬 배정·부서 간 협조 → 검토(flow review, 반려 최대 2회) → report.md → flow deliver(사용자 확인 대기)까지 진행하는 절차. 산출물이 필요한 업무 요청(조사, 문서·HTML·엑셀·PPT 작성, 정산, 계약 검토 등)을 받으면 사용한다.
+description: 비서실장(메인 세션)이 사무 업무 요청을 받아 업무 등록 → 담당 확인(없으면 [회의]) → plan.json 작성·검사 → 계획대로 직원(서브에이전트) 병렬 배정·부서 간 협조 → 검토(flow review, 반려 최대 2회) → report.md → flow deliver(검토 후 자동 완료)까지 진행하는 절차. 산출물이 필요한 업무 요청(조사, 문서·HTML·엑셀·PPT 작성, 정산, 계약 검토 등)을 받으면 사용한다.
 ---
 
 # office-task: 업무 처리 체크리스트
@@ -13,6 +13,8 @@ description: 비서실장(메인 세션)이 사무 업무 요청을 받아 업�
 - Agent를 `run_in_background: true`로 부르지 않는다(거부된다). 병렬은 한 응답에서 여러 Agent를 동시에 호출하고 모두 끝날 때까지 기다린다.
 - plan의 모든 단계, 검토, `flow deliver`가 끝나기 전에 "진행 중"이라는 최종 답변으로 종료하지 않는다(헤드리스 실행은 그 답변으로 끝나 업무가 멈춘다).
 - 거부되면 우회하지 말고 사유대로 고친다. 필요한 직원이 없으면 대신 하지 말고 `plan.json`의 `gaps`에 적는다.
+
+대시보드의 제어 실행 중에는 주입된 phase/JSON 응답 계약을 우선한다. 비서실장은 기본 최종 검토자이며 별도 검증실 부재를 공백으로 알리지 않는다. 전문 검토는 대표가 요청한 경우만 추가한다. 직원 질문·오전달·팀장 분담은 needs_decision/reroute/delegate 응답으로 실행기에 전달하고 직접 다른 직원을 호출하지 않는다. 지속 감시는 실행기가 계속 유지하며 새 자료의 후속 업무와 동시에 진행한다. 대표가 지시한 메일·글/댓글 게시만 publications로 계획하고 검토 후 연결된 office_browser로 실행한다. 로그인 값은 읽거나 요구하지 않는다. 아래 CLI 절차는 터미널에서 직접 업무를 운영할 때 사용한다.
 
 ## 1. 요청 분류
 
@@ -74,21 +76,21 @@ description: 비서실장(메인 세션)이 사무 업무 요청을 받아 업�
 - [ ] `node scripts/office.mjs flow <id> review-request --from <부서>`
 - [ ] `node scripts/office.mjs task files <id>`로 산출물 목록과 계획 단계 산출물(있음/없음)을 확인했다. '없음' 단계는 작업 완료로 보고됐어도 `[반려]`로 파일 작성을 다시 지시했다.
 - [ ] 산출물을 Read로 확인하고 plan.json의 `review.criteria`와 각 단계 완료 기준으로 판단했다. 지적은 `outputs/<id>/review-notes.md`에 적었다.
-- [ ] Codex 검증이 필요하면 `node scripts/codex-review.mjs --target outputs/<id> --task <id> [--reviewers ...]` 실행
+- [ ] 대표가 별도 전문 검증을 요청한 경우에만 `node scripts/codex-review.mjs --target outputs/<id> --task <id> [--reviewers ...]` 실행
   - 재무 숫자 → `number-auditor`, 사실 주장 → `fact-checker`, 문서 → `document-qa`, 코드 → `code-reviewer`, 종합 → `verification-lead` (직무 key 또는 직원 id)
   - `outputs/<id>/reviews/*.md`의 판정(PASS/FIX/BLOCK)을 읽었다. 종료 코드 2는 BLOCK이 있다는 뜻이다.
 - [ ] 결과를 기록했다: `node scripts/office.mjs flow <id> review --verdict pass|reject --to <부서> --reason "<사유>"`
 - [ ] 반려면 해당 부서 직원을 다시 불렀다. `description`과 지시문 모두 `[반려]`로 시작하고 사유·수정 기준·입력·출력을 적었다. 원인이 앞 단계면 앞 단계 부서로 보냈다. 고친 뒤 이 단계를 다시 밟았다.
-- [ ] 반려는 최대 2회(3번째는 CLI·가드가 거부). 부서에 단계가 여럿이면 `--to <직원 id>`나 `--stage <단계 id>`로 지정했다. 그래도 해결되지 않으면 남은 문제를 report.md "확인 필요"에 적고 8단계로 넘겼다. BLOCK이 남아 있으면 완료로 쓰지 않았다.
+- [ ] 반려는 최대 2회(3번째는 CLI·가드가 거부). 부서에 단계가 여럿이면 `--to <직원 id>`나 `--stage <단계 id>`로 지정했다. 그래도 해결되지 않으면 남은 문제를 report.md "확인 필요"에 적고 blocked로 두었다. 검토 통과한 업무만 8단계에서 완료한다. BLOCK이 남아 있으면 완료로 쓰지 않았다.
 
-## 8. 보고·사용자 확인
+## 8. 보고·완료
 
 - [ ] `outputs/<id>/report.md`를 작성했다: `## 완료` / `## 확인 필요`(역량 공백·남은 문제 포함) / `## 근거`(검토 판정과 반영 여부 포함)
-- [ ] `node scripts/office.mjs flow <id> deliver` 실행(업무 상태 `review` = 사용자 확인 대기). 완료(`done`)는 대표가 대시보드에서 승인할 때 기록되므로 직접 바꾸지 않는다.
+- [ ] 검토 통과와 보고서·최종 산출물을 확인하고 `node scripts/office.mjs flow <id> deliver`를 실행했다. 업무는 `done`으로 자동 완료되며 대표 승인을 요청하지 않는다.
 - [ ] 대표에게 결과 요약, 확인 필요 항목, report.md 경로를 전달했다.
 - [ ] 대표 결정·외부 자료를 기다리면 `node scripts/office.mjs task status <id> blocked`
 
 ## 9. 사용자 반려
 
 - [ ] 대표 피드백이 "이어서 답하기"로 오면 반영할 단계를 정해 해당 부서에 `[반려]`로 재배정하고 7~8단계를 다시 밟았다.
-- [ ] 실행 안에서 대표가 승인·반려 의사를 밝히면 "대시보드의 [승인]·[반려] 버튼이나 상단 입력창에서 처리됩니다"라고 한 줄로 안내했다. 반려 피드백은 반영해 재배정했고, 완료(`done`) 처리는 하지 않았다.
+- [ ] 완료 모달에는 완료 작업과 최종 산출물만 전달했다. 결과 확인은 알림 읽음 처리이며 추가 승인을 요구하지 않았다. 완료 후 추가 수정은 새 업무로 처리한다.

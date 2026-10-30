@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "properties": {
+    "status": {"type": "string", "enum": ["done", "needs_decision", "reroute", "delegate"]},
+    "summary": {"type": "string"},
+    "question": {"type": "string"},
+    "department": {"type": "string"},
+    "agent": {"type": "string"},
+    "reason": {"type": "string"},
+    "assignments": {
+      "type": "array", "items": {
+        "type": "object", "properties": {
+          "agent": {"type": "string"}, "title": {"type": "string"},
+          "output": {"type": "string"}, "done": {"type": "string"}
+        }, "required": ["agent", "title", "output", "done"], "additionalProperties": false
+      }
+    }
+  },
+  "required": ["status", "summary", "question", "department", "agent", "reason", "assignments"],
+  "additionalProperties": false
+}

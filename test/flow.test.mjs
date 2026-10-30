@@ -93,8 +93,8 @@ test('마케팅+개발: 요청 → 확인 → 하달 → 진행 → 협조 → �
   assert.ok(!items.some((i) => /python3|build\.py/.test(i.text)), '명령어 원문은 숨긴다');
 
   const s = tasks[TASK];
-  assert.equal(s.current, 'user');
-  assert.deepEqual(s.steps.map((x) => x.state), ['done', 'done', 'done', 'done', 'done', 'done', 'current', 'todo']);
+  assert.equal(s.current, 'done');
+  assert.deepEqual(s.steps.map((x) => x.state), ['done', 'done', 'done', 'done', 'done', 'done', 'current']);
   assert.deepEqual(s.depts.sort(), ['dev', 'marketing']);
   assert.deepEqual(s.plan.map((p) => [p.id, p.status]), [['s1', 'done'], ['s2', 'done']]);
   assert.equal(s.rejects, 0);
@@ -346,7 +346,7 @@ test('사용자 반려 → 재배정 → 다시 확인 대기 → 승인', () =>
   ];
   let r = deriveTaskFlows(events, ORG_MKT_DEV, { tasks: [{ id: T, status: 'active' }] });
   assert.equal(r.items.at(-1).text, '사용자 → 비서실장: 반려 — 색을 바꿔 주세요');
-  assert.notEqual(r.tasks[T].current, 'user', '반려 뒤에는 사용자 확인 단계가 아니다');
+  assert.notEqual(r.tasks[T].current, 'done', '반려 뒤에는 사용자 확인 단계가 아니다');
   assert.equal(r.tasks[T].userRejects, 1);
   events.push(t.cli('flow.deliver', T), t.cli('flow.user_approve', T));
   r = deriveTaskFlows(events, ORG_MKT_DEV, { tasks: [{ id: T, status: 'done' }] });
@@ -382,8 +382,8 @@ test('buildState: flow·업무 단계·attention(reply·approve·gap, since 오�
   const s = buildState({ org: ORG_MKT_DEV, events, runs, tasks, now: '2026-10-29T03:00:00.000Z' });
   assert.ok(Array.isArray(s.flow) && s.flow.length > 0);
   const task = s.tasks.find((x) => x.id === TASK);
-  assert.equal(task.stage, 'user');
-  assert.equal(task.steps.length, 8);
+  assert.equal(task.stage, 'done');
+  assert.equal(task.steps.length, 7);
   assert.deepEqual(s.attention.map((a) => [a.kind, a.agent]), [['gap', 'chief'], ['reply', 'chief'], ['approve', 'chief']]);
   assert.equal(s.attention[0].task, T2);
   assert.match(s.attention[0].text, /HTML 작성 → 개발부 추가 권장/);
@@ -393,7 +393,8 @@ test('buildState: flow·업무 단계·attention(reply·approve·gap, since 오�
   assert.equal(s.metrics.tasks, 2, '사용자 확인 대기(review)도 진행 중 업무로 센다');
   // 승인되면 approve·gap(완료 업무) 항목이 사라진다
   const after = buildState({ org: ORG_MKT_DEV, events, runs: [], tasks: tasks.map((x) => ({ ...x, status: 'done' })), now: '2026-10-29T03:00:00.000Z' });
-  assert.deepEqual(after.attention, []);
+  assert.equal(after.attention.length, 2);
+  assert.ok(after.attention.every((item) => item.kind === 'complete'));
 });
 
 test('깨진 입력에도 멈추지 않는다: 이벤트가 아닌 값, 잘못된 계획표', () => {
@@ -515,7 +516,7 @@ test('단계 표시줄: 사용자 반려 뒤에는 하달, 검토 반려 뒤에�
   const rejected = [...events, t.raw({ session: 'office-server', instance: 'office-server', agent: undefined, kind: 'flow.user_reject', task: TASK, summary: '경쟁사 추가' })];
   let s = deriveTaskFlows(rejected, ORG_MKT_DEV, { tasks: [{ id: TASK, status: 'active' }] }).tasks[TASK];
   assert.equal(s.current, 'assign');
-  assert.deepEqual(s.steps.map((x) => x.state), ['done', 'done', 'current', 'todo', 'todo', 'todo', 'todo', 'todo']);
+  assert.deepEqual(s.steps.map((x) => x.state), ['done', 'done', 'current', 'todo', 'todo', 'todo', 'todo']);
   const again = [...rejected, t.call('marketing-1', '경쟁사 추가 조사', TASK), t.start('marketing-1', 'a9', TASK)];
   s = deriveTaskFlows(again, ORG_MKT_DEV, { tasks: [{ id: TASK, status: 'active' }] }).tasks[TASK];
   assert.equal(s.current, 'progress', '재배정 뒤 다시 진행');

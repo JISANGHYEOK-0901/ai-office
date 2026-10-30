@@ -29,6 +29,7 @@
         <span class="conn" id="conn" role="status" aria-live="polite"><i aria-hidden="true"></i><span>연결 중…</span></span>
         <button type="button" class="btn btn-sm" id="notifyBtn" aria-pressed="false" title="사용자 의견이 필요할 때 브라우저 알림 받기">알림 꺼짐</button>
         <button type="button" class="btn btn-sm" id="companyBtn">회사 설정</button>
+        <button type="button" class="btn btn-sm" id="connectionsBtn">계정 연결</button>
         <button type="button" class="btn btn-sm theme-toggle" id="themeToggle" aria-label="화면 테마 전환">
           <span aria-hidden="true" class="theme-icon"></span><span id="themeLabel">NEON</span>
         </button>
@@ -38,22 +39,30 @@
     <div class="tool-banners" id="toolBanners" role="status" aria-live="polite"></div>
 
     <div class="commandbar">
+      <div class="command-input">
       <form class="chief-form" id="chiefForm" autocomplete="off">
         <label for="chiefInput" class="chief-label"><span aria-hidden="true">▶</span> 비서실장</label>
         <input id="chiefInput" name="prompt" type="text" maxlength="4000"
                placeholder="비서실장에게 업무 지시 — 예: 경쟁사 3곳 가격 정책 조사해서 보고서로 정리해 줘">
-        <select id="chiefModel" class="model-select" aria-label="비서실장 실행 모델">
-          <option value="">모델 기본</option><option value="haiku">haiku</option><option value="sonnet">sonnet</option><option value="opus">opus</option>
-        </select>
+        <select id="chiefEngine" class="model-select" aria-label="비서실장 제공자"><option value="codex">Codex</option><option value="claude">Claude</option></select>
+        <select id="chiefModel" class="model-select" aria-label="비서실장 실행 모델"><option value="gpt-6.1-sol">gpt-6.1-sol</option></select>
+        <select id="chiefEffort" class="model-select" aria-label="비서실장 effort"><option value="max">max</option></select>
         <button type="submit" class="btn btn-primary" id="chiefSubmit">지시하기</button>
       </form>
+      <span id="chiefPolicy" class="help">계획·실무는 Claude, 최종 검토는 선택한 AI로 진행합니다. Claude를 사용할 수 없으면 Codex로 계획합니다.</span>
+      <span id="chiefSettingsStatus" class="help" role="status" aria-live="polite"></span>
+      </div>
+      <div class="command-actions">
+      <span id="modeBadge" class="tag" aria-label="사용 가능한 AI 도구"></span>
       <div class="view-tabs" role="tablist" aria-label="화면 보기">
         <button type="button" role="tab" id="tabControl" aria-controls="viewControl" aria-selected="true" data-view="control">관제</button>
         <button type="button" role="tab" id="tabOffice" aria-controls="viewOffice" aria-selected="false" data-view="office">사무실</button>
         <button type="button" role="tab" id="tabOrg" aria-controls="viewOrg" aria-selected="false" data-view="org">조직</button>
         <button type="button" role="tab" id="tabOutputs" aria-controls="viewOutputs" aria-selected="false" data-view="outputs">산출물</button>
       </div>
+      <button type="button" class="btn" id="schedulesBtn">반복 예약</button>
       <button type="button" class="btn" id="addDeptBtn">+ 부서 추가</button>
+      </div>
     </div>
 
     <div class="layout">
@@ -112,6 +121,9 @@
           </div>
           <div class="win-body">
             <form class="out-filters" id="outFilters" role="search" aria-label="산출물 검색·필터" autocomplete="off">
+              <label>보기
+                <select id="outScope"><option value="final">최종산출물</option><option value="all">전체 업무 자료</option></select>
+              </label>
               <label class="of-q">검색
                 <input type="search" id="outQ" placeholder="업무 제목·id">
               </label>
@@ -144,7 +156,7 @@
           <ol class="win-body feed" id="feed" aria-live="off"></ol>
         </section>
         <section class="win panel-tasks" aria-labelledby="tasksTitle">
-          <div class="win-bar"><h2 id="tasksTitle">업무 · 실행</h2><span class="win-ctl" aria-hidden="true"></span></div>
+          <div class="win-bar"><h2 id="tasksTitle">업무 · 실행</h2><button type="button" class="btn btn-sm" id="clearHistoryBtn">내역 초기화</button><span class="win-ctl" aria-hidden="true"></span></div>
           <div class="win-body tasks" id="tasks"></div>
         </section>
       </aside>
@@ -194,21 +206,23 @@
         <fieldset class="span-2" id="handoffField">
           <legend>결과를 주로 넘기는 부서 <small class="help-inline">협조 순서의 기본값</small></legend>
           <div class="tool-checks" id="handoffChecks"></div>
+          <label>전달 방식<select name="handoffPolicy"><option value="suggested">권장 · 업무에 맞춰 조정</option><option value="required">필수 · 선택한 부서를 반드시 거침</option></select></label>
         </fieldset>
         <fieldset>
           <legend>엔진</legend>
           <label class="inline"><input type="radio" name="engine" value="claude" checked> Claude (실행)</label>
-          <label class="inline"><input type="radio" name="engine" value="codex"> Codex (검증·읽기 전용)</label>
+          <label class="inline"><input type="radio" name="engine" value="codex"> Codex (실행 / 검토)</label>
         </fieldset>
         <div class="codex-fields span-2" id="codexFields" hidden>
           <label>Codex 모델
-            <input name="codexModel" maxlength="64" pattern="[a-z0-9][a-z0-9.\-]{1,63}" placeholder="gpt-6.1-sol">
+            <select name="codexModel"><option value="">기본(gpt-6.1-sol)</option></select>
           </label>
           <label>추론 강도
             <select name="codexEffort">
               <option value="">기본(max)</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option><option>ultra</option>
             </select>
           </label>
+          <label>Codex 역할<select name="codexRole"><option value="exec">실행 · 산출물 작성</option><option value="review">검토 · 읽기 전용</option></select></label>
         </div>
         <label id="deptModelRow">기본 모델
           <select name="model">
@@ -218,12 +232,12 @@
             <option value="inherit">inherit (메인 세션과 동일)</option>
           </select>
         </label>
-        <fieldset class="span-2">
+        <fieldset class="span-2" id="deptToolsField">
           <legend>허용 도구</legend>
           <label class="inline"><input type="checkbox" name="toolsAll" id="toolsAll"> 제한 없음(모든 도구)</label>
           <div class="tool-checks" id="toolChecks"></div>
         </fieldset>
-        <label class="span-2">권한 모드
+        <label class="span-2" id="deptPermissionRow">권한 모드
           <select name="permission" id="deptPermission">
             <option value="acceptEdits">acceptEdits — 파일 편집 자동 승인 (기본)</option>
             <option value="default">default — 매번 확인</option>
@@ -274,7 +288,7 @@
         <label class="span-2"><span class="lbl">혼잣말 <small class="help-inline">대기 중 말풍선, 줄마다 하나</small></span>
           <textarea name="thoughts" rows="2" maxlength="300" placeholder="자료 더 찾아볼까…"></textarea>
         </label>
-        <label>모델
+        <label id="agentModelRow">모델
           <select name="model">
             <option value="">기본(팀장 opus · 그 외 부서값)</option>
             <option value="sonnet">sonnet</option>
@@ -283,6 +297,10 @@
             <option value="inherit">inherit</option>
           </select>
         </label>
+        <div id="agentCodexFields" class="span-2 form-grid" hidden>
+          <label>Codex 모델<select name="codexModel"><option value="">부서 기본</option></select></label>
+          <label>effort<select name="codexEffort"><option value="">부서 기본</option></select></label>
+        </div>
         <label>직원 id
           <input name="id" maxlength="48" pattern="[a-z][a-z0-9-]{1,47}" aria-describedby="agentIdHelp">
           <small id="agentIdHelp" class="help">자동 생성됨. 수정 가능(영문 소문자·숫자·하이픈)</small>
@@ -332,6 +350,7 @@
             <option value="">기본(직원 설정)</option><option value="haiku">haiku</option><option value="sonnet">sonnet</option><option value="opus">opus</option>
           </select>
         </label>
+        <label class="run-model" id="runEffortRow" hidden>effort<select id="runEffort"><option value="">직원 기본</option></select></label>
         <p class="form-error" id="runError" role="alert" hidden></p>
       </div>
       <div class="modal-actions">
@@ -341,14 +360,49 @@
     </form>
   </dialog>
 
+  <dialog id="connectionsDialog" class="modal modal-wide win" aria-labelledby="connectionsTitle">
+    <div class="modal-form">
+      <div class="win-bar"><h2 id="connectionsTitle">외부 계정 연결</h2><span class="win-ctl" aria-hidden="true"></span></div>
+      <div class="win-body">
+        <p>처음 연결한 로그인 상태를 다음 업무와 앱 재시작에도 재사용합니다. 같은 네이버 계정은 블로그·카페에서 함께 사용합니다.</p>
+        <p class="help">로그인 창에서 직접 인증하거나 자동 로그인 정보를 선택해서 저장할 수 있습니다. 추가 인증·재연결이 필요하면 알려드립니다.</p>
+        <div id="connectionList" class="connection-list" aria-live="polite"></div>
+        <form id="connectionForm" class="form-grid" autocomplete="off">
+          <label>연결할 서비스<select name="provider" id="connectionProvider"><option value="naverworks">네이버웍스 메일</option><option value="naver">네이버 블로그·카페</option><option value="kakao">다음·카카오 블로그·카페</option></select></label>
+          <label>계정 구분 이름<input name="label" maxlength="80" placeholder="예: 회사 메일, 홍보용 네이버"></label>
+          <label class="inline span-2"><input type="checkbox" name="remember" id="connectionRemember">자동 로그인 정보도 이 컴퓨터에 저장</label>
+          <label>로그인 아이디<input name="username" id="connectionUsername" autocomplete="off" maxlength="320" disabled></label>
+          <label>비밀번호<input name="password" id="connectionPassword" type="password" autocomplete="new-password" maxlength="1024" disabled></label>
+          <p class="help span-2">저장한 비밀번호와 로그인 쿠키는 AI에게 전달하지 않습니다. 계정 연결을 해제하면 저장된 로그인 정보도 삭제합니다.</p>
+          <button type="submit" class="btn btn-primary" id="connectionSubmit">계정 추가·로그인 창 열기</button>
+          <button type="button" class="btn" id="connectionCancelEdit" hidden>변경 취소</button>
+        </form>
+        <p id="connectionError" class="form-error" role="alert" hidden></p>
+      </div>
+      <div class="modal-actions"><button type="button" class="btn" id="connectionsClose">닫기</button></div>
+    </div>
+  </dialog>
+
   <!-- 회사 설정 -->
   <dialog id="companyDialog" class="modal win" aria-labelledby="companyTitle">
     <form method="dialog" id="companyForm" class="modal-form">
       <div class="win-bar"><h2 id="companyTitle">회사 설정</h2><span class="win-ctl" aria-hidden="true"></span></div>
       <div class="win-body">
+        <section class="org-backup" aria-labelledby="companySchedulesTitle">
+          <h3 class="lbl" id="companySchedulesTitle">반복 업무 예약</h3>
+          <p class="help">매일 시작할 시각과 업무 내용을 등록하고 수정·일시중지할 수 있습니다. 예약 화면에서 저장한 내용은 바로 적용됩니다.</p>
+          <button type="button" class="btn" id="companySchedulesBtn">반복 예약 설정</button>
+        </section>
         <label for="companyRules"><span class="lbl">회사 공통 규칙 <small class="help-inline">모든 직원 지침 파일의 공통 머리말 다음에 들어갑니다(최대 8000자). 비우면 생략</small></span></label>
         <textarea id="companyRules" rows="12" maxlength="8000" placeholder="예: 보고서는 한국어 존댓말로 쓴다. 금액은 원 단위로 쓴다."></textarea>
         <p class="help" id="companyCount"></p>
+        <section class="org-backup" aria-labelledby="finalOutputTitle">
+          <h3 class="lbl" id="finalOutputTitle">최종산출물 저장 위치</h3>
+          <label for="finalOutputParent">저장할 상위 폴더</label>
+          <input id="finalOutputParent" type="text" maxlength="2000" placeholder="비우면 현재 작업 공간 · 예: /Users/사용자/Documents/AI업무">
+          <p class="help">비서실장 보고와 최종 전달 파일을 ‘최종산출물/날짜/업무명’으로 모읍니다. 변경 후 전달하는 결과부터 적용하며, 기존 파일은 옮기거나 지우지 않습니다.</p>
+          <p class="workspace-path"><code id="finalOutputPath">불러오는 중…</code></p>
+        </section>
         <section class="org-backup" aria-labelledby="workspaceTitle">
           <h3 class="lbl" id="workspaceTitle">작업 공간</h3>
           <p class="help">회사 데이터(조직 정본·산출물·실행 기록)와 AI 직원의 실행 위치입니다. AI 직원은 이 폴더 안에서만 일하고 대시보드 프로그램 폴더는 고치지 못합니다.</p>
@@ -387,44 +441,49 @@
     </form>
   </dialog>
 
-  <!-- 입력창 승인·반려: 사용자 확인 대기 업무가 여러 건이면 대상을 고른다 -->
-  <dialog id="pickTaskDialog" class="modal modal-sm win" aria-labelledby="pickTaskTitle">
-    <form method="dialog" class="modal-form">
-      <div class="win-bar"><h2 id="pickTaskTitle">대상 업무 선택</h2><span class="win-ctl" aria-hidden="true"></span></div>
-      <div class="win-body"><p id="pickTaskText"></p><div id="pickTaskList" class="pick-list" role="radiogroup" aria-labelledby="pickTaskText"></div></div>
-      <div class="modal-actions">
-        <button type="submit" class="btn" value="cancel">취소</button>
-        <button type="submit" class="btn btn-primary" value="ok" id="pickTaskOk">선택</button>
+  <dialog id="schedulesDialog" class="modal modal-wide win" aria-labelledby="schedulesTitle">
+    <div class="modal-form">
+      <div class="win-bar"><h2 id="schedulesTitle">매일 반복 예약</h2><span class="win-ctl" aria-hidden="true"></span></div>
+      <div class="win-body schedule-body">
+        <p class="help">한국 시각에 업무를 시작하고, 검색·작성·검토를 마친 뒤 게시합니다. PC와 ai-office가 켜져 있어야 합니다. 놓친 예약은 몰아서 실행하지 않습니다.</p>
+        <section aria-labelledby="scheduleListTitle"><h3 class="sub-title" id="scheduleListTitle">등록된 예약</h3><ul id="scheduleList" class="schedule-list"></ul></section>
+        <form id="scheduleForm" class="schedule-form">
+          <h3 class="sub-title" id="scheduleFormTitle">예약 추가</h3>
+          <input type="hidden" id="scheduleId">
+          <label for="scheduleTime">매일 시작 시각 <span class="help-inline">한국 시간</span></label>
+          <input type="time" id="scheduleTime" value="11:00" required>
+          <label for="schedulePrompt">업무 지시</label>
+          <textarea id="schedulePrompt" rows="4" maxlength="4000" required placeholder="예: 연결한 계정으로 지정 카페 게시판에 여행 주제의 유튜브 숏츠를 찾아 하루 2~3개씩 소개 글을 게시해 줘. 게시판 주소와 원하는 글 형식도 적어 주세요."></textarea>
+          <p class="help">계정은 ‘계정 연결’에서 로그인해 주세요. 게시한 영상은 ID로 기록해 재사용을 막고, 새 영상이 부족하면 실제 게시 수와 사유를 보고합니다. 영상 기록과 예약은 내역 초기화 후에도 유지됩니다.</p>
+          <p id="scheduleError" class="form-error" role="alert" hidden></p>
+          <div class="schedule-form-actions"><button type="button" class="btn" id="scheduleCancelEdit" hidden>수정 취소</button><button type="submit" class="btn btn-primary" id="scheduleSave">매일 예약하기</button></div>
+        </form>
       </div>
-    </form>
+      <div class="modal-actions"><button type="button" class="btn" data-close>닫기</button></div>
+    </div>
   </dialog>
 
-  <!-- 사용자 확인(승인·반려) -->
-  <dialog id="approveDialog" class="modal modal-wide win" aria-labelledby="approveTitle">
-    <form method="dialog" id="approveForm" class="modal-form">
-      <div class="win-bar"><h2 id="approveTitle">사용자 확인</h2><span class="win-sub" id="approveSub"></span><span class="win-ctl" aria-hidden="true"></span></div>
-      <div class="win-body approve-body">
-        <div id="approveSteps"></div>
-        <div class="approve-grid">
+  <!-- 검토가 끝난 업무의 완료 결과 -->
+  <dialog id="completionDialog" class="modal modal-wide win" aria-labelledby="completionTitle">
+    <form method="dialog" class="modal-form">
+      <div class="win-bar"><h2 id="completionTitle">업무 완료</h2><span class="win-ctl" aria-hidden="true"></span></div>
+      <div class="win-body completion-body">
+        <p class="help" id="completionSub">비서실장의 최종 검토를 마쳤습니다.</p>
+        <div class="completion-grid">
           <section aria-labelledby="apvReportTitle">
-            <h3 class="sub-title" id="apvReportTitle">보고서 <span>report.md</span></h3>
-            <div class="doc-box" id="approveReport"></div>
+            <h3 class="sub-title" id="apvReportTitle">완료한 작업</h3>
+            <div class="doc-box" id="completionReport"></div>
           </section>
           <section aria-labelledby="apvFilesTitle">
-            <h3 class="sub-title" id="apvFilesTitle">산출물</h3>
-            <ul class="file-list" id="approveFiles"></ul>
-            <div class="file-preview" id="approvePreview"></div>
+            <h3 class="sub-title" id="apvFilesTitle">최종 산출물</h3>
+            <ul class="file-list" id="completionFiles"></ul>
+            <div class="file-preview" id="completionPreview"></div>
           </section>
         </div>
-        <label for="approveFeedback" class="feedback-label"><span class="lbl">반려 피드백 <small class="help-inline">반려하면 비서실장이 이 내용으로 다시 배정합니다</small></span></label>
-        <textarea id="approveFeedback" rows="3" maxlength="4000" placeholder="예: 경쟁사 2곳을 더 넣고, 표의 기준일을 밝혀 주세요."></textarea>
-        <p class="form-error" id="approveError" role="alert" hidden></p>
       </div>
       <div class="modal-actions">
-        <span class="thread-status" id="approveStatus" role="status"></span>
+        <button type="button" class="btn" id="completionFolder">최종 폴더 열기</button>
         <button type="button" class="btn" data-close>닫기</button>
-        <button type="button" class="btn btn-danger" id="approveReject">반려</button>
-        <button type="button" class="btn btn-primary" id="approveOk">승인</button>
       </div>
     </form>
   </dialog>
@@ -460,6 +519,7 @@
               <option value="">이전과 같게</option><option value="haiku">haiku</option><option value="sonnet">sonnet</option><option value="opus">opus</option>
             </select>
           </label>
+          <label class="run-model">effort<select id="threadEffort"><option value="">이전과 같게</option></select></label>
           <span class="thread-status" id="threadStatus" role="status"></span>
           <button type="button" class="btn" data-close>닫기</button>
           <button type="submit" class="btn btn-primary" id="threadSend" value="default">보내기</button>

@@ -376,6 +376,7 @@ test('runner: claude·codex-review 실행의 cwd는 작업 공간, codex-review�
   mkdirSync(join(ws, 'org'));
   writeFileSync(join(ws, 'org', 'departments.json'), '[]');
   writeFileSync(join(ws, 'org', 'roster.json'), '[]');
+  writeFileSync(join(ws, 'org', 'company.json'), JSON.stringify({ chief: { engine: 'claude', model: 'sonnet', effort: 'high' } }));
   const prev = process.env.CLAUDE_BIN;
   process.env.CLAUDE_BIN = join(ws, 'fake-claude.js');
   t.after(() => { if (prev === undefined) delete process.env.CLAUDE_BIN; else process.env.CLAUDE_BIN = prev; });
@@ -386,7 +387,7 @@ test('runner: claude·codex-review 실행의 cwd는 작업 공간, codex-review�
   await new Promise((r) => setImmediate(r));
   assert.equal(calls.length, 2);
   for (const c of calls) assert.equal(c.opts.cwd, ws);
-  const review = calls[1];
+  const review = calls.find((c) => c.args[0] === join(programRoot(), 'scripts', 'codex-review.mjs'));
   assert.equal(review.args[0], join(programRoot(), 'scripts', 'codex-review.mjs'));
   assert.equal(review.opts.env.AI_OFFICE_WORKSPACE, ws);
   assert.equal(review.opts.env.AI_OFFICE_ROOT, '');

@@ -1216,7 +1216,8 @@ export function createOffice(canvas, handlers = {}) {
     const colors = ICON_COLORS[themeName] || ICON_COLORS.neon;
     const s = iconScale(cam.z);
     const P = 2.4 * s;
-    for (const [id, kind] of attention) {
+    for (const [id, rawKind] of attention) {
+      const kind = rawKind === 'complete' ? 'approve' : rawKind;
       const bmp = ATTENTION_ICONS[kind];
       const head = bmp && headOf(id);
       if (!head) continue;

@@ -319,9 +319,9 @@ export function startSimulation({ root = workspaceRoot(), intervalMs = 1200, org
     const c = cli(t.id);
     emit({ ...c, kind: 'flow.review_request', ...(from ? { from } : {}) });
     emit({ ...c, kind: 'flow.review', verdict: 'pass', summary: '완료 기준 충족' });
-    emit({ ...c, kind: 'flow.deliver', summary: '결과를 확인해 주세요' });
-    t.status = 'review';
-    emit({ ...c, kind: 'task.update', status: 'review', summary: `${t.title}: active → review` });
+    emit({ ...c, kind: 'flow.deliver', summary: '검토를 마쳐 업무를 완료했습니다' });
+    t.status = 'done';
+    emit({ ...c, kind: 'task.update', status: 'done', summary: `${t.title}: active → done` });
   }
 
   // 이어서 답하기 연출: 직원이나 비서실장이 확인 질문으로 답을 끝낸 상황(데모에서는 답장을 보낼 수 없다)

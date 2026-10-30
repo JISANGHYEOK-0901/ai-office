@@ -17,5 +17,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+      - run: npm ci
       # 실제 claude/codex는 실행하지 않는다. 테스트는 CLAUDE_BIN/CODEX_BIN 가짜 바이너리만 쓴다.
       - run: npm run check
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # 실제 계정이나 외부 발송 없이 전용 가짜 로그인·사이트에서 검증한다.
+      - run: npm run verify:ui

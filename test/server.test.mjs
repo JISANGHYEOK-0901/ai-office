@@ -2,6 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,7 +63,7 @@ before(async () => {
 
 after(async () => {
   if (handle) await handle.close();
-  if (root) rmSync(root, { recursive: true, force: true });
+  if (root) await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 test('index.html에 토큰이 주입되고 GET /api/state가 동작한다', { skip }, async () => {

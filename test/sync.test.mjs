@@ -211,7 +211,9 @@ test('sync-agents.mjs: --check는 차이가 있으면 종료 코드 1과 내용 
 
   p = run('--write');
   assert.equal(p.status, 0, p.stderr);
-  assert.match(p.stdout, /완료: 생성·갱신 3개/);
+  // 에이전트 파일 3개 + 작업 공간 생성물(표식·CLAUDE.md·AGENTS.md·스킬·설정·office/codex-review 연결 파일) 7개
+  assert.match(p.stdout, /완료: 생성·갱신 10개/);
+  assert.match(p.stdout, /생성: \.claude\/settings\.json/);
 
   p = run('--check');
   assert.equal(p.status, 0);
@@ -221,6 +223,11 @@ test('sync-agents.mjs: --check는 차이가 있으면 종료 코드 1과 내용 
   p = run('--check');
   assert.equal(p.status, 1);
   assert.match(p.stdout, /변경 필요: \.claude\/agents\/research-2\.md \(\d+행/);
+
+  // npm run sync -- --check(= --write --check)는 검사만 한다
+  p = run('--write', '--check');
+  assert.equal(p.status, 1);
+  assert.match(p.stdout, /변경 필요: \.claude\/agents\/research-2\.md/);
 
   p = run();
   assert.equal(p.status, 64);

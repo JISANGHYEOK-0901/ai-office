@@ -9,7 +9,9 @@ import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ID_PATTERN, MAX_COMPANY_RULES, exportOrg, importOrg, loadCompanyRules, loadOrg, loadPresets, mutateOrg, saveCompanyRules, slugifyId, validateOrg } from '../lib/org.mjs';
 import { quickToolCheck } from '../lib/doctor.mjs';
-import { kstDate } from '../lib/paths.mjs';
+import { WORKSPACE_SOURCE_LABEL, WorkspaceError, kstDate, legacyItems, programRoot, resolveWorkspace, saveLocalWorkspace } from '../lib/paths.mjs';
+import { ensureWorkspace, isCompatRoot } from '../lib/workspace.mjs';
+import { acquireServerLock } from '../lib/server-lock.mjs';
 import { appendEvent, readEvents, redact } from '../lib/events.mjs';
 import { previewAgentFile } from '../lib/sync.mjs';
 import { isOffplanCall } from '../lib/flow.mjs';
@@ -21,7 +23,6 @@ import { createRunner } from './runner.mjs';
 import { buildState } from './state.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_ROOT = resolve(HERE, '..');
 const BODY_LIMIT = 1024 * 1024;
 // 회사 구성 가져오기는 내보낸 파일 전체(지침 포함)를 받으므로 한도를 따로 둔다. 내보내기에는 크기 제한이 없어 1MB로는 큰 회사가 왕복되지 않는다
 const IMPORT_BODY_LIMIT = 8 * 1024 * 1024;
@@ -272,11 +273,14 @@ function resolveReviewTarget(root, target) {
 }
 
 /**
- * 서버를 띄운다. 테스트에서는 port 0과 임시 root·publicDir를 쓴다.
+ * 서버를 띄운다. 테스트에서는 port 0과 임시 root(작업 공간)·publicDir를 쓴다.
+ * root를 주지 않으면 작업 공간을 결정한다(AI_OFFICE_WORKSPACE > .office-local.json > 호환 모드 > ~/AIOffice).
  * @returns {Promise<{server, url, token, port, close: () => Promise<void>}>}
  */
 export async function startServer({
-  root = DEFAULT_ROOT,
+  root = null,
+  workspaceSource = null, // 작업 공간을 정한 근거(회사 설정 표시용). root를 주지 않으면 resolveWorkspace가 정한다
+  program = programRoot(), // 프로그램 레포(테스트에서 바꿔 넣는다). 예전 데이터 확인·호환 모드 판정에 쓴다
   port = 4777,
   host = '127.0.0.1',
   demo = false,
@@ -285,8 +289,25 @@ export async function startServer({
   env = process.env, // 시작 때 빠른 점검(claude·codex 설치 여부)에 쓰는 환경. 테스트에서 CLAUDE_BIN/CODEX_BIN을 바꿔 넣는다
   openFolder = defaultOpenFolder, // "폴더 열기" 실행 함수(테스트에서 실제 탐색기를 띄우지 않도록 바꿔 넣는다)
 } = {}) {
+  if (!root) ({ path: root, source: workspaceSource } = resolveWorkspace({ env, program }));
   root = resolve(root);
   publicDir = resolve(publicDir);
+  // 호환 모드: 예전 데이터가 프로그램 레포 안에 있어 레포를 그대로 데이터 위치로 쓴다(배너로 이전을 권한다)
+  const compat = isCompatRoot(root, program);
+  const legacyPending = legacyItems(program).length > 0;
+  if (!workspaceSource) workspaceSource = compat ? 'compat' : 'arg';
+  // 작업 공간이 없으면 만들고 생성물(수칙·설정·훅·스킬·스크립트 연결)과 에이전트 파일을 맞춘다(빈 회사로 시작)
+  if (!demo && !compat) {
+    try {
+      const init = ensureWorkspace(root, { program });
+      for (const rel of init.workspace.conflicts) {
+        if (!quiet) console.error(`[ai-office] ${rel}: 직접 만들거나 고친 파일이라 덮어쓰지 않았습니다(작업 공간 생성물).`);
+      }
+      if (init.error && !quiet) console.error(`[ai-office] 에이전트 파일을 맞추지 못했습니다: ${init.error.message}`);
+    } catch (err) {
+      throw new Error(`작업 공간(${root})을 준비하지 못했습니다: ${err.message}`);
+    }
+  }
   // 루프백이 아닌 주소에 바인딩하면 index.html을 받을 수 있는 기기 누구나 토큰을 얻게 된다.
   // 그래서 원격 바인딩에서는 시작 때 출력하는 접속 주소(?key=)로 들어온 브라우저에만 HttpOnly 쿠키를 주고, 쿠키가 없으면 모든 요청을 거부한다.
   const remote = !isLoopback(host);
@@ -478,6 +499,8 @@ export async function startServer({
       presets,
       demo,
       tools,
+      // 경로 값은 토큰이 필요한 /api/company에서만 준다(상태는 토큰 없이 읽힌다)
+      workspace: { compat, legacyPending },
     };
   }
 
@@ -761,7 +784,7 @@ export async function startServer({
     if (typeof reviewers !== 'string' || !/^(all|[a-z][a-z0-9-]{1,47}(,[a-z][a-z0-9-]{1,47})*)$/.test(reviewers)) {
       throw new HttpError(400, "reviewers는 검토자 id 목록 또는 'all'이어야 합니다.");
     }
-    if (!existsSync(join(root, 'scripts', 'codex-review.mjs'))) throw new HttpError(404, 'scripts/codex-review.mjs가 없습니다.');
+    if (!existsSync(join(program, 'scripts', 'codex-review.mjs'))) throw new HttpError(404, 'scripts/codex-review.mjs가 없습니다.');
     const taskId = target.slice('outputs/'.length);
     const task = /^\d{4}-\d{2}-\d{2}\/[A-Za-z0-9._-]+$/.test(taskId) ? taskId : undefined;
     const run = await callRunner(() => runner.startReview({ target, reviewers, task }), '검증을 시작하지 못했습니다.');
@@ -1022,6 +1045,20 @@ export async function startServer({
     return res.end(data);
   }
 
+  // 회사 설정의 작업 공간 정보(경로는 토큰이 있는 요청에만)
+  function workspaceInfo() {
+    return { path: root, source: workspaceSource, label: WORKSPACE_SOURCE_LABEL[workspaceSource] ?? '', compat, legacyPending };
+  }
+
+  function openWorkspaceFolder() {
+    try {
+      openFolder(root);
+    } catch (err) {
+      throw new HttpError(500, `폴더를 열지 못했습니다: ${err.message}`);
+    }
+    return { ok: true };
+  }
+
   function openOutputFolder(id) {
     if (!id) throw new HttpError(400, '업무 id 형식이 올바르지 않습니다(예: 2026-10-29/slug).');
     const dir = resolveOutput(id, 'dir');
@@ -1143,7 +1180,7 @@ export async function startServer({
       // 회사 규칙·지침 미리보기·실행 로그는 원문이 들어 있어 토큰을 요구한다(같은 기기의 다른 사용자·프로세스 차단)
       if (parts.length === 2 && parts[1] === 'company') {
         checkToken(req);
-        return sendJson(res, 200, { rules: loadCompanyRules(root) });
+        return sendJson(res, 200, { rules: loadCompanyRules(root), workspace: workspaceInfo() });
       }
       if (parts.length === 4 && parts[1] === 'agents' && parts[3] === 'preview') {
         checkToken(req);
@@ -1221,6 +1258,7 @@ export async function startServer({
       return sendJson(res, 200, openOutputFolder(taskIdFromParts(parts, 2, 1)));
     }
     if (resource === 'reviews' && method === 'POST' && parts.length === 2) return sendJson(res, 202, await startReview(body));
+    if (resource === 'workspace' && id === 'open' && method === 'POST' && parts.length === 3) return sendJson(res, 200, openWorkspaceFolder());
     if (resource === 'company' && method === 'PUT' && parts.length === 2) return sendJson(res, 200, await putCompany(body));
     if (resource === 'org' && id === 'import' && method === 'POST' && parts.length === 3) return sendJson(res, 200, await orgImport(body));
     throw new HttpError(404, '없는 API입니다.');
@@ -1268,6 +1306,13 @@ export async function startServer({
     });
   });
   const actualPort = server.address().port;
+  // 실행 표식: migrate가 서버가 켜진 채로 데이터를 옮기지 않도록 pid·포트를 남긴다(close에서 지운다)
+  let releaseLock = null;
+  try {
+    releaseLock = acquireServerLock(root, { port: actualPort, host });
+  } catch (err) {
+    warn('실행 표식(.office/server.lock)을 남기지 못했습니다. 이 서버가 켜져 있는 동안 npm run migrate를 실행하지 마세요', err);
+  }
   hosts = allowedHosts(host, actualPort);
   origins = new Set([...hosts].map((h) => `http://${h}`));
 
@@ -1332,9 +1377,10 @@ export async function startServer({
     }
     server.closeAllConnections?.();
     await new Promise((r) => server.close(() => r()));
+    releaseLock?.();
   }
 
-  return { server, url, accessUrl, remote, token, port: actualPort, close };
+  return { server, url, accessUrl, remote, token, port: actualPort, root, workspaceSource, compat, legacyPending, close };
 }
 
 function parseArgs(argv) {
@@ -1346,7 +1392,10 @@ function parseArgs(argv) {
     if (key === '--demo') opts.demo = true;
     else if (key === '--port') opts.port = Number(value());
     else if (key === '--host') opts.host = value();
-    else throw new Error(`알 수 없는 옵션입니다: ${arg} (사용법: node dashboard/server.mjs [--demo] [--port 4777] [--host 127.0.0.1])`);
+    else if (key === '--workspace') {
+      opts.workspace = value();
+      if (!opts.workspace) throw new Error('--workspace 값이 비어 있습니다.');
+    } else throw new Error(`알 수 없는 옵션입니다: ${arg} (사용법: node dashboard/server.mjs [--demo] [--port 4777] [--host 127.0.0.1] [--workspace <경로>])`);
   }
   if (!Number.isInteger(opts.port) || opts.port < 0 || opts.port > 65535) throw new Error('--port는 0~65535 정수여야 합니다.');
   if (!opts.host) throw new Error('--host 값이 비어 있습니다.');
@@ -1361,14 +1410,33 @@ async function main() {
     console.error(err.message);
     process.exit(1);
   }
+  // 작업 공간 결정. --workspace로 고른 경로는 .office-local.json에 기억해 다음 실행에도 쓴다
+  let ws;
+  try {
+    ws = resolveWorkspace({ workspace: opts.workspace ?? null });
+    if (opts.workspace) {
+      saveLocalWorkspace(resolve(opts.workspace));
+      if (ws.source === 'env') console.log('참고: 환경변수 AI_OFFICE_WORKSPACE가 있어 --workspace보다 우선합니다.');
+    }
+  } catch (err) {
+    console.error(err instanceof WorkspaceError ? `오류: ${err.message}` : `작업 공간을 정하지 못했습니다: ${err.message}`);
+    process.exit(1);
+  }
+  const { workspace: _ignored, ...serverOpts } = opts;
   let handle;
   try {
-    handle = await startServer(opts);
+    handle = await startServer({ ...serverOpts, root: ws.path, workspaceSource: ws.source });
   } catch (err) {
     console.error(`서버를 시작하지 못했습니다: ${err.message}`);
     process.exit(1);
   }
   console.log(`AI Office 대시보드${opts.demo ? ' (DEMO)' : ''}: ${handle.accessUrl}`);
+  console.log(`작업 공간: ${handle.root} (${WORKSPACE_SOURCE_LABEL[ws.source]})`);
+  if (handle.compat) {
+    console.log('호환 모드: 회사 데이터가 아직 프로그램 폴더 안에 있어 그대로 씁니다. 서버를 끄고 npm run migrate로 작업 공간에 옮기세요.');
+  } else if (handle.legacyPending) {
+    console.log('프로그램 폴더에 예전 회사 데이터가 남아 있습니다. 서버를 끄고 npm run migrate로 이 작업 공간에 옮기세요.');
+  }
   if (handle.remote) {
     console.log(`주의: ${opts.host}에 바인딩했습니다. 같은 네트워크의 기기가 이 서버에 닿을 수 있습니다.`);
     console.log('위 주소의 key는 비밀번호와 같습니다. 이 주소로 연 브라우저만 쿠키로 인증되고, 키 없이 들어온 요청은 모두 거부합니다. 주소를 다른 사람과 공유하지 마세요.');

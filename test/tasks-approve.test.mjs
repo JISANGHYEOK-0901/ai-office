@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { kstDate } from '../lib/paths.mjs';
@@ -76,7 +77,7 @@ async function setup(t, { tasks = [], runs = [], sessions = null, demo = false }
     await handle.close();
     if (prev === undefined) delete process.env.CLAUDE_BIN;
     else process.env.CLAUDE_BIN = prev;
-    rmSync(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
   assert.notEqual(handle.port, 4777);
   const base = `http://127.0.0.1:${handle.port}`;

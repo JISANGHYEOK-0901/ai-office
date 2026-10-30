@@ -349,6 +349,14 @@
         <label for="companyRules"><span class="lbl">회사 공통 규칙 <small class="help-inline">모든 직원 지침 파일의 공통 머리말 다음에 들어갑니다(최대 8000자). 비우면 생략</small></span></label>
         <textarea id="companyRules" rows="12" maxlength="8000" placeholder="예: 보고서는 한국어 존댓말로 쓴다. 금액은 원 단위로 쓴다."></textarea>
         <p class="help" id="companyCount"></p>
+        <section class="org-backup" aria-labelledby="workspaceTitle">
+          <h3 class="lbl" id="workspaceTitle">작업 공간</h3>
+          <p class="help">회사 데이터(조직 정본·산출물·실행 기록)와 AI 직원의 실행 위치입니다. AI 직원은 이 폴더 안에서만 일하고 대시보드 프로그램 폴더는 고치지 못합니다.</p>
+          <p class="workspace-path"><code id="workspacePath">불러오는 중…</code> <small class="help-inline" id="workspaceSource"></small></p>
+          <div class="backup-actions">
+            <button type="button" class="btn btn-sm" id="workspaceOpenBtn">폴더 열기</button>
+          </div>
+        </section>
         <section class="org-backup" aria-labelledby="orgBackupTitle">
           <h3 class="lbl" id="orgBackupTitle">백업 · 이전</h3>
           <p class="help">부서·직원·회사 공통 규칙을 JSON 파일 하나로 내려받거나, 내려받아 둔 파일로 현재 회사 구성을 덮어씁니다. 다른 컴퓨터로 옮길 때도 씁니다.</p>

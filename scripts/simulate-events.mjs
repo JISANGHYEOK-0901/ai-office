@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendEvent } from '../lib/events.mjs';
 import { loadOrg, loadPresets } from '../lib/org.mjs';
-import { kstDate, renameWithRetry, repoRoot } from '../lib/paths.mjs';
+import { kstDate, renameWithRetry, workspaceRoot } from '../lib/paths.mjs';
 
 const DEMO_FILE = 'demo-events.jsonl';
 const SURNAMES = ['김', '이', '박', '최', '정', '강', '조', '윤', '장', '임', '한', '오', '서', '신', '권', '황', '안', '송', '류', '홍'];
@@ -122,6 +122,9 @@ export function buildDemoOrg(root, { seed } = {}) {
       });
     }
   });
+  // 데모에 넣지 않은 부서로 넘기는 협조(handoffs)는 뺀다(프리셋은 프로그램 레포에서 항상 읽히므로 경고 없는 조직이어야 한다)
+  const ids = new Set(departments.map((d) => d.id));
+  for (const d of departments) if (Array.isArray(d.handoffs)) d.handoffs = d.handoffs.filter((h) => ids.has(h));
   return { departments, roster };
 }
 
@@ -132,7 +135,7 @@ function writeJsonAtomic(file, data) {
 }
 
 // 조직 기준으로 이벤트를 계속 만든다. 반환값은 중지 함수(stop.org 에 사용한 조직)
-export function startSimulation({ root = repoRoot(), intervalMs = 1200, org, seed } = {}) {
+export function startSimulation({ root = workspaceRoot(), intervalMs = 1200, org, seed } = {}) {
   const officeDir = join(root, '.office');
   mkdirSync(officeDir, { recursive: true });
 
@@ -384,7 +387,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     const opts = parseCli(process.argv.slice(2));
     const org = opts.orgPath ? JSON.parse(readFileSync(resolve(opts.orgPath), 'utf8')) : undefined;
-    const root = repoRoot();
+    const root = workspaceRoot();
     const stop = startSimulation({ root, intervalMs: opts.intervalMs, org });
     console.log(`데모 이벤트 생성 중: ${join(root, '.office', DEMO_FILE)} (직원 ${stop.org.roster.length}명, Ctrl+C 로 종료)`);
     const end = () => { stop(); process.exit(0); };

@@ -5,7 +5,7 @@ description: 비서실장(메인 세션)이 사무 업무 요청을 받아 업�
 
 # office-task: 업무 처리 체크리스트
 
-각 단계를 끝내면 체크하고 다음으로 넘어간다. 서브에이전트(직원)는 다른 서브에이전트를 부를 수 없으므로 배정·협조·반려 지시는 모두 비서실장이 한다. 명령 형식은 `docs/SPEC.md`와 같다.
+각 단계를 끝내면 체크하고 다음으로 넘어간다. 서브에이전트(직원)는 다른 서브에이전트를 부를 수 없으므로 배정·협조·반려 지시는 모두 비서실장이 한다. 명령 형식은 프로그램 폴더의 `docs/SPEC.md`와 같다.
 
 **직접 실무 금지:** 업무 등록 뒤에는 웹 수집·스크립트 실행·산출물 작성을 직접 하지 않는다. `hooks/chief-guard.mjs`가 거부한다.
 - 허용: Read·Glob·Grep, 근무중 직원 Agent 호출, `node scripts/office.mjs …`·`node scripts/codex-review.mjs …` 단독 실행(`cd`·`&&`·`;`·`|`·리다이렉션·`$` 없이, 특수문자 값은 작은따옴표), `outputs/<id>/`의 `brief.md`·`meeting.md`·`plan.json`·`report.md`·`review-notes.md` 작성

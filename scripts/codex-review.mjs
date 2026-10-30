@@ -12,7 +12,7 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { appendEvent, normalizeCodexItem, redact } from '../lib/events.mjs';
 import { loadOrg, loadPresets } from '../lib/org.mjs';
-import { repoRoot } from '../lib/paths.mjs';
+import { WorkspaceError, workspaceRoot } from '../lib/paths.mjs';
 import { CODEX_EFFORTS, CODEX_MODEL_PATTERN, codexModelArgs, resolveCommand, spawnCli, writePrompt } from '../lib/cli.mjs';
 
 const CONCURRENCY = 3;
@@ -71,7 +71,7 @@ export function loadReviewers(root) {
   return { source: 'presets', reviewers: fromPresets };
 }
 
-// 검토 프롬프트. targetRel(레포 기준 산출물 경로)이나 request(대시보드에서 직접 지시한 요청) 중 하나 이상을 준다
+// 검토 프롬프트. targetRel(작업 공간 기준 산출물 경로)이나 request(대시보드에서 직접 지시한 요청) 중 하나 이상을 준다
 export function buildPrompt(reviewer, targetRel, request = '') {
   return [
     `너는 AI Office 검증실의 ${reviewer.name}(${reviewer.id})이다.${reviewer.specialty ? ` 담당: ${reviewer.specialty}` : ''}`,
@@ -81,7 +81,7 @@ export function buildPrompt(reviewer, targetRel, request = '') {
     '',
     '## 공통 검토 기준',
     REVIEW_RULES,
-    ...(targetRel ? ['', '## 검토 대상', `레포 기준 경로: ${targetRel}`] : []),
+    ...(targetRel ? ['', '## 검토 대상', `작업 공간 기준 경로: ${targetRel}`] : []),
     ...(request ? ['', '## 요청', request] : []),
     '',
     '## 출력 형식',
@@ -225,7 +225,14 @@ export async function main(argv = process.argv.slice(2)) {
     console.error(`오류: ${err.message}`);
     return 1;
   }
-  const root = repoRoot();
+  let root;
+  try {
+    root = workspaceRoot();
+  } catch (err) {
+    if (!(err instanceof WorkspaceError)) throw err;
+    console.error(`오류: ${err.message}`);
+    return 1;
+  }
   let targetAbs;
   try {
     targetAbs = resolveTarget(root, opts.target);
@@ -268,7 +275,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (opts.dryRun) {
     for (const r of reviewers) {
       console.log(`===== ${r.id} (${loaded.source}) =====`);
-      console.log(`# codex exec --json -s read-only -C <repo> ${argsFor.get(r.id).join(' ')} -`);
+      console.log(`# codex exec --json -s read-only -C <작업 공간> ${argsFor.get(r.id).join(' ')} -`);
       console.log(buildPrompt(r, targetRel));
       console.log('');
     }

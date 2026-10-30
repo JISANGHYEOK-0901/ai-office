@@ -5,6 +5,7 @@ import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRunner, looksLikeQuestion, SESSION_PATTERN } from '../dashboard/runner.mjs';
@@ -375,7 +376,7 @@ test('API: GET /api/runs/:id/result(토큰), POST /api/runs/:id/reply(토큰·Or
     await handle.close();
     if (prev === undefined) delete process.env.CLAUDE_BIN;
     else process.env.CLAUDE_BIN = prev;
-    rmSync(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
   assert.notEqual(handle.port, 4777);
   const base = `http://127.0.0.1:${handle.port}`;

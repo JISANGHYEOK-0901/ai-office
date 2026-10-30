@@ -4,6 +4,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HTML_PREVIEW_CSP, openFolderCommand, startServer } from '../dashboard/server.mjs';
@@ -72,8 +73,8 @@ before(async () => {
 
 after(async () => {
   await handle?.close();
-  rmSync(root, { recursive: true, force: true });
-  rmSync(outside, { recursive: true, force: true });
+  await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  await rm(outside, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 test('토큰 없으면 산출물 API 403, 폴더 열기는 Origin도 필요', async () => {

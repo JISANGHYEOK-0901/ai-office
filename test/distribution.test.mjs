@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,7 +65,7 @@ async function withServer(root, fn, opts = {}) {
     await fn({ handle, base, authed });
   } finally {
     await handle.close();
-    rmSync(dirname(publicDir), { recursive: true, force: true });
+    await rm(dirname(publicDir), { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 

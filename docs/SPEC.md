@@ -64,6 +64,8 @@ test/                     node:test 테스트
 outputs/YYYY-MM-DD/<slug>/  업무 산출물(Git 제외)
 ```
 
+작업 공간 분리(아래 "작업 공간 분리") 뒤로는 `org/` 정본·`.office/`·`outputs/`·생성물이 작업 공간(기본 `~/AIOffice`)에 있다. 위 표의 데이터 경로는 작업 공간 기준이다.
+
 ## org/departments.json
 
 ```json
@@ -193,7 +195,7 @@ node scripts/codex-review.mjs --target outputs/<날짜>/<slug> [--reviewers fact
 모든 모듈은 ESM(`.mjs`)이다. `root`는 레포 루트의 절대경로다.
 
 ### lib/paths.mjs
-`repoRoot()`(환경변수 `AI_OFFICE_ROOT`가 있으면 그 값), `officeDir(root)`(`.office`가 없으면 만든다), `outputsDir(root)`, `kstDate(d = new Date())`는 `YYYY-MM-DD`를 반환한다. `renameWithRetry(from, to)`는 Windows rename 실패(EPERM/EBUSY/EACCES)를 짧은 백오프로 최대 5회 재시도한다.
+`programRoot()`(프로그램 레포, 파일 위치 기준. 예전 이름 `repoRoot`는 같은 값), `resolveWorkspace(opts)`·`workspaceRoot()`(데이터 위치, 아래 "작업 공간 분리 구현 계약"), `officeDir(root)`(`.office`가 없으면 만든다), `outputsDir(root)`, `kstDate(d = new Date())`는 `YYYY-MM-DD`를 반환한다. `renameWithRetry(from, to)`는 Windows rename 실패(EPERM/EBUSY/EACCES)를 짧은 백오프로 최대 5회 재시도한다.
 
 ### lib/cli.mjs
 - `findExecutable(name)`: PATH와 PATHEXT를 직접 탐색해 절대경로를 반환한다(없으면 null).
@@ -310,7 +312,7 @@ Windows 10 이상(PowerShell·CMD, 네이티브. Git for Windows는 선택)과 m
 - **기타 동작:**
   - 파일 감시는 `fs.watch`가 실패하거나 누락돼도 1초 폴링 백업으로 동작한다.
   - 줄바꿈은 `.gitattributes`에서 `* text=auto eol=lf`로 통일한다. 테스트에서 CRLF가 섞인 JSONL도 파싱돼야 한다.
-- **npm 스크립트:** `npm run office`/`demo`/`check`가 PowerShell·CMD에서도 같게 동작해야 한다. 그래서 셸 문법(`&&` 연결, 환경변수 인라인 지정, `rm`)을 쓰지 않는다. `check`는 `node scripts/check.mjs`(sync --check 후 test/*.test.mjs를 파일 목록으로 `node --test`)다.
+- **npm 스크립트:** `npm run office`/`demo`/`check`가 PowerShell·CMD에서도 같게 동작해야 한다. 그래서 셸 문법(`&&` 연결, 환경변수 인라인 지정, `rm`)을 쓰지 않는다. `check`는 `node scripts/check.mjs`(test/*.test.mjs를 파일 목록으로 `node --test`)다. 작업 공간 분리 뒤로는 사용자 작업 공간을 읽지 않도록 sync --check를 하지 않는다(작업 공간 점검은 `npm run sync -- --check`).
   - Node 22 이상은 `node --test test/`의 폴더 인자를 펼치지 않고 모듈 경로로 해석한다. 호환을 위해 `test/package.json`의 `main`을 `test/run-all.mjs`로 두고, 폴더로 실행됐을 때만 각 테스트 파일을 별도 프로세스로 돌린다.
 - **CI:** `.github/workflows/ci.yml`을 둔다.
   - 행렬: `macos-latest`, `windows-latest`, `ubuntu-latest` × Node 20·22
@@ -851,3 +853,16 @@ orchestration·security·ux 검토 지적을 재현해 고치며 바꾸거나 �
   - Windows 경로는 platform 주입으로 확인한다.
   - 레포에서 `git status`가 깨끗하게 유지되는지 확인한다.
 - **PR 순서:** ① 현재 묶음 → ②(회의실 킥오프)와 ④(작업 공간 분리)는 파일이 거의 겹치지 않아 병렬로 진행 → ③(Codex 전용 모드)은 ④ 위에서 진행한다. 새 runner·오케스트레이터가 처음부터 작업 공간 기준으로 동작하게 하기 위해서다.
+
+### 작업 공간 분리 구현 계약 (2026-10-29)
+
+- **경로 결정(`lib/paths.mjs` `resolveWorkspace`):** `AI_OFFICE_WORKSPACE` > `--workspace` > 프로그램 레포의 `.office-local.json`(`{workspace}`) > 호환 모드 > 기본값(`~/AIOffice`, Windows `%USERPROFILE%\AIOffice`). 예전 테스트·내부용 `AI_OFFICE_ROOT`는 사용자 셸의 `AI_OFFICE_WORKSPACE`가 테스트 임시 작업 공간을 덮지 않도록 가장 앞 순위로 받는다. 작업 공간이 프로그램 레포와 같거나 그 안·상위면 `WorkspaceError`(대소문자 무시 비교는 win32). 반환 `{path, source:'env'|'arg'|'local'|'compat'|'default', compat, legacy}`.
+- **호환 모드:** 사용자가 작업 공간을 고르지 않았고(위 앞 세 단계 없음) 기본 작업 공간에 표식(`.ai-office-workspace`)이 없으며 레포 안에 예전 회사 데이터(`org/departments.json`·`roster.json`·`company.md`·`company.json`, 비어 있지 않은 `outputs/`·`.claude/agents/`·`.codex/agents/`)가 있으면 레포를 데이터 위치로 쓴다. `.office/`만 있는 경우(레포에서 연 개발 세션의 훅 이벤트)는 세지 않는다. 기본 작업 공간이 이미 준비돼 있으면 레포에 예전 항목이 다시 생겨도 기본 작업 공간을 쓰고 `legacy`로만 알린다(이전한 회사 데이터가 화면에서 사라지지 않게). 호환 모드에서는 작업 공간 생성물을 만들지 않고 레포의 CLAUDE.md·AGENTS.md·`.claude/settings.json`(`${CLAUDE_PROJECT_DIR}` 훅)·스킬을 그대로 쓴다. 이 파일들이 작업 공간 생성물의 원본이다(정본 하나).
+- **생성물(`lib/workspace.mjs` `syncWorkspace`/`ensureWorkspace`):** `.ai-office-workspace`(표식), `CLAUDE.md`, `AGENTS.md`(레포 AGENTS.md + 프로그램 경로 머리말), `.claude/skills/office-task/SKILL.md`, `.claude/settings.json`(레포 설정의 `${CLAUDE_PROJECT_DIR}/hooks/X`를 프로그램 레포 훅 절대경로로 바꾼 exec 형식), `scripts/office.mjs`·`scripts/codex-review.mjs`(연결 스크립트: 자기 위치의 상위 폴더를 `AI_OFFICE_WORKSPACE`로 두고 프로그램 스크립트를 실행). 그래서 수칙·허용 명령·chief-guard의 `node scripts/office.mjs …` 단독 실행·세션 연결 검사가 작업 공간에서도 그대로다. 텍스트 생성물은 `ai-office:generated` 표식(스킬은 frontmatter 다음 줄), JSON 설정은 `.claude/ai-office-generated.json`에 기록한 해시와 같을 때만 생성물로 보고 갱신한다. 서버 시작(데모 제외)·`npm run sync`·migrate가 `ensureWorkspace`(폴더 생성 + 생성물 + `syncAgents`)를 부른다. `sync --check`는 표식이 있는 작업 공간만 생성물을 검사한다.
+- **프리셋·템플릿:** `loadPresets(root)`와 부서 템플릿은 작업 공간에 같은 파일이 있으면 그것을, 없으면 프로그램 레포의 것을 쓴다.
+- **실행:** runner의 모든 spawn은 cwd가 작업 공간이다. `startReview`는 프로그램 레포의 `scripts/codex-review.mjs`를 `AI_OFFICE_WORKSPACE=<작업 공간>`으로 실행한다(호환 모드는 환경변수 없음). codex는 `-C <작업 공간>`.
+- **훅:** 데이터 위치는 `CLAUDE_PROJECT_DIR`가 표식이 있는 작업 공간이거나 예전 방식 레포(`hooks/<자기 파일>` 있음)면 그곳, 아니면 훅 파일 위치(프로그램 레포)다.
+- **보호(`lib/chief-guard.mjs` `decideRepoGuard`):** chief-guard 훅은 데이터 위치가 프로그램 레포와 다르면 직원 판정보다 먼저 모든 에이전트에 적용한다. Write·Edit·MultiEdit·NotebookEdit 대상(cwd 기준 상대경로·`~` 포함, 실제 경로로 비교)이 레포 안이면 거부한다. Bash·PowerShell은 `shellWriteTarget`이 따옴표를 묶어 구간을 나눈 뒤 리다이렉션 대상, rm·mv·touch·tee·sed -i·Set-Content·Remove-Item 등의 인자, cp·Copy-Item·ln 등의 대상(마지막 인자·`-t`·`-Destination`), `cd`로 옮긴 폴더나 `git -C`에서의 git 쓰기 명령, 파일 쓰기 API 이름과 레포 경로 문자열이 함께 보이는 인라인 스크립트를 거부한다(최선 노력, README "한계").
+- **migrate(`lib/migrate.mjs`, `scripts/migrate.mjs`, `npm run migrate [-- --workspace <경로>] [--yes] [--dry-run] [--force]`):** 대상은 위 예전 데이터와 `.office/`(`.office/server.lock` 제외). 작업 공간에 같은 이름의 다른 파일·링크가 있으면 아무것도 바꾸지 않고 종료 코드 1. 같은 종류·크기·내용(링크는 같은 대상)의 복사본은 끊긴 이전의 결과로 보고 건너뛴다(재실행으로 이어서 하기, 되돌릴 때도 지우지 않음). 프로그램 레포나 대상 작업 공간의 `.office/server.lock`(서버가 listen 뒤 `{pid, port, host, id}`를 남기고 close 때 자기 id면 지움) pid가 살아 있으면 거부(`--force`로 무시). 복사(덮어쓰기 금지, 심볼릭 링크는 따라가지 않고 링크로 복사) → 항목별 파일 수·전체 크기·파일별 크기 검증(실패하면 이번에 복사한 것만 되돌림) → 대상 작업 공간을 `.office-local.json`에 기억(기본 경로 포함, 원본 이동 전) → 원본을 레포의 `.office-migrated-<KST 날짜>[-N]/`로 rename(실패해도 지우지 않음). 대화형 확인이나 `--yes`가 없으면 바꾸지 않는다. CLI는 이전 중 받은 SIGINT·SIGTERM·SIGHUP(Windows SIGBREAK)을 끝난 뒤로 미룬다. 끝나면 `ensureWorkspace`.
+- **표시:** `/api/state.workspace = {compat, legacyPending}`(경로 없음), `GET /api/company`에 `workspace:{path, source, label, compat, legacyPending}`(토큰 필요), `POST /api/workspace/open`(상태 변경 API 검사, 셸 없는 open/explorer/xdg-open). 화면은 호환 모드·예전 데이터 남음이면 닫기 없는 배너로 `npm run migrate`를 안내한다. doctor는 `workspace` 항목(필수 아님)에 경로·출처를 보이고, 호환 모드·예전 데이터면 ⚠와 `npm run migrate`를 안내한다.
+- **Git:** `.office-local.json`, `.office-migrated-*/`를 `.gitignore`에 넣는다.

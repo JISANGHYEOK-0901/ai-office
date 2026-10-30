@@ -157,7 +157,8 @@ test('Claude 미사용 환경은 Codex로 전체 실행하고 원본 경로는 �
   const result = await f.final(f.runner.reply(first.id, { prompt: '기본값으로 진행' }));
   assert.equal(result.status, 'done'); assert.equal(result.needsReply, false);
   const staff = f.calls.find((c) => c.kind === 'a');
-  assert.ok(staff.input.includes(join(f.root, '.office/simulation-inputs/market.json')));
+  const inputs = JSON.parse(staff.input.match(/\n입력: ([^\n]+)/)[1]);
+  assert.ok(inputs.includes(join(f.root, '.office/simulation-inputs/market.json')));
   for (const call of f.calls) assert.ok(!call.args.includes('--json-schema'));
   assert.equal(loadTasks(f.root).find((task) => task.id === result.task).status, 'done');
 });

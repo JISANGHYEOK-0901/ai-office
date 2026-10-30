@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -169,7 +170,7 @@ test('validateOrg: capabilities·handoffs 형식 오류는 에러, 없는 handof
 
 test('runner: 비서실장 실행에 조직도 주입, 길면 .office/orgmap.md와 --append-system-prompt-file', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'ai-office-orgmap-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const writeOrg = (org) => {
     mkdirSync(join(root, 'org'), { recursive: true });
     writeFileSync(join(root, 'org', 'departments.json'), JSON.stringify(org.departments));

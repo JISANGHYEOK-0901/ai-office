@@ -65,7 +65,9 @@ test('동명 원본은 기존 업무 상대 경로가 우선이며 없는 입력
   const options = { root: ROOT, taskId: TASK, org: ORG, fileExists: (path) => files.has(path) };
   assert.deepEqual(normalizePlanInputs(p, options).stages[0].inputs, [resolve(ROOT, `outputs/${TASK}/brief.md`)]);
   p.stages[0].inputs = ['missing/source.json'];
-  assert.match(validatePlan(p, options).errors.join('\n'), /확인 경로: .*outputs.*missing\/source.json, .*missing\/source.json/);
+  const diagnostic = validatePlan(p, options).errors.join('\n');
+  const expected = `확인 경로: ${resolve(ROOT, `outputs/${TASK}/missing/source.json`)}, ${resolve(ROOT, 'missing/source.json')}`;
+  assert.ok(diagnostic.includes(expected), diagnostic);
   p.stages[0].inputs = ['/outside/secret.json'];
   assert.match(validatePlan(p, options).errors.join('\n'), /레포 밖/);
 });

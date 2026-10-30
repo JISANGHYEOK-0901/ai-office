@@ -9,6 +9,7 @@ description: 비서실장(메인 세션)이 사무 업무 요청을 받아 업�
 
 **직접 실무 금지:** 업무 등록 뒤에는 웹 수집·스크립트 실행·산출물 작성을 직접 하지 않는다. `hooks/chief-guard.mjs`가 거부한다.
 - 허용: Read·Glob·Grep, 근무중 직원 Agent 호출, `node scripts/office.mjs …`·`node scripts/codex-review.mjs …` 단독 실행(`cd`·`&&`·`;`·`|`·리다이렉션·`$` 없이, 특수문자 값은 작은따옴표), `outputs/<id>/`의 `brief.md`·`meeting.md`·`plan.json`·`report.md`·`review-notes.md` 작성
+- 업무 폴더 파일 목록은 `node scripts/office.mjs task files <id>`로 본다(Glob·Grep이 없는 세션에서도 된다).
 - Agent를 `run_in_background: true`로 부르지 않는다(거부된다). 병렬은 한 응답에서 여러 Agent를 동시에 호출하고 모두 끝날 때까지 기다린다.
 - plan의 모든 단계, 검토, `flow deliver`가 끝나기 전에 "진행 중"이라는 최종 답변으로 종료하지 않는다(헤드리스 실행은 그 답변으로 끝나 업무가 멈춘다).
 - 거부되면 우회하지 말고 사유대로 고친다. 필요한 직원이 없으면 대신 하지 말고 `plan.json`의 `gaps`에 적는다.
@@ -71,6 +72,7 @@ description: 비서실장(메인 세션)이 사무 업무 요청을 받아 업�
 ## 7. 검토
 
 - [ ] `node scripts/office.mjs flow <id> review-request --from <부서>`
+- [ ] `node scripts/office.mjs task files <id>`로 산출물 목록과 계획 단계 산출물(있음/없음)을 확인했다. '없음' 단계는 작업 완료로 보고됐어도 `[반려]`로 파일 작성을 다시 지시했다.
 - [ ] 산출물을 Read로 확인하고 plan.json의 `review.criteria`와 각 단계 완료 기준으로 판단했다. 지적은 `outputs/<id>/review-notes.md`에 적었다.
 - [ ] Codex 검증이 필요하면 `node scripts/codex-review.mjs --target outputs/<id> --task <id> [--reviewers ...]` 실행
   - 재무 숫자 → `number-auditor`, 사실 주장 → `fact-checker`, 문서 → `document-qa`, 코드 → `code-reviewer`, 종합 → `verification-lead` (직무 key 또는 직원 id)
@@ -89,3 +91,4 @@ description: 비서실장(메인 세션)이 사무 업무 요청을 받아 업�
 ## 9. 사용자 반려
 
 - [ ] 대표 피드백이 "이어서 답하기"로 오면 반영할 단계를 정해 해당 부서에 `[반려]`로 재배정하고 7~8단계를 다시 밟았다.
+- [ ] 실행 안에서 대표가 승인·반려 의사를 밝히면 "대시보드의 [승인]·[반려] 버튼이나 상단 입력창에서 처리됩니다"라고 한 줄로 안내했다. 반려 피드백은 반영해 재배정했고, 완료(`done`) 처리는 하지 않았다.

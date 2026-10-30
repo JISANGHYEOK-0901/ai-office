@@ -17,6 +17,7 @@ import { previewAgentFile } from '../lib/sync.mjs';
 import { isOffplanCall } from '../lib/flow.mjs';
 import { buildOrgMap } from '../lib/orgmap.mjs';
 import { compactPlan, isTaskId } from '../lib/plan.mjs';
+import { MAX_OUTPUT_FILES, insideRel, planOutputStatus, walkOutputFiles } from '../lib/outputs.mjs';
 import { loadTasks as loadTaskList, updateTask } from '../lib/tasks.mjs';
 import { createRunner } from './runner.mjs';
 import { buildState } from './state.mjs';
@@ -49,8 +50,6 @@ const MIME = {
 const DEPT_FIELDS = ['id', 'name', 'en', 'color', 'engine', 'tools', 'model', 'summary', 'active', 'permission', 'order', 'instructions', 'codexModel', 'codexEffort', 'capabilities', 'handoffs'];
 // 산출물 미리보기·목록 제한
 const PREVIEW_LIMIT = 5 * 1024 * 1024;
-const MAX_OUTPUT_FILES = 2000;
-const MAX_OUTPUT_DEPTH = 6;
 const TEXT_EXTS = new Set(['.md', '.markdown', '.txt', '.csv', '.tsv', '.json', '.jsonl', '.log', '.yaml', '.yml', '.xml', '.js', '.mjs', '.cjs', '.ts', '.py', '.sql', '.sh', '.css', '.toml', '.ini']);
 const HTML_EXTS = new Set(['.html', '.htm']);
 // html 미리보기 응답: 스크립트·외부 요청을 막는다(sandbox = 고유 출처·스크립트 비허용)
@@ -328,6 +327,8 @@ export async function startServer({
   let tasks = [];
   // 업무 id → 계획표 요약. planFiles: outputs/<업무>/plan.json(표시용), planEvents: 최신 plan.set 이벤트(검사 통과본)
   let planFiles = new Map();
+  // 업무 id → plan.json 원본(산출물 존재 확인용. 요약은 경로를 가리거나 잘라 실제 파일과 다를 수 있다). 화면·이벤트에는 쓰지 않는다
+  let planRaws = new Map();
   const planEvents = new Map();
   const offplanSeen = new Set(); // 이미 남긴 flow.offplan 경고(원 이벤트 기준, 중복 방지)
   let orgMtimes = '';
@@ -369,14 +370,19 @@ export async function startServer({
     const raw = readJsonSafe(tasksFile, []);
     const list = Array.isArray(raw) ? raw : Object.values(raw ?? {});
     const plans = new Map();
+    const raws = new Map();
     for (const t of list) {
       if (!t || !isTaskId(t.id)) continue;
       const plan = readJsonSafe(join(root, 'outputs', ...t.id.split('/'), 'plan.json'), null);
       if (plan && typeof plan === 'object' && Array.isArray(plan.stages)) {
-        try { plans.set(t.id, compactPlan(plan, { taskId: t.id, root })); } catch { /* 형식이 깨진 계획표는 표시하지 않는다 */ }
+        try {
+          plans.set(t.id, compactPlan(plan, { taskId: t.id, root }));
+          raws.set(t.id, plan);
+        } catch { /* 형식이 깨진 계획표는 표시하지 않는다 */ }
       }
     }
     planFiles = plans;
+    planRaws = raws;
     tasks = list
       .filter((t) => t && typeof t.id === 'string')
       .map((t) => {
@@ -465,9 +471,31 @@ export async function startServer({
 
   const allRuns = () => (runner ? runner.list() : []);
 
+  // 계획표 단계 산출물이 실제로 있는지(업무 → {단계 id: boolean}). deriveFlow는 파일을 읽지 않으므로 여기서 확인해 넣는다.
+  // 완료로 표시된 단계에 파일이 없으면 화면이 '완료(산출물 없음)'로 경고한다. 데모(산출물 폴더 없음)와 완료된 업무는 확인하지 않는다
+  function currentOutputStatus(plans) {
+    if (demo) return null;
+    const statusOf = new Map(tasks.map((t) => [t.id, t.status]));
+    const out = new Map();
+    // 경로는 plan.json 원본으로 확인한다. 화면 계획표(plan.set 이벤트 우선)와 원본의 단계 output이 다르면(검사 뒤 plan.json을 고친 경우) 그 단계는 확인하지 않는다
+    for (const [id, plan] of plans) {
+      const raw = planRaws.get(id);
+      if (!isTaskId(id) || statusOf.get(id) === 'done' || !raw) continue;
+      const fileOutput = new Map((planFiles.get(id)?.stages ?? []).map((st) => [st.id, st.output]));
+      const shown = new Map((plan.stages ?? []).map((st) => [st.id, st.output]));
+      const status = {};
+      for (const [stage, exists] of Object.entries(planOutputStatus(root, id, raw))) {
+        if (shown.has(stage) && shown.get(stage) === fileOutput.get(stage)) status[stage] = exists;
+      }
+      out.set(id, status);
+    }
+    return out;
+  }
+
   function currentState() {
+    const plans = currentPlans();
     return {
-      ...buildState({ org, events, runs: allRuns(), tasks, plans: currentPlans(), now: Date.now(), demo }),
+      ...buildState({ org, events, runs: allRuns(), tasks, plans, outputs: currentOutputStatus(plans), now: Date.now(), demo }),
       presets,
       demo,
       tools,
@@ -864,10 +892,6 @@ export async function startServer({
   // ---- 산출물(outputs/) ----
   const outputsBase = resolve(root, 'outputs');
   const outsideOutputs = () => new HttpError(400, '산출물 폴더(outputs/) 안의 경로만 열 수 있습니다.');
-  const insideRel = (base, target) => {
-    const rel = relative(base, target);
-    return rel && !rel.startsWith('..') && !isAbsolute(rel) ? rel : null;
-  };
 
   // outputs 기준 상대경로 → 실제 경로. 글자 경로와 실제 경로(realpath, 심볼릭 링크 해석) 모두 outputs 안이어야 한다
   function resolveOutput(p, kind) {
@@ -908,38 +932,6 @@ export async function startServer({
     }
   }
 
-  // 업무 폴더 아래 파일 목록. 심볼릭 링크는 실제 경로가 outputs 안일 때만 따라간다
-  function walkOutputs(dir, relDir, baseReal, depth, out) {
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const ent of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (out.length >= MAX_OUTPUT_FILES) return;
-      if (ent.name.startsWith('.')) continue;
-      const full = join(dir, ent.name);
-      let real = full;
-      let st;
-      try {
-        if (ent.isSymbolicLink()) {
-          real = realpathSync(full);
-          if (!insideRel(baseReal, real)) continue;
-        }
-        st = statSync(real);
-      } catch {
-        continue;
-      }
-      const rel = relDir ? `${relDir}/${ent.name}` : ent.name;
-      if (st.isDirectory()) {
-        if (depth < MAX_OUTPUT_DEPTH) walkOutputs(real, rel, baseReal, depth + 1, out);
-      } else if (st.isFile()) {
-        out.push({ rel, name: ent.name, size: st.size, mtime: st.mtime.toISOString() });
-      }
-    }
-  }
-
   function fileGroup(rel) {
     const [head, ...rest] = rel.split('/');
     if (!rest.length) {
@@ -970,8 +962,7 @@ export async function startServer({
         const id = `${date}/${slug}`;
         if (!isTaskId(id)) continue;
         const dir = join(baseReal, date, slug);
-        const files = [];
-        walkOutputs(dir, '', baseReal, 0, files);
+        const files = walkOutputFiles(dir, baseReal);
         const reviews = files.filter((f) => f.rel.startsWith('reviews/') && f.name.endsWith('.md'));
         const verdicts = {};
         for (const r of reviews) verdicts[r.name.replace(/\.md$/, '')] = verdictOf(join(dir, ...r.rel.split('/'))) ?? 'FIX';
@@ -1005,8 +996,7 @@ export async function startServer({
       return { task: { id, title: id.split('/')[1], status: null }, dir: `outputs/${id}/`, files: [], truncated: false, demo: true };
     }
     const dir = resolveOutput(id, 'dir');
-    const files = [];
-    walkOutputs(dir.real, '', dir.baseReal, 0, files);
+    const files = walkOutputFiles(dir.real, dir.baseReal);
     const t = tasks.find((x) => x.id === id);
     return {
       task: { id, title: t?.title ?? id.split('/')[1], status: t?.status ?? null },

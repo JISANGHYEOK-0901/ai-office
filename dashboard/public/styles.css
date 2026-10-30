@@ -754,6 +754,8 @@ button.badge-reply:hover { background: color-mix(in srgb, var(--warn) 24%, trans
 .fg-head b { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .fg-step { padding: 0 6px; border-radius: 4px; border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--line)); color: var(--accent); font: 800 10px/1.7 var(--mono); white-space: nowrap; }
 .fg-reject { color: var(--danger); font: 800 10.5px var(--mono); white-space: nowrap; }
+.fg-meet { padding: 0 6px; border-radius: 4px; border: 1px solid color-mix(in srgb, var(--ok) 55%, var(--line)); color: var(--ok); font: 800 10px/1.7 var(--mono); white-space: nowrap; }
+.fg-meet.is-wait { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); color: var(--warn); }
 .fg-more { padding: 0 6px; }
 .fg-items { display: grid; gap: 1px; }
 .fl-item { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 6px; padding: 4px 6px; border-radius: 6px; font-size: 12px; }
@@ -810,10 +812,15 @@ button.badge-reply:hover { background: color-mix(in srgb, var(--warn) 24%, trans
 .ps small { color: var(--faint); font-size: 10.5px; }
 .ps-st { justify-self: start; margin-top: 2px; padding: 0 5px; border-radius: 4px; font: 800 9.5px/1.6 var(--mono); border: 1px solid currentColor; }
 .ps-wait .ps-st { color: var(--faint); } .ps-run .ps-st { color: var(--c-active); } .ps-done .ps-st { color: var(--ok); } .ps-reject .ps-st { color: var(--danger); }
+.ps-missing .ps-st { color: var(--warn); }
+.missing-out { margin: 6px 0 0; padding: 5px 8px; font-size: 11.5px; }
+.pick-list { display: grid; gap: 6px; margin-top: 8px; }
+.pick-item { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.pick-item code { grid-column: 2; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .ps-run { box-shadow: 0 0 10px color-mix(in srgb, var(--c-active) 30%, transparent); }
 :root[data-theme="pastel"] .ps { border: 2px solid var(--line); border-left: 6px solid color-mix(in srgb, var(--dept) 70%, #fff); background: #fff; }
 :root[data-theme="pastel"] .ps-st { border: 1.5px solid var(--line); color: var(--text) !important; }
-:root[data-theme="pastel"] .ps-run .ps-st { background: var(--c-active); } :root[data-theme="pastel"] .ps-done .ps-st { background: var(--c-standby); } :root[data-theme="pastel"] .ps-reject .ps-st { background: var(--c-off); }
+:root[data-theme="pastel"] .ps-missing .ps-st { background: var(--c-active); } :root[data-theme="pastel"] .ps-run .ps-st { background: var(--c-active); } :root[data-theme="pastel"] .ps-done .ps-st { background: var(--c-standby); } :root[data-theme="pastel"] .ps-reject .ps-st { background: var(--c-off); }
 .t-review { color: var(--warn); }
 :root[data-theme="pastel"] .t-review { background: #fff3b0; }
 .task-review { border-color: color-mix(in srgb, var(--warn) 60%, var(--line)); }

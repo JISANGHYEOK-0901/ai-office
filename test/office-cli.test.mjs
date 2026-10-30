@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { kstDate, repoRoot } from '../lib/paths.mjs';
@@ -170,4 +170,52 @@ test('알 수 없는 명령은 사용법과 함께 거부', (t) => {
   assert.match(p.stderr, /사용법/);
   assert.equal(run().status, 64);
   assert.equal(existsSync(SCRIPT), true);
+});
+
+test('task files: 업무 폴더 파일 목록·크기(숨김·밖을 가리키는 링크 제외)와 계획 단계 산출물 있음/없음, 읽기 전용', (t) => {
+  const { root, run } = setup(t);
+  const id = lastLine(run('task', 'start', '파일 목록', '--slug', 'files').stdout).replace('OFFICE_TASK=', '');
+  const dir = join(root, 'outputs', ...id.split('/'));
+  mkdirSync(join(dir, 'marketing'), { recursive: true });
+  writeFileSync(join(dir, 'marketing', 'marketing-1-조사.md'), '# 조사\n'.repeat(10));
+  writeFileSync(join(dir, '.hidden'), 'x');
+  writeFileSync(join(root, 'secret.txt'), 'secret');
+  try { symlinkSync(join(root, 'secret.txt'), join(dir, 'leak.md')); } catch { /* Windows 권한 없으면 건너뜀 */ }
+  writeFileSync(join(dir, 'plan.json'), '\uFEFF' + JSON.stringify({ version: 1, task: id, goal: 'g', stages: [
+    { id: 's1', title: '조사', dept: 'marketing', agent: 'marketing-1', output: 'marketing/marketing-1-조사.md', done: 'd' },
+    { id: 's2', title: 'HTML', dept: 'dev', agent: 'dev-1', output: `outputs/${id}/dev/index.html`, done: 'd', dependsOn: ['s1'] },
+  ] }));
+  const before = readFileSync(join(root, '.office', 'events.jsonl'), 'utf8');
+
+  const p = run('task', 'files', id);
+  assert.equal(p.status, 0, p.stderr);
+  assert.match(p.stdout, new RegExp(`^업무 폴더: outputs/${id}/ \\(파일 3개\\)`));
+  assert.match(p.stdout, /\n  brief\.md\t\d+(\.\d)?(B|KB)\n/);
+  assert.match(p.stdout, /\n  marketing\/marketing-1-조사\.md\t\d+B\n/);
+  assert.doesNotMatch(p.stdout, /hidden|leak|secret/);
+  assert.match(p.stdout, /계획 단계 산출물: 1\/2개 있음/);
+  assert.match(p.stdout, new RegExp(`없음\\ts2\\toutputs/${id}/dev/index\\.html`));
+  assert.match(p.stderr, /산출물 파일이 없는 단계가 있습니다\(s2\)/);
+
+  const j = JSON.parse(run('task', 'files', id, '--json').stdout);
+  assert.equal(j.dir, `outputs/${id}/`);
+  assert.deepEqual(j.files.map((f) => f.path), ['brief.md', 'marketing/marketing-1-조사.md', 'plan.json']);
+  assert.deepEqual(j.planOutputs.map((x) => [x.stage, x.exists]), [['s1', true], ['s2', false]]);
+  assert.equal(j.truncated, false);
+  // 읽기 전용: 이벤트·tasks.json을 바꾸지 않는다
+  assert.equal(readFileSync(join(root, '.office', 'events.jsonl'), 'utf8'), before);
+});
+
+test('task files: 잘못된 id·경로 탈출·없는 폴더는 거부', (t) => {
+  const { run } = setup(t);
+  for (const bad of ['../etc', '2026-10-29/../../x', '2026-10-29/a/b', '/etc/passwd']) {
+    const p = run('task', 'files', bad);
+    assert.equal(p.status, 64, `${bad}: ${p.stderr}`);
+    assert.match(p.stderr, /업무 id 형식이 올바르지 않습니다/);
+  }
+  const missing = run('task', 'files', '2026-10-29/nothing');
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /업무 폴더가 없습니다: outputs\/2026-10-29\/nothing\//);
+  assert.equal(run('task', 'files').status, 64);
+  assert.equal(run('task', 'files', '2026-10-29/x', '--all').status, 64);
 });

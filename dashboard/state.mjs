@@ -1,5 +1,5 @@
 // 이벤트 → 화면 상태 리듀서. 입력만으로 결과가 정해지는 순수 함수다(파일·시계·전역 상태를 읽지 않는다).
-import { deriveTaskFlows } from '../lib/flow.mjs';
+import { deriveTaskFlows, scheduleMeetings } from '../lib/flow.mjs';
 
 // 이 시간 안에 tool 이벤트가 있으면 작업 중으로 본다(경계 포함: 정확히 90초 전도 작업 중).
 export const WORKING_WINDOW_MS = 90_000;
@@ -88,10 +88,11 @@ function closeOpen(track, prefix, key) {
 const DEMO_REPLY_MS = 3 * 60 * 1000;
 
 /**
- * @param {{org:{departments:any[], roster:any[]}, events:any[], runs?:any[], tasks?:any[], plans?:Map|object, now?:Date|number|string, demo?:boolean}} input
+ * @param {{org:{departments:any[], roster:any[]}, events:any[], runs?:any[], tasks?:any[], plans?:Map|object, outputs?:Map|object, now?:Date|number|string, demo?:boolean}} input
  *   plans: 업무 id → 계획표 요약(outputs/<업무>/plan.json). plan.set 이벤트가 있으면 그것이 우선한다
+ *   outputs: 업무 id → {단계 id: 산출물 파일이 있는지}(서버가 fs로 확인한 결과). 없으면 산출물 확인을 하지 않는다
  */
-export function buildState({ org, events, runs = [], tasks = [], plans = null, now = Date.now(), demo = false } = {}) {
+export function buildState({ org, events, runs = [], tasks = [], plans = null, outputs = null, now = Date.now(), demo = false } = {}) {
   const nowMs = toMs(now);
   const today = kstDay(nowMs);
   const departments = listOf(org?.departments);
@@ -308,7 +309,7 @@ export function buildState({ org, events, runs = [], tasks = [], plans = null, n
     if (!taskMap.has(id)) taskMap.set(id, task);
   }
   // 업무 흐름: 업무 언어 피드 항목과 업무별 단계 표시줄·계획표 단계 상태·역량 공백
-  const flow = deriveTaskFlows(eventList, { departments, roster }, { plans, tasks: [...taskMap.values()] });
+  const flow = deriveTaskFlows(eventList, { departments, roster }, { plans, outputs, tasks: [...taskMap.values()] });
   const taskViews = [...taskMap.values()]
     .map((task) => {
       const f = flow.tasks[task.id];
@@ -322,8 +323,10 @@ export function buildState({ org, events, runs = [], tasks = [], plans = null, n
         rejects: f?.rejects ?? 0,
         userRejects: f?.userRejects ?? 0,
         depts: f?.depts ?? [],
-        // 계획표: plan.json 형식({goal, stages, gaps})에 단계 상태(pending|active|done|rejected)·반려 횟수를 붙인다
+        // 계획표: plan.json 형식({goal, stages, gaps})에 단계 상태(pending|active|done|done_missing_output|rejected)·반려 횟수를 붙인다
         plan: f?.plan ? { goal: f.goal, stages: f.plan, gaps: f.gaps } : null,
+        // 완료로 표시됐지만 산출물 파일이 없는 계획 단계 id(서버가 파일을 확인했을 때만)
+        missingOutputs: f?.missingOutputs ?? [],
         goal: f?.goal ?? null,
         gaps: f?.gaps ?? [],
       };
@@ -380,5 +383,7 @@ export function buildState({ org, events, runs = [], tasks = [], plans = null, n
     feed: eventList.slice(-FEED_LIMIT),
     flow: flow.items.slice(-FLOW_LIMIT),
     attention,
+    // 회의실: 진행 중인 하달 킥오프(8초 연출)·실제 회의와 대기 중인 킥오프(waiting)
+    meetings: scheduleMeetings(flow.meetings, nowMs),
   };
 }

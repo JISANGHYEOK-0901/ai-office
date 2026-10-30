@@ -152,6 +152,7 @@ export function normalizeState(raw = {}) {
     flow: normalizeFlow(raw.flow),
     hasFlow: raw.flow !== undefined && raw.flow !== null,
     attention: normalizeAttention(raw.attention, runs),
+    meetings: normalizeMeetings(raw.meetings),
     gaps: collectGaps(raw),
     tasks: Array.isArray(raw.tasks) ? raw.tasks : [],
     presets: presetList(raw.presets),
@@ -357,13 +358,13 @@ export const FLOW_STEPS = [
   { key: 'user', label: '사용자 확인' }, { key: 'done', label: '완료' },
 ];
 const STAGE_STEP = {
-  request: 'request', intake: 'intake', meeting: 'intake', assign: 'assign', accept: 'progress',
+  request: 'request', intake: 'intake', meeting: 'intake', kickoff: 'assign', assign: 'assign', accept: 'progress',
   progress: 'progress', done: 'progress', cooperate: 'cooperate',
   review_request: 'review', review_pass: 'review', review_reject: 'review', codex_review: 'review',
   deliver: 'user', user_reject: 'user', user_approve: 'done',
 };
 export const STAGE_LABEL = {
-  request: '업무 요청', intake: '내용 확인', meeting: '회의', assign: '업무 하달', accept: '업무 전달받음',
+  request: '업무 요청', intake: '내용 확인', meeting: '회의', kickoff: '하달 킥오프', assign: '업무 하달', accept: '업무 전달받음',
   progress: '진행 중', done: '작업 완료', cooperate: '업무 협조 요청', review_request: '검토 요청',
   review_pass: '검토 통과', review_reject: '검토 반려', deliver: '사용자 확인 대기', user_approve: '사용자 승인',
   user_reject: '사용자 반려', codex_review: '검증실 검토', reply_wait: '답변 대기',
@@ -483,8 +484,9 @@ const PLAN_STATUS = {
   run: 'run', running: 'run', active: 'run', progress: 'run', 진행: 'run',
   done: 'done', complete: 'done', completed: 'done', 완료: 'done',
   reject: 'reject', rejected: 'reject', 반려: 'reject',
+  done_missing_output: 'missing',
 };
-export const PLAN_STATUS_LABEL = { wait: '대기', run: '진행', done: '완료', reject: '반려' };
+export const PLAN_STATUS_LABEL = { wait: '대기', run: '진행', done: '완료', reject: '반려', missing: '완료(산출물 없음)' };
 
 // plan.json 단계별 상태. 서버가 stage.status를 주면 그대로 쓰고, 없으면 흐름 항목에서 stage.agent를 매칭해 도출한다
 export function planStages(plan, flow = [], taskId) {
@@ -511,6 +513,65 @@ export function planStages(plan, flow = [], taskId) {
     }
   }
   return stages.map((s) => ({ ...s, status: status.get(s.id) || 'wait' }));
+}
+
+// 회의실 상태(state.meetings): 진행 중인 하달 킥오프·실제 회의와 대기 중인 킥오프
+export function normalizeMeetings(raw) {
+  return (Array.isArray(raw) ? raw : []).filter((m) => m && typeof m === 'object' && typeof m.task === 'string'
+    && (m.kind === 'kickoff' || m.kind === 'meeting') && typeof m.since === 'string')
+    .map((m) => ({ ...m, attendees: Array.isArray(m.attendees) ? m.attendees.filter((a) => typeof a === 'string' && a) : [] }));
+}
+
+// 업무 묶음 머리의 회의실 표시: 킥오프 중 / 회의실 대기 / 회의 중(없으면 '')
+export function meetingBadge(meetings = [], taskId, now = Date.now()) {
+  let label = '';
+  for (const m of meetings) {
+    if (!m || m.task !== taskId) continue;
+    const since = Date.parse(m.since);
+    const until = Date.parse(m.until);
+    if (m.kind === 'meeting' && !m.waiting) return '회의 중';
+    if (m.kind !== 'kickoff') continue;
+    if (Number.isFinite(until) && now >= until) continue;
+    // 끝 기록 없는 회의 뒤에서 기다리는 킥오프는 until이 없고 since가 요청 시각(과거)이라, 여는 시각이 정해진(until 있음) 대기만 since로 승격한다(activeRoom과 같은 기준)
+    if (!m.waiting || (Number.isFinite(since) && Number.isFinite(until) && since <= now)) return '킥오프 중';
+    label = '회의실 대기';
+  }
+  return label;
+}
+
+// ───── 비서실장 입력창의 승인·반려 인식 ─────
+// 사용자 확인 대기 업무가 있을 때 "승인"·"반려 …" 같은 입력을 새 비서실장 실행으로 보내지 않고 승인·반려 API로 처리한다.
+// 승인은 입력 전체가 승인 표현일 때만(앞에 '좋아'·'네' 정도는 허용), 반려는 '반려'·'다시 해'·'수정해'로 시작할 때다.
+// 질문(?로 끝남, '볼까'·'줄래'처럼 물음 어미로 끝남), 부정·취소('승인하지 마', '반려 안 해', '반려 취소'), 승인과 반려가 섞인 입력은 애매하므로 실행으로 보낸다
+const APPROVE_INPUT = /^(?:(?:좋아요?|좋습니다|네|예|응|그래요?|확인했(?:어요|습니다)?)\s*[,.]?\s*)?(?:승인|통과|ok|okay|오케이)(?:\s*(?:해|해요|해\s*줘|해\s*주세요|합니다|할게|할게요|처리해|처리해\s*줘|처리해\s*주세요|시켜|시켜\s*줘|이요|입니다))?\s*[.!~]*$/i;
+// 반려 표현 뒤의 말이 부정·취소로 시작하면(띄어 쓴 '반려 하지 마', '반려 안 해', '반려 취소'·'철회'·'보류', '반려. 아니 됐다') 애매하다
+const REJECT_NEGATION = /^(?:하지|말고|말아|마(?:라|요|세요|십시오)?(?=$|[\s,.!~])|안\s*(?:해|하|할|함|돼|되|됨|된)|못\s*(?:해|하)|취소|철회|보류|아니|ㄴㄴ|금지|그만|됐)/;
+// 물음표 없이 물음 어미로 끝나는 말('다시 해 볼까', '수정해 줄래')
+const QUESTION_ENDING = /(?:까|래|나|니|냐)요?\s*[.!~]*$/;
+const MIXED_APPROVE = /승인|통과|오케이|(?:^|[^a-z])ok(?:ay)?(?![a-z])/i;
+const REJECT_INPUT = /^(?:반려(?:합니다|할게요?|해요|해\s*줘|해\s*주세요|해)?|다시\s*해(?:\s*줘|\s*주세요|요)?|수정해(?:\s*줘|\s*주세요|요)?)(?=$|[\s,.:;!~\u2014-])[\s,.:;!~\u2014-]*([\s\S]*)$/;
+
+export function classifyChiefInput(text) {
+  const s = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (!s || /[?？]\s*$/.test(s)) return { intent: null };
+  if (APPROVE_INPUT.test(s)) return { intent: 'approve' };
+  const m = s.match(REJECT_INPUT);
+  if (m) {
+    const feedback = m[1].trim();
+    if (MIXED_APPROVE.test(feedback) || REJECT_NEGATION.test(feedback) || QUESTION_ENDING.test(feedback)) return { intent: null };
+    return { intent: 'reject', feedback };
+  }
+  return { intent: null };
+}
+
+// 입력창 → 처리 방법. review 업무가 없거나 판정이 애매하면 {action:'run'}(기존대로 비서실장 실행).
+// review 업무가 1건이면 taskId, 여러 건이면 choices(사용자가 고른다)
+export function chiefInputAction(text, tasks = []) {
+  const review = (Array.isArray(tasks) ? tasks : []).filter((t) => t && t.status === 'review' && typeof t.id === 'string');
+  const c = classifyChiefInput(text);
+  if (!c.intent || !review.length) return { action: 'run' };
+  const base = c.intent === 'reject' ? { action: 'reject', feedback: c.feedback } : { action: 'approve' };
+  return review.length === 1 ? { ...base, taskId: review[0].id } : { ...base, choices: review.map((t) => t.id) };
 }
 
 // ───────────────────── 사용자 의견 필요(attention) ─────────────────────
@@ -830,6 +891,7 @@ function render() {
     office.update({
       departments: S.departments, feed: S.feed, chief: S.agents.chief || null,
       attention: attentionIcons(), meeting: meetingAttendees(S.feed, S.flow), handoffs: handoffList(),
+      meetings: S.meetings.map((m) => ({ ...m, title: taskTitle(m.task) })),
     });
     office.setVisible(!onboarding && v === 'office');
     office.setSelected(ui.drawer?.type === 'agent' || ui.drawer?.type === 'chief' ? ui.drawer.id : null);
@@ -854,10 +916,17 @@ function deptIdOf(id, fallback) {
   if (deptOf(id)) return id;
   return S.agents[id]?.department || fallback || '';
 }
+// 넘기는 사람은 보낸 부서에서 그 업무를 마지막으로 끝낸 직원, 받는 사람은 협조 요청 대상 직원이다
 function handoffList() {
-  return S.flow.filter((it) => it.stage === 'cooperate').slice(-20).map((it) => ({
-    key: `${it.ts}|${it.task}|${it.from}|${it.to}`, ts: it.ts, from: deptIdOf(it.from), to: deptIdOf(it.to, it.dept),
-  }));
+  return S.flow.filter((it) => it.stage === 'cooperate').slice(-20).map((it) => {
+    const from = deptIdOf(it.from);
+    let giver = null;
+    for (const x of S.flow) {
+      if (String(x.ts || '') > String(it.ts || '')) break;
+      if (x.stage === 'done' && x.mode !== 'meeting' && x.task === it.task && x.actor && deptIdOf(x.actor) === from) giver = x.actor;
+    }
+    return { key: `${it.ts}|${it.task}|${it.from}|${it.to}`, ts: it.ts, from, to: deptIdOf(it.to, it.dept), fromAgent: giver, toAgent: it.target || null };
+  });
 }
 
 function updateTitle() {
@@ -1216,8 +1285,9 @@ function renderFeed() {
     const task = S.tasks.find((t) => t.id === g.task);
     const st = g.task ? taskSteps(task || { id: g.task }, S.flow) : null;
     const cur = st && st.current >= 0 ? FLOW_STEPS[st.current].label : '';
+    const meet = g.task ? meetingBadge(S.meetings, g.task) : '';
     return `<li class="flow-group">
-      <div class="fg-head">${g.task ? `<b>${esc(task?.title || g.task)}</b>${cur ? `<span class="fg-step">${esc(cur)}</span>` : ''}${st?.rejects ? `<span class="fg-reject" title="반려 횟수">↩ ${st.rejects}</span>` : ''}` : '<b>업무 외 활동</b>'}</div>
+      <div class="fg-head">${g.task ? `<b>${esc(task?.title || g.task)}</b>${cur ? `<span class="fg-step">${esc(cur)}</span>` : ''}${meet ? `<span class="fg-meet${meet === '회의실 대기' ? ' is-wait' : ''}">${esc(meet)}</span>` : ''}${st?.rejects ? `<span class="fg-reject" title="반려 횟수">↩ ${st.rejects}</span>` : ''}` : '<b>업무 외 활동</b>'}</div>
       ${(g.open ? g.items.length > FEED_GROUP_ITEMS : g.folded) ? `<button type="button" class="btn btn-sm btn-ghost fg-more" data-act="feed-more" data-task="${esc(g.task)}" data-key="fm-${esc(g.task)}" aria-expanded="${g.open}">${g.open ? '최근 줄만 보기' : `이전 ${g.folded}건 보기`}</button>` : ''}
       ${g.hidden && g.open ? `<p class="help fg-more">그보다 이전 ${g.hidden}건은 생략</p>` : ''}
       <ol class="fg-items">${g.items.map(flowLine).join('')}</ol></li>`;
@@ -1285,6 +1355,14 @@ function planHtml(task, plan) {
   }).join('')}</ol>`;
 }
 
+// 완료로 표시됐지만 산출물 파일이 없는 계획 단계(서버가 파일을 확인한 결과)
+function missingOutputsHtml(task) {
+  const ids = Array.isArray(task.missingOutputs) ? task.missingOutputs : [];
+  if (!ids.length) return '';
+  const titles = ids.map((id) => task.plan?.stages?.find((st) => st.id === id)?.title || id);
+  return `<p class="warn missing-out" role="note">⚠ 산출물 없이 완료된 단계 ${ids.length}개: ${esc(titles.slice(0, 4).join(', '))}${ids.length > 4 ? ' 외' : ''} — 검토 전에 파일을 확인하세요.</p>`;
+}
+
 function renderTasks() {
   const tasks = [...S.tasks].sort((a, b) => (b.status === 'review') - (a.status === 'review')).slice(0, 30);
   const runs = [...S.runs].sort((a, b) => String(runStart(b) || '').localeCompare(String(runStart(a) || ''))).slice(0, 30);
@@ -1296,6 +1374,7 @@ function renderTasks() {
       <div class="task-top"><span class="tag t-${esc(t.status)}">${esc(TASK_LABEL[t.status] || t.status || '진행')}</span><b>${esc(t.title || t.id)}</b>${attnButton(approve, `ta-${t.id}`)}</div>
       ${stepperHtml(t, true)}
       ${t.plan ? planHtml(t, t.plan) : ''}
+      ${missingOutputsHtml(t)}
       <div class="task-meta"><code>${esc(t.id)}</code>
         ${hasReport === undefined ? '' : `<span class="${hasReport ? 'ok' : 'muted'}">${hasReport ? '보고서 ✓' : '보고서 없음'}</span>`}
         ${reviews.map((r) => `<span class="verdict v-${esc(String(r.verdict || 'none').toLowerCase())}" title="${esc(agentName(r.reviewer))}">${esc(agentName(r.reviewer).replace(/ \(미등록\)$/, ''))} ${esc(r.verdict || '…')}</span>`).join('')}
@@ -1915,11 +1994,69 @@ async function submitRun(ev) {
   }
 }
 
+// 대상 업무 고르기(사용자 확인 대기 업무가 여러 건일 때). 고른 업무 id, 취소하면 null
+function pickTaskBox(text, ids, okLabel) {
+  const dlg = $('pickTaskDialog');
+  $('pickTaskText').textContent = text;
+  $('pickTaskOk').textContent = okLabel;
+  const list = $('pickTaskList');
+  list.replaceChildren(...ids.map((id, i) => {
+    const label = el('label', 'pick-item');
+    const radio = document.createElement('input');
+    radio.type = 'radio'; radio.name = 'pickTask'; radio.value = id; radio.checked = i === 0;
+    label.append(radio, el('b', '', taskTitle(id)), el('code', '', id));
+    return label;
+  }));
+  dlg.returnValue = '';
+  dlg.showModal();
+  return new Promise((resolve) => dlg.addEventListener('close', () => {
+    const picked = list.querySelector('input:checked');
+    resolve(dlg.returnValue === 'ok' && picked ? picked.value : null);
+  }, { once: true }));
+}
+
+// 입력창의 승인·반려: 확인 대화상자를 거쳐 승인·반려 API로 보낸다. 처리했으면 true(입력을 비운다)
+async function chiefDecision(act) {
+  const verb = act.action === 'approve' ? '승인' : '반려';
+  let taskId = act.taskId;
+  if (!taskId) {
+    taskId = await pickTaskBox(`사용자 확인 대기 업무가 ${act.choices.length}건이에요. 어느 업무를 ${verb}할까요?`, act.choices, verb);
+    if (!taskId) return false;
+  }
+  if (act.action === 'reject' && !act.feedback) {
+    openApprove(taskId, { focusFeedback: true });
+    toast('무엇을 고쳐야 하는지 반려 피드백을 적어 주세요. 비서실장이 이 내용으로 다시 배정합니다.');
+    return true;
+  }
+  const title = taskTitle(taskId);
+  const question = act.action === 'approve' ? `'${title}' 업무를 승인할까요? 완료로 바뀝니다.` : `'${title}' 업무를 반려할까요? 비서실장에게 전달할 피드백: ${act.feedback}`;
+  if (!(await confirmBox(question, verb))) return false;
+  if (act.action === 'approve') {
+    await api('POST', `/api/tasks/${encodeURIComponent(taskId)}/approve`);
+    toast(`'${title}' 업무를 승인했어요. 완료로 바꿨어요.`);
+  } else {
+    await api('POST', `/api/tasks/${encodeURIComponent(taskId)}/reject`, { feedback: act.feedback });
+    toast('반려 피드백을 비서실장에게 전달했어요. 다시 배정합니다.');
+  }
+  await refresh();
+  return true;
+}
+
 async function submitChief(ev) {
   ev.preventDefault();
   const input = $('chiefInput');
   const prompt = input.value.trim();
   if (!prompt) { input.focus(); return; }
+  // 사용자 확인 대기 업무가 있으면 "승인"·"반려 …"는 새 실행이 아니라 승인·반려로 처리한다
+  const act = chiefInputAction(prompt, S.tasks);
+  if (act.action !== 'run') {
+    try {
+      if (await chiefDecision(act)) input.value = '';
+    } catch (e) {
+      toast(e.message, { type: 'error' });
+    }
+    return;
+  }
   try {
     const model = $('chiefModel').value;
     await api('POST', '/api/runs', { prompt, ...(model ? { model } : {}) });
@@ -2718,7 +2855,7 @@ function renderApprove() {
   const files = ui.out.files.get(st.taskId);
   $('approveTitle').textContent = `사용자 확인 · ${t.title || t.id}`;
   $('approveSub').textContent = t.id;
-  setHTML($('approveSteps'), stepperHtml(t) + (t.plan ? planHtml(t, t.plan) : ''));
+  setHTML($('approveSteps'), stepperHtml(t) + (t.plan ? planHtml(t, t.plan) : '') + missingOutputsHtml(t));
   const waiting = t.status === 'review';
   const status = S.demo ? '데모 모드에서는 승인·반려를 보낼 수 없어요.' : st.busy ? '보내는 중…' : waiting ? '' : `이 업무는 지금 '${TASK_STATUS_LABEL[t.status] || t.status}' 상태예요.`;
   $('approveStatus').textContent = status;

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{REPORT_TITLE}}</title>
+  <style>
+    :root { color-scheme: light; --ink: #172b3a; --muted: #516575; --line: #dce5eb; --accent: #0b6c66; --paper: #fff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: #f1f5f7; font: 16px/1.7 system-ui, -apple-system, "Malgun Gothic", sans-serif; }
+    a { color: #075d91; text-underline-offset: 3px; overflow-wrap: anywhere; }
+    a:focus-visible { outline: 3px solid #0b6c66; outline-offset: 4px; }
+    .skip { position: absolute; top: -100px; left: 16px; padding: 8px; background: white; }
+    .skip:focus { top: 8px; }
+    main { max-width: 1120px; margin: auto; padding: 56px 32px 64px; }
+    header { padding-bottom: 28px; border-bottom: 2px solid var(--ink); }
+    .eyebrow, .number { font-variant-numeric: tabular-nums; }
+    .eyebrow { color: var(--accent); font-size: .8rem; font-weight: 750; letter-spacing: .08em; }
+    h1 { max-width: 900px; margin: 12px 0 16px; font-size: clamp(1.9rem, 4vw, 3rem); line-height: 1.25; letter-spacing: -.04em; word-break: keep-all; overflow-wrap: anywhere; }
+    h2 { margin: 0 0 16px; font-size: 1.3rem; letter-spacing: -.02em; }
+    h3 { margin: 0 0 8px; font-size: 1rem; }
+    p { margin: 0 0 12px; }
+    .meta, .muted, figcaption { color: var(--muted); font-size: .88rem; }
+    .lead { font-size: 1.15rem; max-width: 75ch; }
+    .takeaway { margin-top: 28px; padding: 24px; background: #e7f3ef; border-left: 4px solid var(--accent); border-radius: 0 10px 10px 0; }
+    .takeaway strong { display: block; margin-bottom: 8px; color: #07524d; }
+    .layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 24px; align-items: start; margin-top: 24px; }
+    .panel { padding: 26px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+    .panel + .panel { margin-top: 24px; }
+    ol, ul { margin: 0; padding-left: 24px; }
+    li + li { margin-top: 14px; }
+    .table-wrap { max-width: 100%; overflow-x: auto; margin: 20px 0 12px; border: 1px solid var(--line); border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; text-align: left; }
+    caption { padding: 12px; text-align: left; color: var(--muted); }
+    th { background: #f1f5f7; font-weight: 700; }
+    th, td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+    tr:last-child td { border-bottom: 0; }
+    .label { display: inline-block; padding: 1px 7px; border-radius: 4px; background: #edf2f5; color: #375467; font-size: .76rem; font-weight: 700; }
+    .label.uncertain { background: #fff0d9; color: #80500c; }
+    .note { padding: 16px; background: #fff8eb; border: 1px solid #e8d4ab; border-radius: 8px; }
+    footer { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--line); }
+    .sources { padding-left: 22px; font-size: .9rem; }
+    @media (max-width: 700px) {
+      main { padding: 28px 16px 40px; }
+      .layout { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+      .panel, .takeaway { padding: 20px; }
+      .panel + .panel { margin-top: 20px; }
+      th, td { padding: 10px; }
+    }
+    @media print {
+      body { background: white; font-size: 11pt; }
+      main { padding: 0; max-width: none; }
+      .layout { display: block; }
+      .panel, .takeaway { break-inside: avoid; border-radius: 0; box-shadow: none; }
+      .layout > aside { margin-top: 24px; }
+      a { color: inherit; }
+      .skip { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#report">보고서 본문으로</a>
+  <main id="report">
+    <header>
+      <div class="eyebrow">DECISION BRIEF · 의사결정 보고서</div>
+      <h1>{{REPORT_TITLE}}</h1>
+      <p class="lead">{{REPORT_SUBTITLE}}</p>
+      <p class="meta">작성: {{REPORT_AUTHOR}} · 기준일: {{REPORT_DATE}} · 조사 범위: {{REPORT_SCOPE}}</p>
+    </header>
+    <section class="takeaway" aria-label="핵심 결론">
+      <strong>먼저 읽을 결론</strong>
+      <p>{{REPORT_CONCLUSION}}</p>
+    </section>
+    <div class="layout">
+      <div>
+        <section class="panel" aria-labelledby="findings">
+          <h2 id="findings">확인한 내용과 의미</h2>
+          {{REPORT_FINDINGS_HTML}}
+        </section>
+        <section class="panel" aria-labelledby="evidence">
+          <h2 id="evidence">근거를 한눈에</h2>
+          <p class="muted">수치는 단위·기간을 함께 읽고, 해석은 사실과 구분합니다.</p>
+          <div class="table-wrap" role="region" aria-label="근거 비교표" tabindex="0">
+            <table>
+              <caption>{{REPORT_TABLE_CAPTION}}</caption>
+              <thead><tr><th scope="col">항목</th><th scope="col">확인한 사실</th><th scope="col">업무에 주는 의미</th><th scope="col">출처</th></tr></thead>
+              <tbody>{{REPORT_TABLE_ROWS_HTML}}</tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+      <aside>
+        <section class="panel" aria-labelledby="actions">
+          <h2 id="actions">다음 행동</h2>
+          {{REPORT_ACTIONS_HTML}}
+        </section>
+        <section class="panel" aria-labelledby="limits">
+          <h2 id="limits">확인 범위와 한계</h2>
+          <div class="note">{{REPORT_LIMITATIONS}}</div>
+        </section>
+      </aside>
+    </div>
+    <footer aria-labelledby="sources">
+      <h2 id="sources">출처와 확인일</h2>
+      <ol class="sources">{{REPORT_SOURCES_HTML}}</ol>
+      <p class="meta">추정·제안은 표시하고, 확인하지 못한 내용은 결론의 근거에 포함하지 않습니다.</p>
+    </footer>
+  </main>
+</body>
+</html>

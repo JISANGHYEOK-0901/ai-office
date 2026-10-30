@@ -43,6 +43,7 @@ const ORG = {
 function makeRoot(org = ORG) {
   const root = mkdtempSync(join(tmpdir(), 'office-reply-'));
   writeOrg(root, org);
+  writeFileSync(join(root, 'org', 'company.json'), JSON.stringify({ chief: { engine: 'claude', model: 'sonnet', effort: 'high' } }));
   return root;
 }
 
@@ -110,7 +111,7 @@ test('claude: session_id 추출·답변 전문 0600 저장·needsReply·답변 �
   const root = makeRoot();
   const { calls, spawnImpl } = fakeSpawner();
   const runner = createRunner({ root, spawnImpl });
-  const run = runner.start({ prompt: '중고명품 자료수집해줘' });
+  const run = runner.start({ agentId: 'research-1', prompt: '중고명품 자료수집해줘' });
   assert.equal(run.rootId, run.id);
   assert.equal(run.parentId, null);
   assert.equal(run.canReply, false);
@@ -139,7 +140,7 @@ test('claude: session_id 추출·답변 전문 0600 저장·needsReply·답변 �
   const events = readFileSync(join(root, '.office', 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   const wait = events.find((e) => e.kind === 'reply.wait');
   assert.ok(wait, '답변 대기 이벤트');
-  assert.equal(wait.agent, 'chief');
+  assert.equal(wait.agent, 'research-1');
   assert.equal(wait.run, run.id);
   assert.match(wait.summary, /답하셔도 됩니다/);
 
@@ -199,11 +200,11 @@ test('reply(codex): codex exec -s read-only -C <root> resume --json … <thread_
   assert.equal(JSON.parse(readFileSync(join(root, '.office', 'runs.json'), 'utf8'))[0].sessionId, TID);
   assert.match(readFileSync(join(root, '.office', 'runs', `${first.id}.result.md`), 'utf8'), /원본 파일 위치/);
 
-  runner.reply(first.id, { prompt: 'ledger.xlsx 입니다', model: 'opus' });
+  runner.reply(first.id, { prompt: 'ledger.xlsx 입니다' });
   const cmd = resolveCommand('codex', 'CODEX_BIN');
   const model = process.env.OFFICE_CODEX_MODEL || 'gpt-6.1-sol';
   const effort = process.env.OFFICE_CODEX_EFFORT || 'max';
-  assert.deepEqual(calls[1].args, [...cmd.prefixArgs, 'exec', '-s', 'read-only', '-C', root, 'resume', '--json', '-m', model, '-c', `model_reasoning_effort="${effort}"`, TID, '-']);
+  assert.deepEqual(calls[1].args, [...cmd.prefixArgs, 'exec', '--skip-git-repo-check', '-s', 'read-only', '-C', root, 'resume', '--json', '-m', model, '-c', `model_reasoning_effort="${effort}"`, TID, '-']);
   await tick();
   assert.equal(calls[1].child.input, 'ledger.xlsx 입니다');
   calls[1].child.finish(0);
@@ -295,7 +296,7 @@ test('화면 계약: 대화 모달·답장 입력·답변 필요 칩, 답변 전
   assert.match(src, /data-act="open-thread"/);
   assert.match(src, /님이 답변을 기다립니다/);
   assert.match(src, /'threadSend', 'threadPrompt', 'threadModel'/, '데모 모드에서 보내기 비활성');
-  const thread = src.slice(src.indexOf('// ───── 대화 보기'), src.indexOf('// ───── 회사 설정'));
+  const thread = src.slice(src.indexOf('// ───── 대화 보기'), src.indexOf('// ───── 계정 연결'));
   assert.ok(thread.length > 0);
   assert.doesNotMatch(thread, /innerHTML/, '대화 영역은 DOM API(textContent)로만 그린다');
 });
@@ -319,7 +320,7 @@ process.stdin.on('end', () => {
   process.env.CLAUDE_BIN = bin;
   try {
     const runner = createRunner({ root });
-    const first = runner.start({ prompt: '자료 모아 줘' });
+    const first = runner.start({ agentId: 'research-1', prompt: '자료 모아 줘' });
     await waitFor(() => runner.list()[0].status === 'done');
     assert.equal(runner.list()[0].needsReply, true);
     const second = runner.reply(first.id, { prompt: '기본값으로 진행' });
@@ -415,5 +416,5 @@ test('API: GET /api/runs/:id/result(토큰), POST /api/runs/:id/reply(토큰·Or
   const after = await request(base, 'GET', '/api/state');
   assert.equal(after.json.metrics.needsReply, 0);
   const log = readFileSync(join(root, '.office', 'runs', `${ok.json.id}.log`), 'utf8');
-  assert.match(log, new RegExp(`"--model","sonnet","--resume","${SID}"`));
+  assert.match(log, new RegExp(`"--model","sonnet","--effort","high","--resume","${SID}"`));
 });

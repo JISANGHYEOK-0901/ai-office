@@ -19,6 +19,9 @@ const ORG = {
 };
 
 const FAKE = `const args = process.argv.slice(2);
+if(args.includes('--version')){console.log('Fixture 1.0');process.exit(0)}
+if(args.includes('auth')){console.log(JSON.stringify({loggedIn:true}));process.exit(0)}
+if(args.includes('login')){console.log('Logged in');process.exit(0)}
 const i = args.indexOf('--resume');
 const sid = i >= 0 ? args[i + 1] : ${JSON.stringify(SID2)};
 let input = '';
@@ -26,7 +29,9 @@ process.stdin.on('data', (c) => { input += c; });
 process.stdin.on('end', () => {
   const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
   out({ type: 'system', subtype: 'init', session_id: sid, args });
-  out({ type: 'result', subtype: 'success', is_error: false, result: 'INPUT:' + input, session_id: sid });
+  const j=args.indexOf('--json-schema');
+  if(j>=0)out({type:'result',structured_output:{question:'산출물 폴더: outputs/2026-10-29/html-page/ 범위를 알려 주세요.',plan:null},session_id:sid});
+  else out({ type: 'result', subtype: 'success', is_error: false, result: 'INPUT:' + input, session_id: sid });
 });
 `;
 
@@ -62,6 +67,7 @@ async function setup(t, { tasks = [], runs = [], sessions = null, demo = false }
   mkdirSync(join(root, 'org'), { recursive: true });
   writeFileSync(join(root, 'org', 'departments.json'), JSON.stringify(ORG.departments));
   writeFileSync(join(root, 'org', 'roster.json'), JSON.stringify(ORG.roster));
+  writeFileSync(join(root, 'org', 'company.json'), JSON.stringify({ chief: { engine: 'claude', model: 'sonnet', effort: 'high' } }));
   mkdirSync(join(root, '.office', 'runs'), { recursive: true });
   writeFileSync(join(root, '.office', 'tasks.json'), JSON.stringify(tasks));
   writeFileSync(join(root, '.office', 'runs.json'), JSON.stringify(runs));
@@ -155,7 +161,9 @@ test('reject: 세션이 없으면 새 비서실장 실행을 띄우고 새 세�
   assert.equal(r.json.run.parentId, null);
   const id = r.json.run.id;
   await waitFor(() => existsSync(join(root, '.office', 'runs', `${id}.result.md`)));
-  const log = readFileSync(join(root, '.office', 'runs', `${id}.log`), 'utf8');
+  const child = read('runs.json').find((run) => run.parentId === id && run.phase === 'plan');
+  assert.ok(child, '새 비서실장은 계획 단계로 실행한다');
+  const log = readFileSync(join(root, '.office', 'runs', `${child.id}.log`), 'utf8');
   assert.doesNotMatch(log, /--resume/);
   assert.match(log, /--append-system-prompt/);
   assert.match(readFileSync(join(root, '.office', 'runs', `${id}.result.md`), 'utf8'), /산출물 폴더: outputs\/2026-10-29\/html-page\//);

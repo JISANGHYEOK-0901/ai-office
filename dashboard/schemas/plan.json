@@ -1,0 +1,216 @@
+{
+  "type": "object",
+  "properties": {
+    "question": {
+      "type": "string"
+    },
+    "needsMeeting": {
+      "type": "boolean"
+    },
+    "meetingAgents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "meetingSummary": {
+      "type": "string"
+    },
+    "plan": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "task": {
+          "type": "string"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "dept": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "output": {
+                "type": "string"
+              },
+              "done": {
+                "type": "string"
+              },
+              "parallelGroup": {
+                "type": "string"
+              },
+              "inputs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "dependsOn": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "dept",
+              "agent",
+              "output",
+              "done",
+              "parallelGroup",
+              "inputs",
+              "dependsOn"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "review": {
+          "type": "object",
+          "properties": {
+            "by": {
+              "type": "string",
+              "description": "기본 chief. 대표가 별도 검토를 요청한 경우에만 codex 또는 검토 직원 id."
+            },
+            "criteria": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "by",
+            "criteria"
+          ],
+          "additionalProperties": false
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "need": {
+                "type": "string"
+              },
+              "suggestion": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "need",
+              "suggestion"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "publications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "service": {
+                "type": "string"
+              },
+              "connection": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "mail",
+                  "post",
+                  "comment"
+                ]
+              },
+              "recipients": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "service",
+              "connection",
+              "agent",
+              "target",
+              "subject",
+              "content",
+              "action",
+              "recipients"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "deliverables": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "version",
+        "task",
+        "goal",
+        "stages",
+        "review",
+        "gaps",
+        "publications",
+        "deliverables"
+      ],
+      "additionalProperties": false
+    },
+    "rerunStages": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "question",
+    "needsMeeting",
+    "meetingAgents",
+    "meetingSummary",
+    "plan",
+    "rerunStages"
+  ],
+  "additionalProperties": false
+}

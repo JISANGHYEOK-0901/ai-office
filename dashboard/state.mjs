@@ -164,6 +164,7 @@ export function buildState({ org, events, runs = [], tasks = [], plans = null, o
         if (!fromRun) t.open.set(`r:${instanceKey}`, ms);
         break;
       case 'agent.stop':
+      case 'agent.pause':
         closeOpen(t, 'a:', `a:${instanceKey}`);
         break;
       case 'review.end':
@@ -243,6 +244,14 @@ export function buildState({ org, events, runs = [], tasks = [], plans = null, o
     agents[a.id] = agentView(a.id, { ...a, unregistered: false }, offDuty);
   }
   agents[CHIEF_ID] = agentView(CHIEF_ID, { name: '비서실장', department: null, chief: true, unregistered: false }, false);
+  for (const run of runs) {
+    if (!run.continuous || !['running', 'queued'].includes(run.status)) continue;
+    const agent = agents[run.monitor?.agent || run.agentId];
+    if (!agent || agent.status === 'off-duty') continue;
+    agent.monitor = run.monitor || { status: 'checking' };
+    agent.runId = run.id;
+    if (agent.status === 'idle') agent.status = 'standby';
+  }
 
   // 정본에 없는 agent는 버리지 않고 '미등록'으로 표시한다.
   const unregistered = [];
@@ -362,6 +371,9 @@ export function buildState({ org, events, runs = [], tasks = [], plans = null, o
     for (const [agent, ev] of demoReply) attention.push({ kind: 'reply', agent, runId: null, ...(ev.task ? { task: ev.task } : {}), since: ev.ts, text: ev.summary || '' });
   }
   for (const t of taskViews) {
+    if (t.status === 'done' && !t.resultSeenAt && !t.approvedAt && !t.historyArchivedAt) {
+      attention.push({ kind: 'complete', agent: CHIEF_ID, task: t.id, since: t.completedAt ?? t.updated ?? t.lastActivity ?? t.created ?? null, text: `'${t.title ?? t.id}' 업무 완료` });
+    }
     if (t.status === 'review') {
       attention.push({ kind: 'approve', agent: CHIEF_ID, task: t.id, since: t.updated ?? t.lastActivity ?? t.created ?? null, text: `'${t.title ?? t.id}' 결과 확인 대기` });
     }

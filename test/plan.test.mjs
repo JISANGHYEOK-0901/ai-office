@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { compactPlan, isTaskId, validatePlan } from '../lib/plan.mjs';
+import { compactPlan, isTaskId, normalizePlanInputs, validatePlan } from '../lib/plan.mjs';
 import { kstDate, repoRoot } from '../lib/paths.mjs';
 
 const SCRIPT = join(repoRoot(), 'scripts', 'office.mjs');
@@ -44,6 +44,39 @@ const goodPlan = () => ({
 
 const existing = new Set([resolve(ROOT, 'outputs', '2026-10-29', 'html-page', 'brief.md')]);
 const check = (plan, org = ORG, taskId = TASK) => validatePlan(plan, { org, taskId, root: ROOT, fileExists: (p) => existing.has(p) });
+
+test('작업 공간의 실제 원본 상대 입력과 업무 상대·절대·앞 단계 입력을 함께 해석한다', () => {
+  const p = goodPlan();
+  const source = resolve(ROOT, '.office/simulation-inputs/2026-10-30/market.json');
+  const files = new Set([...existing, source]);
+  const options = { root: ROOT, taskId: TASK, org: ORG, fileExists: (path) => files.has(path) };
+  p.stages[0].inputs = ['.office/simulation-inputs/2026-10-30/market.json', source];
+  assert.equal(validatePlan(p, options).ok, true);
+  const normalized = normalizePlanInputs(p, options);
+  assert.deepEqual(normalized.stages[0].inputs, [source, source]);
+  assert.deepEqual(normalized.stages[1].inputs, ['s1', resolve(ROOT, `outputs/${TASK}/marketing/research.md`), resolve(ROOT, `outputs/${TASK}/brief.md`)]);
+  assert.equal(validatePlan(normalized, options).ok, true);
+  assert.equal(p.stages[0].inputs[0], '.office/simulation-inputs/2026-10-30/market.json');
+});
+
+test('동명 원본은 기존 업무 상대 경로가 우선이며 없는 입력은 검사한 경로를 알린다', () => {
+  const p = goodPlan(); p.stages[0].inputs = ['brief.md'];
+  const files = new Set([...existing, resolve(ROOT, 'brief.md')]);
+  const options = { root: ROOT, taskId: TASK, org: ORG, fileExists: (path) => files.has(path) };
+  assert.deepEqual(normalizePlanInputs(p, options).stages[0].inputs, [resolve(ROOT, `outputs/${TASK}/brief.md`)]);
+  p.stages[0].inputs = ['missing/source.json'];
+  assert.match(validatePlan(p, options).errors.join('\n'), /확인 경로: .*outputs.*missing\/source.json, .*missing\/source.json/);
+  p.stages[0].inputs = ['/outside/secret.json'];
+  assert.match(validatePlan(p, options).errors.join('\n'), /레포 밖/);
+});
+
+test('최종 전달 목록은 계획의 단계 id·산출물만 허용하고 빈 첨부 목록도 저장한다', () => {
+  for (const deliverables of [[], ['s2'], [`outputs/${TASK}/dev/index.html`]]) assert.equal(check({ ...goodPlan(), deliverables }).ok, true);
+  for (const deliverables of [['없는단계'], ['../../비밀.txt'], 's2', [null]]) {
+    const result = check({ ...goodPlan(), deliverables });
+    assert.equal(result.ok, false); assert.ok(result.errors.some((message) => message.includes('deliverables')));
+  }
+});
 
 test('단계 산출물 이름이 report·summary·findings·analysis로 시작하는 .md면 거부한다(서브에이전트 쓰기 차단)', () => {
   for (const name of ['summary.md', 'Report-final.md', 'findings.md', 'ANALYSIS_v2.md']) {
@@ -220,8 +253,9 @@ test('CLI flow·meeting: 이벤트 kind·필드, deliver는 task status review, 
   ok('flow', id, 'review-request', '--from', 'dev');
   ok('flow', id, 'review', '--verdict', 'reject', '--to', 'dev', '--reason', '링크 깨짐');
   ok('flow', id, 'review', '--verdict=pass');
+  writeFileSync(join(root, 'outputs', id, 'report.md'), '# 최종 검토 보고서');
   const d = ok('flow', id, 'deliver');
-  assert.match(d.stderr, /report\.md가 없습니다/);
+  assert.match(d.stdout, /업무를 완료/);
   const evs = events().filter((e) => e.task === id && e.kind !== 'task.start');
   assert.deepEqual(evs.map((e) => e.kind), ['meeting.start', 'meeting.end', 'flow.cooperate', 'flow.review_request', 'flow.review', 'flow.review', 'flow.deliver', 'task.update']);
   assert.deepEqual(evs[0].attendees, ['marketing-1', 'dev']);
@@ -229,9 +263,9 @@ test('CLI flow·meeting: 이벤트 kind·필드, deliver는 task status review, 
   assert.deepEqual([evs[2].from, evs[2].to], ['marketing', 'dev'], '직원 id는 소속 부서로 바꾼다');
   assert.deepEqual([evs[4].verdict, evs[4].to, evs[4].summary], ['reject', 'dev', '링크 깨짐']);
   assert.equal(evs[5].verdict, 'pass');
-  assert.equal(evs[7].status, 'review');
+  assert.equal(evs[7].status, 'done');
   const tasks = JSON.parse(readFileSync(join(root, '.office', 'tasks.json'), 'utf8'));
-  assert.equal(tasks[0].status, 'review');
+  assert.equal(tasks[0].status, 'done');
 
   assert.equal(run('flow', id, 'review', '--verdict', 'reject').status, 64, '반려는 --to 필요');
   assert.match(run('flow', id, 'cooperate', '--from', 'marketing', '--to', 'nope').stderr, /찾을 수 없습니다: nope\. 있는 부서: marketing, dev/);
@@ -255,7 +289,7 @@ test('CLI flow review 반려는 최대 2회: 3번째는 종료 코드 1, 사용�
   const third = reject();
   assert.equal(third.status, 1);
   assert.match(third.stderr, /최대 2회/);
-  assert.match(third.stderr, /deliver/);
+  assert.match(third.stderr, /blocked/);
   assert.equal(events().filter((e) => e.kind === 'flow.review').length, 2, '3번째는 기록하지 않는다');
   assert.equal(events().filter((e) => e.kind === 'flow.review')[1].stage, 'html');
   // 사용자 반려(서버 이벤트) 뒤에는 재배정을 막지 않는다
@@ -280,4 +314,21 @@ test('CLI org export·import는 대시보드 비서실장 실행(OFFICE_CHIEF_RU
   const imp = spawnSync(process.execPath, [SCRIPT, 'org', 'import', target, '--yes'], { env, encoding: 'utf8' });
   assert.equal(imp.status, 1);
   assert.equal(JSON.parse(readFileSync(join(root, 'org', 'roster.json'), 'utf8')).length, ORG.roster.length, '조직 정본은 그대로');
+});
+
+
+test('필수 전달은 실제 후속 의존 경로를 요구하고 기존 권장은 생략 가능', () => {
+  const plan = goodPlan();
+  const org = structuredClone(ORG);
+  org.departments[0].handoffs = ['dev'];
+  const inspect = (value) => validatePlan(value, { root: ROOT, org, taskId: TASK, fileExists: (path) => existing.has(path) });
+  const one = { ...plan, stages: [plan.stages[0]] };
+  assert.equal(inspect(one).ok, true);
+  org.departments[0].handoffPolicy = 'required';
+  assert.equal(inspect(one).ok, false);
+  assert.match(inspect(one).errors.join(' '), /필수 전달 부서 dev/);
+  assert.equal(inspect(plan).ok, true);
+  plan.stages[1].dependsOn = [];
+  plan.stages[1].inputs = [];
+  assert.equal(inspect(plan).ok, false, '부서가 계획에 존재해도 의존 경로가 없으면 전달한 것이 아니다');
 });

@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "paths": ["dashboard/public/**", "org/templates/report.html"],
+  "inputs": ["dashboard/*.mjs", "dashboard/schemas/**", "lib/**", "scripts/verify-ui.mjs", "scripts/browser-mcp.mjs", "scripts/*-checks.mjs", "package*.json"],
+  "base": "main",
+  "command": ["npm", "run", "verify:ui", "--", "--report", "{report}"]
+}

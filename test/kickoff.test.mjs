@@ -227,14 +227,17 @@ test('planOutputStatus: plan.json 원본 경로로 확인해 공백 연속·비�
   const root = mkdtempSync(join(tmpdir(), 'ai-office-outputs-raw-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const dir = join(root, 'outputs', ...TA.split('/'));
-  const long = `${'긴이름'.repeat(60)}.md`;
+  // 경로 전체는 160자를 넘기되, 폴더·파일 이름 하나는 Linux 한도(255바이트) 안으로 나눈다
+  const longDirs = Array.from({ length: 6 }, (_, i) => `${'긴이름'.repeat(10)}${i}`);
+  const long = [...longDirs, `${'긴이름'.repeat(10)}.md`].join('/');
   mkdirSync(join(dir, 'marketing'), { recursive: true });
   mkdirSync(join(dir, 'dev', 'site', 'css'), { recursive: true });
   mkdirSync(join(dir, 'dev', 'empty'), { recursive: true });
   mkdirSync(join(dir, 'dev', 'hidden'), { recursive: true });
   writeFileSync(join(dir, 'marketing', 'a  b.md'), '# a');
   writeFileSync(join(dir, 'marketing', 'token=v2-notes.md'), '# t');
-  writeFileSync(join(dir, 'marketing', long), '# l');
+  mkdirSync(join(dir, 'marketing', ...longDirs), { recursive: true });
+  writeFileSync(join(dir, 'marketing', ...long.split('/')), '# l');
   writeFileSync(join(dir, 'dev', 'site', 'css', 'main.css'), 'body{}');
   writeFileSync(join(dir, 'dev', 'hidden', '.keep'), '');
   const raw = { stages: [

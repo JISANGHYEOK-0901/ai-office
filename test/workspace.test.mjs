@@ -25,7 +25,8 @@ const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostTool
 
 function tmp(t, prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // Windows는 runner가 닫는 로그 스트림 등이 잠깐 남아 ENOTEMPTY·EBUSY가 날 수 있어 재시도한다
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return dir;
 }
 

@@ -30,4 +30,12 @@ test('계정 API: 최초 저장·수정·해제, 비밀값 비공개와 토큰/O
   const listed = await request('/api/connections'); assert.equal(listed.data.connections.length, 1); assert.doesNotMatch(JSON.stringify(listed.data), /fixture-updated|fixture-new-password/);
   assert.equal((await request(`/api/connections/${created.data.id}`, 'DELETE')).status, 200);
   assert.equal((await request('/api/connections')).data.connections.length, 0);
+  // 일반 웹사이트: 시작 주소·허용 도메인 저장, 잘못된 주소 거부, 목록의 종류 표시
+  const providers = (await request('/api/connections')).data.providers;
+  assert.ok(providers.some((p) => p.id === 'web' && p.custom));
+  assert.equal((await request('/api/connections', 'POST', { provider: 'web', startUrl: 'http://erp.example.com/' })).status, 400);
+  const web = await request('/api/connections', 'POST', { provider: 'web', label: 'ERP', startUrl: 'https://erp.example.com/erp/login', hosts: 'partners.example.com' });
+  assert.equal(web.status, 200);
+  assert.deepEqual([web.data.provider, web.data.startUrl, web.data.hosts], ['web', 'https://erp.example.com/erp/login', ['erp.example.com', 'partners.example.com']]);
+  assert.equal((await request(`/api/connections/${web.data.id}`, 'DELETE')).status, 200);
 });

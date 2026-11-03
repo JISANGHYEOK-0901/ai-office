@@ -107,6 +107,8 @@ npm run migrate -- --dry-run                      # 무엇을 옮길지만 보�
 ```bash
 npm run doctor     # 실행 환경 점검(claude·codex 설치·로그인 등)
 npm run office     # 대시보드 → http://127.0.0.1:4777
+npm run office:start  # 대시보드를 터미널·AI 세션과 분리해 켜기(창을 닫아도 유지, 기록은 .office/server.log)
+npm run office:stop   # 분리해 켠 서버 끄기(실행 중인 AI 작업도 정리) · office:status로 상태 확인
 npm run demo       # 가짜 이벤트로 화면만 구경 (DEMO 배지, 실제 파일에 쓰지 않음)
 npm run check      # 전체 테스트(사용자 작업 공간은 읽지 않음)
 npm run sync       # 작업 공간 생성물·에이전트 파일을 정본에서 다시 만들기(--check는 검사만)

@@ -201,6 +201,7 @@
     <li><a href="#ready">준비물</a></li>
     <li><a href="#install">처음 한 번만: 설치하기</a></li>
     <li><a href="#start">서버 켜기</a></li>
+    <li><a href="#setup">사용 전 세팅: AI에게 맡기기</a></li>
     <li><a href="#use">대시보드 사용법</a></li>
     <li><a href="#custom">내 마음대로 고쳐 쓰기</a></li>
     <li><a href="#daily">매일 쓰는 순서</a></li>
@@ -398,7 +399,7 @@
       <li>중간에 <b>“이 작업을 실행해도 될까요?”</b>(Claude: Do you want to proceed? / Codex: Allow command?)라고 물으면, 설명을 읽고 <b>Yes</b>를 고릅니다.</li>
       <li>끝나면 브라우저에 대시보드가 열립니다. 직접 열려면 주소창에 <b>http://127.0.0.1:4777</b> 을 입력합니다.</li>
     </ul>
-    <div class="warn"><b>주의</b>서버를 켠 <b>IntelliJ 터미널 창은 닫지 마세요.</b> 창을 닫거나 AI를 끝내면 서버도 꺼질 수 있습니다.</div>
+    <div class="tip"><b>알아 두기</b>서버는 한 번 켜면 <b>IntelliJ나 터미널 창을 닫아도 계속 켜져 있습니다.</b> 다 쓰면 AI에게 <b>“서버 꺼줘”</b>라고 말해 끕니다. 컴퓨터를 껐다 켜면 서버도 꺼지니 다시 “서버 켜줘”라고 하면 됩니다.</div>
   </div>
   <div class="grid2">
     <div class="card">
@@ -412,8 +413,33 @@
   </div>
 </section>
 
+<section class="part" id="setup">
+  <h2>5. 사용 전 세팅: AI에게 맡기기</h2>
+  <p class="sub">부서와 직원을 하나하나 만들지 않아도 됩니다. IntelliJ 터미널의 Claude 또는 Codex에게 내 업무를 설명하면 알맞게 만들어 줍니다.</p>
+  <div class="card">
+    <h3 style="margin-top:0">이렇게 말해 보세요</h3>
+    <div class="say">블로그 콘텐츠 마케팅 업무를 맡길 건데 알맞게 부서와 팀원들을 세팅해줘</div>
+    <div class="say">우리 가게 온라인 주문·재고 정리랑 매출 보고서를 맡길 거야. 필요한 부서랑 직원을 만들어줘</div>
+    <div class="say">경쟁사 조사하고 제안서 쓰는 일을 자주 해. 리서치부랑 문서제작부를 만들고 팀장도 정해줘</div>
+    <div class="say">매일 유튜브 영상 보고 카페 글 올리는 일을 맡길 거야. 맡을 사람들을 세팅해줘</div>
+    <ul>
+      <li>AI가 먼저 <b>어떤 부서에 누구를 둘지 표로 보여 주고 물어봅니다.</b> 괜찮으면 “좋아, 진행해”, 바꾸고 싶으면 “SNS 담당은 빼줘”처럼 답합니다. 일일이 확인하기 귀찮으면 처음부터 <b>“알아서 해줘”</b>를 붙이면 됩니다.</li>
+      <li>세팅이 끝나면 대시보드에 바로 나타납니다. 새로고침하지 않아도 됩니다.</li>
+      <li>기존 부서·직원은 그대로 두고 필요한 것만 더합니다. 바꾸기 전 구성은 따로 저장해 두니 <b>“방금 세팅 되돌려줘”</b>라고 하면 원래대로 돌아갑니다.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">세팅을 다듬을 때</h3>
+    <div class="say">마케팅부에 블로그 글 검수 담당을 한 명 더 추가해줘</div>
+    <div class="say">모든 직원이 존댓말로 쓰고, 출처를 꼭 적게 회사 규칙을 정해줘</div>
+    <div class="say">리서치부 직원은 빠르고 저렴한 모델로 바꿔줘</div>
+    <div class="say">지금 우리 회사 부서랑 직원 구성 설명해줘</div>
+  </div>
+  <div class="ok"><b>다음 단계</b>세팅이 끝나면 대시보드 위쪽 <b>비서실장</b> 입력창에 실제 업무를 적습니다. 예: “다음 달 블로그 콘텐츠 주제와 발행 일정을 기획해줘”</div>
+</section>
+
 <section class="part" id="use">
-  <h2>5. 대시보드 사용법</h2>
+  <h2>6. 대시보드 사용법</h2>
   <p class="sub">처음에는 회사가 비어 있습니다. 부서와 직원부터 만듭니다.</p>
 
   <div class="card step">
@@ -421,6 +447,7 @@
     <div>
       <h3>부서 만들기</h3>
       <ul>
+        <li><a href="#setup">5. 사용 전 세팅</a>처럼 AI에게 맡겼다면 이 단계와 다음 단계는 건너뛰어도 됩니다. 화면에서 직접 만들고 싶을 때 아래처럼 합니다.</li>
         <li>처음 화면의 <span class="btnlike">첫 부서 만들기</span> 카드나 <span class="btnlike">+ 부서 추가</span>를 누릅니다.</li>
         <li>마케팅·리서치·운영·재무처럼 <b>미리 만들어 둔 부서(프리셋)</b>를 고르면 편합니다. <span class="btnlike">인원까지 추가</span>를 누르면 직원도 한 번에 채워집니다.</li>
         <li class="only-codex">Codex만 쓴다면 부서를 만들 때 <b>엔진</b>을 <b>Codex</b>로, 역할을 <b>실행</b>으로 고릅니다.</li>
@@ -481,7 +508,7 @@
 </section>
 
 <section class="part" id="custom">
-  <h2>6. 내 마음대로 고쳐 쓰기</h2>
+  <h2>7. 내 마음대로 고쳐 쓰기</h2>
   <p class="sub">AI Office는 쓰면서 내 일에 맞게 계속 바꿔 나가는 프로그램입니다.</p>
   <div class="grid2">
     <div class="card">
@@ -518,7 +545,7 @@
 </section>
 
 <section class="part" id="daily">
-  <h2>7. 매일 쓰는 순서</h2>
+  <h2>8. 매일 쓰는 순서</h2>
   <div class="card">
     <div class="flow">
       <span class="box">IntelliJ 열기</span><span class="arrow">→</span>
@@ -528,7 +555,7 @@
       <span class="box">브라우저에서 업무 지시</span>
     </div>
     <ul>
-      <li>다 쓰면 AI에게 <b>“서버 꺼줘”</b>라고 하거나 IntelliJ를 닫습니다.</li>
+      <li>다 쓰면 AI에게 <b>“서버 꺼줘”</b>라고 말합니다. 창만 닫으면 서버는 계속 켜져 있습니다.</li>
       <li>새 버전이 나왔다고 들으면 이렇게 부탁합니다.</li>
     </ul>
     <div class="say">AI Office 최신 버전으로 업데이트해줘. 내가 고친 부분은 유지해줘</div>
@@ -536,7 +563,7 @@
 </section>
 
 <section class="part" id="safe">
-  <h2>8. 꼭 지켜 주세요</h2>
+  <h2>9. 꼭 지켜 주세요</h2>
   <div class="card">
     <ul>
       <li><b>비밀번호·카드번호·인증번호를 AI 대화창이나 업무 지시에 적지 마세요.</b> 바깥 사이트 계정은 <span class="btnlike">계정 연결</span> 창에서만 로그인합니다.</li>
@@ -549,7 +576,7 @@
 </section>
 
 <section class="part" id="help">
-  <h2>9. 막혔을 때</h2>
+  <h2>10. 막혔을 때</h2>
   <p class="sub">대부분은 터미널의 AI에게 화면에 보이는 그대로 말하면 해결됩니다.</p>
   <div class="card">
     <details>

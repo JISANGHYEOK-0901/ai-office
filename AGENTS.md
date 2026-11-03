@@ -108,7 +108,14 @@
 
 대표는 명령어를 직접 입력하지 않고 "서버 켜줘", "대시보드 열어줘", "서버 꺼줘"처럼 말로 요청한다. 이 요청은 업무 등록 없이 바로 처리한다.
 
-- **켜기:** `node -v`로 Node 20 이상을 확인한다(없거나 낮으면 nodejs.org LTS 설치를 안내하고 멈춘다). `node_modules`가 없거나 `package-lock.json`이 바뀌었으면 `npm ci`를 실행한다. 포트 4777이 이미 쓰이면 열려 있는 주소를 안내한다. 아니면 `npm run office`를 세션이 끝나도 유지되게 백그라운드로 실행하고(Claude는 백그라운드 실행 기능, Codex는 macOS·Linux `nohup npm run office > .office/server.out 2>&1 &`, Windows `Start-Process npm.cmd -ArgumentList 'run','office' -WindowStyle Hidden`; 샌드박스가 네트워크·프로세스를 막으면 대표에게 실행 승인을 요청한다), 출력의 대시보드 주소(기본 http://127.0.0.1:4777)를 받으면 브라우저로 열고 주소를 알려 준다. 이 터미널(Claude·Codex) 창을 닫으면 서버도 꺼질 수 있다고 한 줄로 안내한다.
+- **켜기:** `node -v`로 Node 20 이상을 확인한다(없거나 낮으면 nodejs.org LTS 설치를 안내하고 멈춘다). `node_modules`가 없거나 `package-lock.json`이 바뀌었으면 `npm ci`를 실행한다. 그다음 `npm run office:start`를 실행한다. 이 명령은 서버를 터미널·AI 세션과 분리해 띄우고, 준비되면 주소를 출력한 뒤 끝난다(이미 켜져 있으면 그 주소를 알려 준다). `npm run office`처럼 끝나지 않는 명령이나 `nohup … &`로 띄우지 않는다. 세션이 끝날 때 함께 꺼진다. 출력된 주소(기본 http://127.0.0.1:4777)를 브라우저로 열고 알려 준다. 실패하면 출력된 서버 기록을 보고 원인을 고친다.
+- **Codex 샌드박스:** `npm run office:start`·`npm run office:stop`·`npm run doctor`는 처음부터 샌드박스 밖 실행(권한 상승)으로 승인을 요청한다. 샌드박스 안에서는 포트가 막히고(`listen EPERM`), 켜지더라도 서버가 실행하는 직원(claude·codex)이 같은 제한을 물려받아 작업 공간·로그인 정보를 쓰지 못한다. doctor도 로그인 정보를 읽지 못해 '미로그인'으로 잘못 나오고, 샌드박스 안의 `office:stop`은 밖에서 켠 서버를 끄지 못한다. `npm ci`가 네트워크로 막혀도 같은 방법으로 승인을 요청한다. 막혔다고 대표에게 명령어 입력을 넘기지 않는다. 승인이 거절되면 무엇을 승인하면 되는지 한 줄로 다시 안내한다.
 - **처음 실행:** `npm run doctor`로 Claude·Codex 로그인을 확인해 결과를 쉬운 말로 전한다. 둘 중 하나만 로그인돼 있어도 된다. Claude만 쓰면 화면 상단 최종 검토 제공자를 Claude로, Codex만 쓰면 Codex가 계획·실무·검토를 맡고 부서 엔진을 Codex로 고르면 된다고 안내한다. 브라우저 업무에 Chrome이 없으면 `npx playwright install chromium`을 대신 실행한다.
-- **끄기:** 포트 4777에서 실행 중인 AI Office 서버 프로세스를 종료하고, 포트 4777이 비었는지 확인한다.
+- **끄기·상태:** `npm run office:stop`(실행 중인 AI 작업도 함께 정리), 상태는 `npm run office:status`.
+- **부서·팀원 세팅 요청:** "○○ 업무를 맡길 건데 알맞게 부서와 팀원을 세팅해줘"처럼 요청하면 업무 등록 없이 처리한다.
+  1. `org/presets.json`(부서·직무 프리셋)과 현재 구성(`node scripts/office.mjs org export <임시 파일>`)을 읽는다. 요청 업무에 필요한 역량을 프리셋에서 고르고, 없으면 프리셋 형식대로 새로 만든다.
+  2. 바꾸기 전에 부서·직원 표(부서, 직원 이름·직급·담당, 팀장, 엔진·모델)를 짧게 보여 주고 확인을 받는다. 기존 부서·직원을 지우거나 바꾸는 내용이 있으면 따로 표시한다. 대표가 "알아서"라고 하면 그대로 진행한다.
+  3. 기존 구성은 유지하고 추가·수정분만 합친 JSON(`{version:1, company, departments, roster}`, 내보낸 파일과 같은 형식)을 프로그램 폴더 `.office/`(Git 제외)에 만들고 `node scripts/office.mjs org import <파일> --yes`로 반영한다. 검증 오류가 나면 고쳐서 다시 반영한다. 원래 구성을 내보낸 파일은 되돌리기용으로 남기고 위치를 알려 준다.
+  4. 로그인된 도구에 맞춰 엔진을 고른다(Claude만 있으면 claude, Codex만 있으면 codex·역할 exec). 직원 모델은 일반 실무 sonnet, 복잡한 기획·취합 opus, 대량 수집·분류 haiku를 기본으로 한다. 회사 공통 규칙이 필요하면 `company`에 함께 넣는다.
+  5. 대시보드는 저장 후 1초 안에 바뀐 구성을 보여 준다. 대표에게 대시보드에서 확인하라고 안내하고, 바로 써 볼 업무 지시 예시를 1~2개 준다.
 - **고쳐 달라는 요청:** 부서·직원·회사 규칙처럼 화면에서 바꿀 수 있는 것은 대시보드 위치를 안내한다. 화면·기능 자체를 바꾸는 요청은 `docs/SPEC.md` 기준으로 개발하고, 고친 뒤 `npm run check`를 통과시키고 서버를 다시 켜서 보여 준다.

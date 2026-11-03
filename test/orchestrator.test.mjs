@@ -97,6 +97,7 @@ function fixture(t, options = {}) {
         call.kind = 'route'; finish(JSON.stringify({ department: 'dev', agent: 'dev-1', reason: '개발부 소관', question: '' }));
       } else if (schema.endsWith('review.json')) {
         call.kind = 'review'; counts.review++;
+        if (options.review) { finish(JSON.stringify({ stage: '', stages: [], reason: '', report: '# 결과\n\n산출물과 근거를 확인했습니다.\n\n확인 필요: 없음', question: '', revisedPlan: null, ...options.review(counts.review, input) })); return; }
         const reject = counts.review <= (options.rejects || 0);
         finish(JSON.stringify({ verdict: options.reviewQuestion && counts.review === 1 ? 'question' : reject ? 'reject' : 'pass', stage: 'a', reason: '근거 확인',
           report: '# 결과\n\n산출물과 근거를 확인했습니다.\n\n확인 필요: 없음', question: options.reviewQuestion && counts.review === 1 ? '보고서 공개 범위를 알려 주세요.' : '' }));
@@ -484,6 +485,10 @@ test('사이트 조회 단계는 연결 계정 브라우저(쓰기 가능)로 �
   // 대표가 정한 참고 범위 밖(공지·다른 게시판)을 조사에 넣거나 열지 않는다
   assert.match(f.calls.find((c) => c.kind === 'plan').input, /그 범위 밖의 조회\(공지·규칙·다른 게시판 둘러보기 등\)는 done에 넣지 마세요/);
   assert.match(stageCall.input, /대표가 범위를 정했으면 그 범위의 자료만 엽니다/);
+  // 직원 지시는 목표 → 입력·출력·완료 기준 → 이 단계 안내 → 응답 형식 → 안전선 순서이고, HTML 안내는 HTML 산출물에만 붙는다
+  const order = ['## 목표·대표 요청', '## 입력·출력·완료 기준', '## 이 단계 안내', '## 응답 형식', '## 안전선'].map((h) => stageCall.input.indexOf(h));
+  assert.ok(order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1])), JSON.stringify(order));
+  assert.doesNotMatch(stageCall.input, /HTML은 비개발자가 읽는 보고서/, '.txt 산출물에는 HTML 안내를 붙이지 않는다');
   assert.match(stageCall.args.join(' '), /office_browser/);
   assert.equal(stageCall.args[stageCall.args.indexOf('-s') + 1], 'workspace-write', '조회 결과 파일을 쓸 수 있다');
   assert.ok(f.calls.filter((c) => c.kind === 'b').every((c) => !c.args.join(' ').includes('office_browser')), '일반 단계에는 브라우저를 붙이지 않는다');
@@ -737,4 +742,44 @@ test('예약 업무처럼 대표가 없는 업무는 예산을 묻지 않고, �
   assert.equal(loadTasks(f.root)[0].status, 'blocked');
   assert.match(f.runner.result(run.id).text, /이번 회차 업무가 예산을 모두 써서 멈췄습니다\(AI 호출 5\/5회/);
   assert.doesNotMatch(f.runner.result(run.id).text, /계속할까요/);
+});
+
+// ── 검토 루프 ──
+test('검토 루프: 여러 단계를 한 번에 단계별 수정 사항과 함께 반려하고, 각 단계는 자기 사유로 다시 작업한다', async (t) => {
+  const f = fixture(t, { review: (n) => n === 1
+    ? { verdict: 'reject', stages: [{ id: 'a', reason: '출처 확인일 추가' }, { id: 'b', reason: '요약 표 수정' }], reason: '두 단계 보완' }
+    : { verdict: 'pass', reason: '보완 확인' } });
+  const first = f.runner.start({ prompt: '자료를 조사해 보고서로 정리해 줘' });
+  await f.final(first);
+  assert.equal(loadTasks(f.root)[0].status, 'done', f.runner.result(first.id).text);
+  assert.deepEqual([f.counts.a, f.counts.b, f.counts.review], [2, 2, 2]);
+  const redo = (id) => f.calls.filter((c) => c.kind === id).at(-1).input;
+  assert.match(redo('a'), /(?:^|\n)\[반려\] a\n\n## 목표·대표 요청/, '재작업 지시는 [반려]로 시작한다(Codex 직원은 직원 지침 뒤)');
+  assert.match(redo('a'), /반려 사유\(모두 반영\): 출처 확인일 추가/);
+  assert.match(redo('b'), /반려 사유\(모두 반영\): 요약 표 수정/);
+});
+
+test('검토 루프: 기존 단계로 채울 수 없으면 검토에서 단계를 추가하고, 완료 단계는 반복하지 않는다', async (t) => {
+  const f = fixture(t, { review: (n, input) => {
+    if (n !== 1) return { verdict: 'pass', reason: '보완 확인' };
+    const plan = JSON.parse(input.match(/계획: (.*)/)[1]);
+    const b = plan.stages.find((s) => s.id === 'b');
+    plan.stages.push({ id: 'c', title: '보충 분석', dept: 'dev', agent: 'dev-1', inputs: ['b'], dependsOn: ['b'], output: b.output.replace(/-b\.txt$/, '-c.txt'), done: '빠진 비교 분석을 추가한다', parallelGroup: '' });
+    return { verdict: 'revise', reason: '비교 분석이 빠져 단계를 추가', revisedPlan: plan };
+  } });
+  const first = f.runner.start({ prompt: '자료를 조사해 보고서로 정리해 줘' });
+  await f.final(first);
+  assert.equal(loadTasks(f.root)[0].status, 'done', f.runner.result(first.id).text);
+  assert.deepEqual([f.counts.a, f.counts.b, f.counts.c, f.counts.review], [1, 1, 1, 2]);
+  const checkpoint = JSON.parse(readFileSync(join(f.root, '.office', 'orchestrations', `${first.rootId}.json`)));
+  assert.deepEqual(checkpoint.revisions.at(-1).added, ['c']);
+});
+
+test('검토 루프: 검증실은 계획의 검토 기준을, 비서실장은 대표 요청 충족을 보며 같은 항목을 다시 검토하지 않는다', async (t) => {
+  const f = fixture(t, { reviewBy: 'codex', reviewerVerdict: 'PASS' });
+  const first = f.runner.start({ prompt: '검증실 검토가 필요한 업무' });
+  await f.final(first);
+  assert.equal(loadTasks(f.root)[0].status, 'done');
+  assert.match(f.calls.find((c) => c.kind === 'reviewer').input, /검토 기준: 근거와 산출물을 확인한다[\s\S]*기술·사실 확인에 집중/);
+  assert.match(f.calls.find((c) => c.kind === 'review').input, /검증실이 이미 확인한 항목은 다시 검토하지 말고/);
 });

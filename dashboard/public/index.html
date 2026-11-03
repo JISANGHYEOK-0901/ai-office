@@ -346,8 +346,11 @@
         <p class="help">로그인 창에서 직접 인증하거나 자동 로그인 정보를 선택해서 저장할 수 있습니다. 추가 인증·재연결이 필요하면 알려드립니다.</p>
         <div id="connectionList" class="connection-list" aria-live="polite"></div>
         <form id="connectionForm" class="form-grid" autocomplete="off">
-          <label>연결할 서비스<select name="provider" id="connectionProvider"><option value="naverworks">네이버웍스 메일</option><option value="naver">네이버 블로그·카페</option><option value="kakao">다음·카카오 블로그·카페</option></select></label>
+          <label>연결할 서비스<select name="provider" id="connectionProvider"><option value="naverworks">네이버웍스 메일</option><option value="naver">네이버 블로그·카페</option><option value="kakao">다음·카카오 블로그·카페</option><option value="web">일반 웹사이트(직접 입력)</option></select></label>
           <label>계정 구분 이름<input name="label" maxlength="80" placeholder="예: 회사 메일, 홍보용 네이버"></label>
+          <label class="span-2" id="connectionStartRow" hidden>시작 주소(로그인 화면)<input name="startUrl" id="connectionStartUrl" inputmode="url" autocapitalize="off" spellcheck="false" maxlength="2000" placeholder="예: https://erp.example.com/login" disabled></label>
+          <label class="span-2" id="connectionHostsRow" hidden>함께 허용할 도메인(선택)<input name="hosts" id="connectionHosts" maxlength="600" placeholder="예: partners.example.com, cdn.example.com" disabled></label>
+          <p class="help span-2" id="connectionSiteHelp" hidden>직원 브라우저는 시작 주소의 도메인과 여기에 적은 도메인(하위 도메인 포함) 안에서만 움직입니다. 주소는 https만 받고, 이 컴퓨터에서 띄운 검증 서버는 http://localhost도 됩니다.</p>
           <label class="inline span-2"><input type="checkbox" name="remember" id="connectionRemember">자동 로그인 정보도 이 컴퓨터에 저장</label>
           <label>로그인 아이디<input name="username" id="connectionUsername" autocomplete="off" maxlength="320" disabled></label>
           <label>비밀번호<input name="password" id="connectionPassword" type="password" autocomplete="new-password" maxlength="1024" disabled></label>

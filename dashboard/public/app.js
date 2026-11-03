@@ -2340,7 +2340,7 @@ async function refreshConnections() {
   const data = await response.json(); if (!response.ok) throw new Error(data.error || '연결 계정을 불러오지 못했습니다.');
   connectionCache = data.connections;
   $('connectionList').innerHTML = data.connections.length ? data.connections.map((c) => `<article class="connection-card">
-    <div><strong>${esc(c.label)}</strong><p class="help">${esc(data.providers.find((p) => p.id === c.provider)?.name || c.provider)} · ${esc(CONNECTION_LABEL[c.status] || c.status)}${c.hasCredentials ? ' · 자동 로그인 저장됨' : ''}</p></div>
+    <div><strong>${esc(c.label)}</strong><p class="help">${esc(data.providers.find((p) => p.id === c.provider)?.name || c.provider)}${c.hosts?.length ? ` (${esc(c.hosts.join(', '))})` : ''} · ${esc(CONNECTION_LABEL[c.status] || c.status)}${c.hasCredentials ? ' · 자동 로그인 저장됨' : ''}</p></div>
     <div class="connection-actions"><button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="open">${c.status === 'needs_login' ? '재연결' : '로그인 창 열기'}</button>
     <button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="credentials">${c.hasCredentials ? '로그인 정보 변경' : '자동 로그인 설정'}</button>
     ${c.status === 'connecting' ? `<button type="button" class="btn btn-sm btn-primary" data-connection="${esc(c.id)}" data-connection-action="confirm">연결 완료</button>` : ''}
@@ -2362,7 +2362,8 @@ async function submitConnection(event) {
   event.preventDefault();
   await connectionAction(async () => {
     const form = $('connectionForm');
-    const body = { provider: form.provider.value, label: form.label.value, remember: form.remember.checked };
+    const body = { provider: form.provider.value, label: form.label.value, remember: form.remember.checked,
+      ...(form.provider.value === 'web' ? { startUrl: form.startUrl.value.trim(), hosts: form.hosts.value } : {}) };
     if (body.remember) Object.assign(body, { username: form.username.value, password: form.password.value });
     // 네트워크 응답·로그인 창을 기다리는 동안에도 로그인 값은 폼에 남기지 않는다.
     form.username.value = ''; form.password.value = '';
@@ -2379,6 +2380,14 @@ function resetConnectionForm() {
   form.username.disabled = true; form.password.disabled = true;
   form.provider.disabled = false; form.label.disabled = false; form.remember.disabled = false;
   $('connectionSubmit').textContent = '계정 추가·로그인 창 열기'; $('connectionCancelEdit').hidden = true;
+  syncConnectionSiteFields();
+}
+// 일반 웹사이트를 고르면 시작 주소·허용 도메인 입력을 보인다(새 연결을 만들 때만)
+function syncConnectionSiteFields() {
+  const form = $('connectionForm');
+  const custom = form.provider.value === 'web' && !connectionEditing;
+  for (const id of ['connectionStartRow', 'connectionHostsRow', 'connectionSiteHelp']) $(id).hidden = !custom;
+  form.startUrl.disabled = !custom; form.hosts.disabled = !custom; form.startUrl.required = custom;
 }
 
 // ───── 회사 설정 ─────
@@ -3342,6 +3351,7 @@ function init() {
   });
   $('connectionCancelEdit').addEventListener('click', resetConnectionForm);
   $('connectionForm').addEventListener('submit', submitConnection);
+  $('connectionProvider').addEventListener('change', syncConnectionSiteFields);
   $('connectionRemember').addEventListener('change', (event) => {
     $('connectionUsername').disabled = !event.target.checked; $('connectionPassword').disabled = !event.target.checked;
     if (!event.target.checked) { $('connectionUsername').value = ''; $('connectionPassword').value = ''; }
@@ -3355,6 +3365,7 @@ function init() {
       const form = $('connectionForm'); connectionEditing = id;
       form.provider.value = record.provider; form.label.value = record.label;
       form.provider.disabled = true; form.label.disabled = true; form.remember.disabled = true;
+      syncConnectionSiteFields();
       form.remember.checked = true; form.username.disabled = false; form.password.disabled = false;
       $('connectionSubmit').textContent = '자동 로그인 정보 저장·연결'; $('connectionCancelEdit').hidden = false;
       form.username.focus(); return;

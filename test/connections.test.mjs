@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createConnectionStore, allowedServiceUrl, connectionDirectory } from '../lib/connections.mjs';
+import { createConnectionStore, allowedServiceUrl, connectionDirectory, connectionAllowsUrl, connectionLoginUrl, normalizeSite } from '../lib/connections.mjs';
 import { externalActionPolicy } from '../lib/browser-work.mjs';
 import { attachBrowser } from '../lib/browser-cli.mjs';
 import { credentialLoginUrl } from '../lib/browser-session.mjs';
@@ -83,4 +83,33 @@ test('MCP 연결은 실행별 승인된 도구에 한정하고 전역 설정·�
   assert.ok(!definition.tools.includes('Write') && !definition.tools.includes('Bash'));
   assert.ok(claude.args[claude.args.indexOf('--tools') + 1].includes('mcp__office_browser__browser_snapshot'));
   assert.doesNotMatch(claude.args.join(' '), /fixture-token/);
+});
+
+test('일반 웹사이트 연결은 사용자가 정한 시작 주소·허용 도메인 안에서만 열고 로그인 값을 입력한다', async (t) => {
+  const temp = mkdtempSync(join(tmpdir(), 'office-accounts-web-')), root = join(temp, 'workspace'); mkdirSync(root);
+  t.after(() => rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const store = createConnectionStore({ root, base: join(temp, 'private') });
+  const erp = store.create({ provider: 'web', label: '', startUrl: 'https://erp.example.com/erp/login', hosts: 'partners.example.com, *.cdn.example.net' });
+  assert.equal(erp.label, 'erp.example.com');
+  assert.deepEqual(erp.hosts, ['erp.example.com', 'partners.example.com', 'cdn.example.net']);
+  assert.deepEqual(erp.services, []);
+  const record = store.find(erp.id);
+  assert.equal(connectionLoginUrl(record), 'https://erp.example.com/erp/login');
+  for (const url of ['https://erp.example.com/erp/proposal-pages', 'https://partners.example.com/a', 'https://img.cdn.example.net/x.png'])
+    assert.equal(connectionAllowsUrl(record, url), true, url);
+  for (const url of ['http://erp.example.com/', 'https://erp.example.com.evil.test/', 'https://example.com/', 'https://user:pw@erp.example.com/', 'https://erp.example.com:8443/'])
+    assert.equal(connectionAllowsUrl(record, url), false, url);
+  assert.equal(credentialLoginUrl(record, 'https://erp.example.com/erp/login'), true);
+  assert.equal(credentialLoginUrl(record, 'https://evil.test/erp/login'), false);
+  // 이 컴퓨터에서 띄운 검증 서버는 http://localhost를 허용한다(포트 무관)
+  const local = store.find(store.create({ provider: 'web', label: '로컬 ERP', startUrl: 'http://localhost:5173/erp/login' }).id);
+  assert.equal(connectionAllowsUrl(local, 'http://localhost:8080/api/admin'), true);
+  assert.equal(connectionAllowsUrl(local, 'http://127.0.0.1:5173/'), false);
+  for (const startUrl of ['http://erp.example.com/', 'ftp://erp.example.com/', 'https://u:p@erp.example.com/', 'javascript:alert(1)', ''])
+    assert.throws(() => normalizeSite({ startUrl }), /시작 주소/, startUrl);
+  assert.throws(() => normalizeSite({ startUrl: 'https://erp.example.com/', hosts: 'bad_host!' }), /허용 도메인/);
+  assert.throws(() => normalizeSite({ startUrl: 'https://erp.example.com/', hosts: 'com' }), /허용 도메인/);
+  // 기존 서비스 연결은 예전 규칙 그대로
+  assert.equal(connectionAllowsUrl({ provider: 'naver' }, 'https://blog.naver.com/x'), true);
+  assert.equal(connectionAllowsUrl({ provider: 'naver' }, 'https://erp.example.com/'), false);
 });

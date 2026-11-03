@@ -11,7 +11,7 @@ import { ID_PATTERN, MAX_COMPANY_RULES, exportOrg, importOrg, loadCompanyRules, 
 import { quickToolCheck, checkToolLogins, detectedMode } from '../lib/doctor.mjs';
 import { loadSettings, saveSettings } from '../lib/settings.mjs';
 import { modelCatalog } from '../lib/models.mjs';
-import { createConnectionStore, CONNECTION_PROVIDERS, validateLoginValues } from '../lib/connections.mjs';
+import { createConnectionStore, CONNECTION_PROVIDERS, CUSTOM_PROVIDER, CUSTOM_PROVIDER_INFO, validateLoginValues } from '../lib/connections.mjs';
 import { createBrowserSessions } from '../lib/browser-session.mjs';
 import { createBrowserWork } from '../lib/browser-work.mjs';
 import { createKeepAwake } from '../lib/keep-awake.mjs';
@@ -1304,7 +1304,7 @@ export async function startServer({
       }
       if (parts.length === 2 && parts[1] === 'connections') {
         checkToken(req);
-        return sendJson(res, 200, { connections: demo ? [] : connections.list(), providers: Object.entries(CONNECTION_PROVIDERS).map(([id, p]) => ({ id, name: p.name, services: p.services })) });
+        return sendJson(res, 200, { connections: demo ? [] : connections.list(), providers: [...Object.entries(CONNECTION_PROVIDERS).map(([id, p]) => ({ id, name: p.name, services: p.services })), { id: CUSTOM_PROVIDER, name: CUSTOM_PROVIDER_INFO.name, services: [], custom: true }] });
       }
       if (parts.length === 2 && parts[1] === 'schedules') {
         checkToken(req);
@@ -1404,7 +1404,7 @@ export async function startServer({
       try {
         if (method === 'POST' && parts.length === 2) {
           if (body.remember) validateLoginValues(body);
-          result = connections.create({ provider: body.provider, label: body.label || '' });
+          result = connections.create({ provider: body.provider, label: body.label || '', startUrl: body.startUrl, hosts: body.hosts });
           if (body.remember) result = connections.saveCredentials(result.id, body);
         } else if (method === 'POST' && parts.length === 4 && parts[3] === 'open') result = await browserSessions.open(id);
         else if (method === 'POST' && parts.length === 4 && parts[3] === 'confirm') result = await browserSessions.confirm(id);

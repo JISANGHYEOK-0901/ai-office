@@ -86,10 +86,34 @@ export async function verifyLogin() {
     await page.goto('https://auth.worksmobile.com.evil.invalid/login');
     assert.equal(await automaticLogin({ page, provider: 'naverworks', credentials }), false);
     assert.equal(await page.locator('input#user_id').inputValue(), '');
+    // 일반 웹사이트: 화면 프레임워크가 늦게 준비되며 입력칸을 다시 그려도 빈 칸으로 제출하지 않는다(로컬 ERP 실측 결함)
+    const site = { provider: 'web', startUrl: 'https://erp.fixture.invalid/erp/login', hosts: ['erp.fixture.invalid'] };
+    const submissions = [];
+    await page.unroute('**/*');
+    await page.route('**/*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === '/erp') return route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<h1>ERP 홈</h1>' });
+      return route.fulfill({ contentType: 'text/html; charset=utf-8', body: `<div id="app"><input type="email" name="loginId"><input type="password" name="password"><button type="button">로그인</button></div>
+        <script>
+          const form = () => '<input type="email" name="loginId"><input type="password" name="password"><button type="button" id="go">로그인</button>';
+          const bind = () => document.querySelector('button').onclick = () => {
+            const id = document.querySelector('[name=loginId]').value, pw = document.querySelector('[name=password]').value;
+            fetch('/submit?filled=' + (id && pw ? 1 : 0)).finally(() => { if (id && pw) location.href = '/erp'; });
+          };
+          // 준비 전 버튼은 동작하지 않고, 준비되면 입력칸을 다시 그려 앞서 넣은 값이 사라진다
+          setTimeout(() => { document.getElementById('app').innerHTML = form(); bind(); }, 900);
+        </script>` });
+    });
+    page.on('request', (request) => { const url = new URL(request.url()); if (url.pathname === '/submit') submissions.push(url.searchParams.get('filled')); });
+    await page.goto(site.startUrl, { waitUntil: 'domcontentloaded' });
+    assert.equal(await automaticLogin({ page, connection: site, credentials }), true);
+    assert.deepEqual(submissions, ['1'], '다시 그려진 입력칸에 값을 채운 뒤 한 번만 제출');
+    assert.equal(await page.locator('h1').innerText(), 'ERP 홈');
     return [{ name: '저장된 미연결 계정의 직원 첫 로그인·단계형 인증·보이는 창', interaction: 'click', passed: true },
       { name: '첫 업무 화면 이후 인증 이동도 같은 직원 브라우저에서 재로그인', interaction: 'click', passed: true },
       { name: '추가 인증을 자동 제출하지 않고 직원 창 유지·연결 완료로 재개', interaction: 'click', passed: true },
-      { name: '서비스 문서·유사 인증 호스트에는 자격 증명 입력 차단', interaction: 'click', passed: true }];
+      { name: '서비스 문서·유사 인증 호스트에는 자격 증명 입력 차단', interaction: 'click', passed: true },
+      { name: '일반 웹사이트 늦은 화면 준비에도 입력 유지 확인 후 한 번만 로그인', interaction: 'click', passed: true }];
   } finally {
     await standalone?.close(); await sessions.close();
     await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });

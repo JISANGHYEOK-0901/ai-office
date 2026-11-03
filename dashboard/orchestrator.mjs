@@ -208,6 +208,8 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
   plan = { ...plan, stages: plan.stages.map((stage) => ({ ...stage,
     output: relative(root, outputPath(stage.output)).replace(/\\/g, '/') })) };
   if (plan.publications) plan.publications = plan.publications.map((publication) => ({ ...publication,
+    // 메일 대상 주소가 비었으면 그 서비스의 기본 주소로 채운다(계획 안내는 메일에 주소를 요구하지 않음)
+    ...(publication.action === 'mail' && !publication.target ? { target: CONNECTION_PROVIDERS[serviceProvider(publication.service)]?.loginUrl || publication.target } : {}),
     content: plan.stages.find((s) => s.id === publication.content || outputPath(s.output) === outputPath(publication.content))?.id || publication.content,
     ...(Array.isArray(publication.files) ? { files: publication.files.map((ref) => plan.stages.find((s) => s.id === ref || outputPath(s.output) === outputPath(ref))?.id || ref) } : {}) }));
   if (plan.deliverables) plan.deliverables = plan.deliverables.map((ref) => plan.stages.find((s) => s.id === ref || outputPath(s.output) === outputPath(ref))?.id || ref);
@@ -236,7 +238,8 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
   // 필요한 계정은 작업 전에 확인한다(조사·작성을 다 마친 뒤 마지막 게시 단계에서야 묻지 않게)
   {
     const list = outbound?.connections?.() || [];
-    const usable = (c) => Boolean(c) && (c.status === 'connected' || c.hasCredentials === true);
+    // 첫 로그인은 대표가 직접 한다: 연결됨이거나, 직접 로그인한 적이 있고 다시 로그인할 정보가 있을 때만 바로 쓸 수 있다
+    const usable = (c) => Boolean(c) && (c.status === 'connected' || c.hasCredentials === true && c.firstLoginDone === true);
     const needs = [];
     let replan = false;
     for (const p of plan.publications || []) {
@@ -257,7 +260,7 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
       const chosen = list.find((c) => c.id === stage.connection);
       if (!usable(chosen)) { needs.push(`${stage.target} 조회용 계정`); replan ||= !chosen; }
     }
-    if (needs.length) return ask([{ phase: 'account', replan, question: `이 업무에는 다음 계정이 필요합니다: ${[...new Set(needs)].join(', ')}. 상단 '계정 연결'에서 로그인하거나 보관함/계정.env에 사이트 주소·아이디·비밀번호를 적은 뒤 "이어서 재개"라고 답해 주세요.` }]);
+    if (needs.length) return ask([{ phase: 'account', replan, question: `이 업무에는 다음 계정이 필요합니다: ${[...new Set(needs)].join(', ')}. 보관함/계정.env에 사이트 주소·아이디·비밀번호를 적거나 상단 '계정 연결'에서 계정을 추가한 뒤, '로그인 창 열기'로 처음 한 번 직접 로그인하고 "이어서 재개"라고 답해 주세요. 로그인을 마치면 창은 자동으로 닫힙니다.` }]);
   }
   const executeStage = async (stage, reason = '') => {
     const desc = `${reason ? '[반려] ' : ''}${stage.title}`;
@@ -460,9 +463,11 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
                   '마지막에 결과 화면에서 확인한 내용(만든 항목, 공개 주소, 하지 못한 일과 이유)을 summary에 적고, 지침을 끝까지 마쳤으면 completed:true, 아니면 completed:false로 browser_finish를 호출하세요. 그다음 끝까지 마쳤으면 status:done, 아니면 status:needs_decision과 질문을 JSON으로 보고하세요. 로그인·추가 인증·권한 문제나 지침이 모호해도 needs_decision입니다.',
                   '쿠키·비밀번호·개인 프로필 파일을 읽거나 출력하지 않습니다. 삭제·결제·계정 변경은 하지 않습니다.',
                 ].join('\n\n') : ['대표가 이번 업무에서 지시하고 비서실장이 검토한 외부 작업을 실행합니다. 아래 원문의 내용과 대상을 바꾸지 마세요.',
-                  `작업: ${JSON.stringify({ ...publication, content: undefined })}`, `본문 파일: ${content}`,
+                  // 이번 한 건만 알려 준다(여러 수신자 문안이 든 파일 경로를 주면 다른 사람 메일과 헷갈린다)
+                  `이번 작업 한 건: ${JSON.stringify({ 종류: publication.action, 대상: publication.target, ...(publication.recipients?.length ? { 받는사람: publication.recipients } : {}), ...(publication.subject ? { 제목: publication.subject } : {}) })}`,
+                  `본문 앞부분(확인용): ${JSON.stringify(String(body).slice(0, 80))}… 본문 전체는 browser_fill_content(field:"body")가 그대로 넣으니 파일을 읽거나 직접 타이핑하지 마세요.`,
                   'office_browser 도구만 사용해 사이트의 화면을 읽고 조작하세요. 쿠키·비밀번호·로그인 코드·개인 프로필 파일을 읽거나 출력하지 않습니다.',
-                  'browser_snapshot의 ref를 사용하고 제목/수신자/본문은 browser_fill_content로 입력합니다. 마지막 발송·발행·등록은 browser_submit으로만 실행합니다.',
+                  'browser_snapshot으로 칸을 확인하고 각 칸의 ref에 맞는 field로 browser_fill_content를 부르세요: 받는사람 칸 → recipients, 제목 칸 → subject, 본문 편집기(여러 줄) → body. 도구가 칸 종류가 맞지 않으면 거부하니 그때는 화면을 다시 읽고 맞는 칸을 고르세요. 마지막 발송·발행·등록은 browser_submit으로만 실행합니다.',
                   '전송 완료 또는 실제 게시된 본문을 확인해 browser_finish로 증표를 만든 뒤 status:done JSON으로 보고하세요. 로그인/추가 인증/쓰기 권한이 필요하면 status:needs_decision과 질문을 반환하세요.',
                   '이메일·글·댓글 작성 외의 삭제·결제·계정 변경은 하지 않습니다. 결과가 불확실한 전송을 다시 누르지 마세요.',
                 ].join('\n\n') });

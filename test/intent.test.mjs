@@ -70,3 +70,12 @@ test('지시에 적은 저장 폴더는 전체 경로이고 원문에 있을 때
   assert.equal((await judgeCommand(text, { judge: ai({ outputDir: '~/Documents/다른곳', outputDirEvidence: '~/Desktop/상담사 리스트 폴더에 저장해' }) })).outputDir, null, '원문에 없는 경로는 버린다');
   assert.equal((await judgeCommand('바탕화면에 저장해 줘', { judge: ai({ outputDir: '바탕화면', outputDirEvidence: '바탕화면에 저장해' }) })).outputDir, null, '전체 경로가 아니면 쓰지 않는다');
 });
+
+test('근거가 원문과 글자 그대로 맞지 않아도 규칙 판별이 같은 결론이면 외부 작업·위임을 인정한다(실발송 실측 결함)', async () => {
+  const text = '네이버웍스 메일 계정으로 a@example.com 과 b@example.com 에 각각 메일을 한 통씩 보내줘. 끝까지 자동으로 진행해.';
+  const r = await judgeCommand(text, { judge: ai({ externalActions: [{ action: 'mail', evidence: 'a@example.com, b@example.com 에 메일 보내기' }], delegated: true, delegatedEvidence: '자동 진행' }) });
+  assert.deepEqual([r.actions, r.delegated], [['mail'], true]);
+  // 규칙도 근거도 없는 허가는 여전히 버린다
+  const none = await judgeCommand('보고서만 써 줘', { judge: ai({ externalActions: [{ action: 'mail', evidence: '메일 보내' }], delegated: true, delegatedEvidence: '자동' }) });
+  assert.deepEqual([none.actions, none.delegated], [[], false]);
+});

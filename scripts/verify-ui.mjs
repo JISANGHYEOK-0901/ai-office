@@ -232,33 +232,52 @@ try {
   await page.locator('#connectionsBtn').click();
   await choose('connectionProvider', 'naverworks');
   await page.locator('#connectionForm input[name="label"]').fill('검증용 웍스 계정');
+  // 계정 브라우저는 열릴 때마다 새로 만들어지므로, 동작 뒤 새로 생긴 창을 기다려 쓴다
+  const nextLoginWindow = async (count) => {
+    for (let i = 0; i < 100 && !(accountContexts.length > count && accountContexts[count].pages().length); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(accountContexts.length > count, '로그인 창이 열린다');
+    return accountContexts[count];
+  };
+  const closed = (context) => new Promise((resolve, reject) => { if (!context.pages().length) { resolve(); return; } const t = setTimeout(() => reject(new Error('로그인 확인 뒤 창이 자동으로 닫히지 않았습니다.')), 20000); context.once('close', () => { clearTimeout(t); resolve(); }); });
+  let windows = accountContexts.length;
   await page.locator('#connectionSubmit').click();
+  // 첫 로그인은 대표가 직접: 안내가 뜨고, 로그인을 마치면 창이 자동으로 닫히며 목록이 연결됨으로 바뀐다
+  const worksContext = await nextLoginWindow(windows);
   await page.locator('[data-connection-action="confirm"]').waitFor();
-  const firstLogin = accountContexts.at(-1).pages().at(-1);
+  const firstLogin = worksContext.pages().at(-1);
+  await firstLogin.locator('#ai-office-login-banner').waitFor({ state: 'attached' });
   await firstLogin.locator('input[name="id"]').fill('fixture-user');
   await firstLogin.locator('input[type="password"]').fill('fixture-password');
   await firstLogin.getByRole('button', { name: '로그인', exact: true }).click();
-  await firstLogin.getByRole('heading', { name: '연결된 가상 계정' }).waitFor();
-  await page.locator('[data-connection-action="confirm"]').click();
-  await page.getByText('네이버웍스 메일 · 연결됨', { exact: true }).waitFor();
-  await page.locator('[data-connection-action="open"]').click();
-  await page.locator('[data-connection-action="confirm"]').waitFor();
-  const reused = accountContexts.at(-1).pages().at(-1);
-  assert.equal(await reused.locator('input[type="password"]').count(), 0);
-  await reused.getByRole('heading', { name: '연결된 가상 계정' }).waitFor();
-  await page.locator('[data-connection-action="confirm"]').click();
-  report.checks.push({ name: '첫 로그인 저장 후 새 브라우저 프로세스에서도 session cookie 재사용', interaction: 'click', passed: true });
+  await closed(worksContext);
+  await page.getByText('네이버웍스 메일 · 연결됨', { exact: true }).waitFor({ timeout: 20000 });
+  await page.waitForFunction(() => !document.querySelector('[data-connection-action="confirm"]'));
+  // 다시 열면 저장된 로그인 상태로 입력 없이 연결되고 창이 자동으로 닫힌다
+  windows = accountContexts.length;
+  await page.locator('[data-connection-action="open"]').first().click();
+  await closed(await nextLoginWindow(windows));
+  await page.getByText('네이버웍스 메일 · 연결됨', { exact: true }).waitFor({ timeout: 20000 });
+  await page.waitForFunction(() => !document.querySelector('[data-connection-action="confirm"]'), null, { timeout: 20000 });
+  report.checks.push({ name: '첫 로그인은 직접(안내·자동 감지·창 자동 닫힘), 새 브라우저 프로세스에서도 로그인 상태 재사용', interaction: 'click', passed: true });
   await choose('connectionProvider', 'naver');
   await page.locator('#connectionForm input[name="label"]').fill('검증용 네이버 계정');
   await page.locator('#connectionRemember').check();
   await page.locator('#connectionUsername').fill('fixture-auto-user');
   await page.locator('#connectionPassword').fill('fixture-auto-password');
+  windows = accountContexts.length;
   await page.locator('#connectionSubmit').click();
+  // 자동 로그인 정보를 저장해도 첫 로그인은 입력하지 않는다
+  const naverContext = await nextLoginWindow(windows);
   await page.locator('[data-connection-action="confirm"]').waitFor();
-  await accountContexts.at(-1).pages().at(-1).getByRole('heading', { name: '연결된 가상 계정' }).waitFor();
-  await page.locator('[data-connection-action="confirm"]').click();
+  const naverLogin = naverContext.pages().at(-1);
+  await naverLogin.locator('input[name="id"]').waitFor();
+  assert.equal(await naverLogin.locator('input[name="id"]').inputValue(), '');
+  await naverLogin.locator('input[name="id"]').fill('fixture-auto-user');
+  await naverLogin.locator('input[type="password"]').fill('fixture-auto-password');
+  await naverLogin.getByRole('button', { name: '로그인', exact: true }).click();
+  await closed(naverContext);
   assert.equal(await page.locator('#connectionPassword').inputValue(), '');
-  await page.waitForFunction(() => !document.querySelector('[data-connection-action="confirm"]'));
+  await page.waitForFunction(() => !document.querySelector('[data-connection-action="confirm"]'), null, { timeout: 20000 });
   await page.getByText(/자동 로그인 저장됨/).waitFor();
   await shot('connections-desktop.png');
   await page.setViewportSize({ width: 390, height: 844 });

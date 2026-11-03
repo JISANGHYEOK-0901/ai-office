@@ -544,8 +544,14 @@ test('필요한 계정이 없으면 작업 전에 묻고, 등록 뒤 이어서 �
   assert.equal((await f.final(first)).needsReply, true);
   assert.match(f.runner.result(first.id).text, /네이버 블로그·카페 계정[\s\S]*보관함\/계정\.env/);
   assert.deepEqual([f.counts.a, f.counts.b], [0, 0], '계정 확인 전에는 작업을 시작하지 않는다');
-  accounts = [{ id: 'naver-1', label: '홍보용', provider: 'naver', status: 'disconnected', hasCredentials: true, source: 'file' }];
-  await f.final(f.runner.reply(first.id, { prompt: '계정 넣었어, 이어서 재개' }));
+  // 계정 파일에 정보만 있고 한 번도 직접 로그인하지 않았으면 아직 쓰지 않는다(첫 로그인은 대표가 직접)
+  accounts = [{ id: 'naver-1', label: '홍보용', provider: 'naver', status: 'disconnected', hasCredentials: true, firstLoginDone: false, source: 'file' }];
+  const again = f.runner.reply(first.id, { prompt: '계정 넣었어, 이어서 재개' });
+  assert.equal((await f.final(again)).needsReply, true);
+  assert.match(f.runner.result(again.id).text, /처음 한 번 직접 로그인/);
+  assert.deepEqual([f.counts.a, f.counts.b], [0, 0]);
+  accounts = [{ id: 'naver-1', label: '홍보용', provider: 'naver', status: 'connected', hasCredentials: true, firstLoginDone: true, source: 'file' }];
+  await f.final(f.runner.reply(again.id, { prompt: '로그인했어, 이어서 재개' }));
   assert.equal(delivered.length, 1);
   assert.deepEqual([f.counts.plan, f.counts.a, f.counts.b], [1, 1, 1], '블로그 계정은 계획을 다시 세우지 않는다');
   // 같은 서비스 계정이 여럿이면 어느 계정을 쓸지 묻는다

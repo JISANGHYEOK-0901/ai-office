@@ -356,3 +356,10 @@ test('필수 전달은 실제 후속 의존 경로를 요구하고 기존 권장
   plan.stages[1].inputs = [];
   assert.equal(inspect(plan).ok, false, '부서가 계획에 존재해도 의존 경로가 없으면 전달한 것이 아니다');
 });
+
+test('메일 외부 작업은 대상 주소를 비워도 되고, 글은 주소가 필요하다', () => {
+  const mail = { id: 'm', action: 'mail', service: 'naverworks_mail', connection: '', agent: 'dev-2', target: '', recipients: ['a@example.com'], subject: '제목', content: 's2', instructions: '', files: [] };
+  assert.equal(check({ ...goodPlan(), publications: [mail] }).ok, true);
+  const post = { ...mail, action: 'post', service: 'naver_blog', recipients: [] };
+  assert.equal(check({ ...goodPlan(), publications: [post] }).ok, false);
+});

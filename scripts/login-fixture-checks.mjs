@@ -48,13 +48,37 @@ export async function verifyLogin() {
   let standalone;
   try {
     assert.equal(store.list()[0].status, 'disconnected');
+    // 첫 로그인은 대표가 직접: 저장 정보가 있어도 업무에서 자동 로그인하지 않는다
+    await assert.rejects(sessions.withSession(connection.id, 'https://mail.worksmobile.com/', new AbortController().signal, async () => {
+      throw new Error('첫 로그인 전에는 업무를 실행하면 안 됩니다.');
+    }), /직접 로그인/);
+    assert.equal(passwordSubmissions, 0);
+    // 로그인 창: 안내를 띄우고 비밀번호를 넣지 않으며, 대표가 로그인을 마치면 자동으로 저장하고 닫는다
+    await sessions.open(connection.id);
+    const loginContext = contexts.at(-1), loginPage = loginContext.pages().at(-1);
+    await loginPage.waitForLoadState('domcontentloaded');
+    assert.equal(await loginPage.locator('#ai-office-login-banner').count(), 1, '창을 닫지 말라는 안내');
+    assert.equal(await loginPage.locator('input#user_id').inputValue(), '', '아이디를 자동 입력하지 않는다');
+    await loginPage.locator('input#user_id').fill(credentials.username);
+    await loginPage.getByRole('button').click();
+    await loginPage.locator('input[type=password]').waitFor();
+    await loginPage.locator('input[type=password]').fill(credentials.password);
+    await loginPage.getByRole('button', { name: 'Login' }).click();
+    for (let i = 0; i < 100 && store.list()[0].status !== 'connected'; i++) await new Promise((r) => setTimeout(r, 100));
+    assert.equal(store.list()[0].status, 'connected', '로그인을 마치면 자동으로 연결된다');
+    assert.ok(store.find(connection.id).manualLoginAt, '직접 로그인 기록');
+    for (let i = 0; i < 100 && loginContext.pages().length; i++) await new Promise((r) => setTimeout(r, 100));
+    assert.equal(loginContext.pages().length, 0, '로그인 창은 자동으로 닫힌다');
+    assert.equal(passwordSubmissions, 1);
+    assert.equal(options[0].headless, false, '로그인 창은 화면에 표시');
     await sessions.withSession(connection.id, 'https://mail.worksmobile.com/', new AbortController().signal, async (context) => {
       assert.equal(new URL(context.pages().at(-1).url()).hostname, 'mail.worksmobile.com');
       assert.equal(await context.pages().at(-1).locator('h1').innerText(), 'Inbox');
     });
-    assert.equal(store.list()[0].status, 'connected');
-    assert.equal(passwordSubmissions, 1);
-    assert.equal(options[0].headless, false, '직원 업무 창은 기본 표시');
+    assert.equal(passwordSubmissions, 1, '저장된 로그인 상태를 재사용한다');
+    assert.equal(options.at(-1).headless, false, '직원 업무 창은 기본 표시');
+    // 직접 로그인한 뒤 로그인 창을 닫아 '연결 안 됨'이 돼도, 저장 정보가 있으면 업무는 진행한다(업무 시작 전 확인과 같은 기준)
+    store.update(connection.id, { status: 'disconnected' });
     await sessions.withSession(connection.id, 'https://mail.worksmobile.com/', new AbortController().signal, async (context) => {
       authenticated = false;
       await context.pages().at(-1).goto('https://auth.worksmobile.com/login/login');
@@ -109,7 +133,7 @@ export async function verifyLogin() {
     assert.equal(await automaticLogin({ page, connection: site, credentials }), true);
     assert.deepEqual(submissions, ['1'], '다시 그려진 입력칸에 값을 채운 뒤 한 번만 제출');
     assert.equal(await page.locator('h1').innerText(), 'ERP 홈');
-    return [{ name: '저장된 미연결 계정의 직원 첫 로그인·단계형 인증·보이는 창', interaction: 'click', passed: true },
+    return [{ name: '첫 로그인은 대표가 직접(자동 입력 없음·안내 표시·로그인 완료 자동 감지 후 창 닫힘), 이후 저장 상태 재사용', interaction: 'click', passed: true },
       { name: '첫 업무 화면 이후 인증 이동도 같은 직원 브라우저에서 재로그인', interaction: 'click', passed: true },
       { name: '추가 인증을 자동 제출하지 않고 직원 창 유지·연결 완료로 재개', interaction: 'click', passed: true },
       { name: '서비스 문서·유사 인증 호스트에는 자격 증명 입력 차단', interaction: 'click', passed: true },

@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ID_PATTERN, MAX_COMPANY_RULES, exportOrg, importOrg, loadCompanyRules, loadOrg, loadPresets, mutateOrg, saveCompanyRules, slugifyId, validateOrg } from '../lib/org.mjs';
 import { quickToolCheck, checkToolLogins, detectedMode } from '../lib/doctor.mjs';
 import { loadSettings, saveSettings } from '../lib/settings.mjs';
+import { validateTaskBudget } from '../lib/guardrails.mjs';
 import { modelCatalog } from '../lib/models.mjs';
 import { createConnectionStore, CONNECTION_PROVIDERS, CUSTOM_PROVIDER, CUSTOM_PROVIDER_INFO, validateLoginValues } from '../lib/connections.mjs';
 import { createBrowserSessions } from '../lib/browser-session.mjs';
@@ -711,14 +712,18 @@ export async function startServer({
     if (body.finalOutputParent !== undefined) {
       try { finalOutputSettings(root, body.finalOutputParent); } catch (err) { throw new HttpError(400, err.message); }
     }
+    if (body.budget !== undefined) {
+      try { validateTaskBudget(body.budget); } catch (err) { throw new HttpError(400, err.message); }
+    }
     // 조직 변경과 같은 큐에서 실행해 sync가 겹치지 않게 한다
     let sync;
     await mutateOrg(root, () => {
       sync = saveCompanyRules(root, body.rules);
       if (body.finalOutputParent !== undefined) saveFinalOutputSettings(root, body.finalOutputParent);
+      if (body.budget !== undefined) saveSettings(root, { budget: body.budget });
     });
     scheduleBroadcast();
-    return { rules: loadCompanyRules(root), finalOutputs: finalOutputSettings(root), sync: { changed: sync.changed, removed: sync.removed, ok: sync.ok } };
+    return { rules: loadCompanyRules(root), finalOutputs: finalOutputSettings(root), budget: loadSettings(root).budget, sync: { changed: sync.changed, removed: sync.removed, ok: sync.ok } };
   }
 
   // ---- 회사 구성 내보내기·가져오기 ----

@@ -384,6 +384,14 @@
           <p class="help">비서실장 보고와 최종 전달 파일을 ‘최종산출물/날짜/업무명’으로 모읍니다. 변경 후 전달하는 결과부터 적용하며, 기존 파일은 옮기거나 지우지 않습니다.</p>
           <p class="workspace-path"><code id="finalOutputPath">불러오는 중…</code></p>
         </section>
+        <section class="org-backup" aria-labelledby="budgetTitle">
+          <h3 class="lbl" id="budgetTitle">업무 예산</h3>
+          <p class="help">업무 하나가 쓸 수 있는 AI 호출 수와 작업 시간입니다. 80%를 쓰면 계속할지 묻고, "계속"이면 같은 만큼 늘립니다. 예약·상시 감시 업무는 확인 주기 하나마다 따로 세며, 예산을 다 쓰면 그 주기만 멈춥니다. 답장을 기다리는 시간은 세지 않습니다.</p>
+          <div class="budget-fields">
+            <label for="budgetCalls">AI 호출 수 <input id="budgetCalls" type="number" min="5" max="500" step="1" inputmode="numeric"></label>
+            <label for="budgetMinutes">작업 시간(분) <input id="budgetMinutes" type="number" min="5" max="1440" step="1" inputmode="numeric"></label>
+          </div>
+        </section>
         <section class="org-backup" aria-labelledby="workspaceTitle">
           <h3 class="lbl" id="workspaceTitle">작업 공간</h3>
           <p class="help">회사 데이터(조직 정본·산출물·실행 기록)와 AI 직원의 실행 위치입니다. AI 직원은 이 폴더 안에서만 일하고 대시보드 프로그램 폴더는 고치지 못합니다.</p>

@@ -80,6 +80,11 @@ test('API는 저장 위치를 검증·보존하고 검토된 옛 업무의 최�
   assert.equal((await (await api('/api/company')).json()).rules, '');
   assert.equal((await api('/api/company', { method: 'PUT', body: JSON.stringify({ rules: '', finalOutputParent: f.external }) })).status, 200);
   assert.equal((await (await api('/api/company')).json()).finalOutputs.directory, join(f.external, '최종산출물'));
+  // 업무 예산도 회사 설정에서 함께 저장하고, 범위를 벗어나면 아무것도 저장하지 않는다
+  assert.equal((await api('/api/company', { method: 'PUT', body: JSON.stringify({ rules: '예산 거부 시 저장 안 됨', budget: { calls: 1, minutes: 60 } }) })).status, 400);
+  assert.equal((await (await api('/api/company')).json()).rules, '');
+  assert.equal((await api('/api/company', { method: 'PUT', body: JSON.stringify({ rules: '', budget: { calls: 80, minutes: 90 } }) })).status, 200);
+  assert.deepEqual((await (await api('/api/company')).json()).settings.budget, { calls: 80, minutes: 90 });
   const list = await (await api('/api/outputs')).json(); assert.equal(list.outputs[0].finalOutput, true);
   const files = await (await api(`/api/outputs/${encodeURIComponent(task)}/files`)).json();
   assert.equal(files.final.files.length, 4); assert.ok(files.files.some((file) => file.name === 'raw.txt'));

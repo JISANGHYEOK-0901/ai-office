@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import {
-  CONTINUOUS_LIMITS, MAX_PLAN_REVISIONS, MAX_PROGRESS_CHECKS, MAX_REVIEW_REJECTS, SECRET_MENTION, evidenceIn, externalActionPolicy,
-  isFinalAction, isFinalConfirm, isForbiddenAction, isReadOnlyBlocked, secretLocations,
+  BUDGET_WARN_RATIO, CONTINUOUS_LIMITS, DEFAULT_TASK_BUDGET, MAX_PLAN_REVISIONS, MAX_PROGRESS_CHECKS, MAX_REVIEW_REJECTS, SECRET_MENTION, evidenceIn, externalActionPolicy,
+  isFinalAction, isFinalConfirm, isForbiddenAction, isReadOnlyBlocked, secretLocations, validateTaskBudget,
 } from '../lib/guardrails.mjs';
 
 test('금지 동작: 삭제·탈퇴·로그아웃·결제·송금·비밀번호 버튼은 위임이 있어도 누르지 않는다', () => {
@@ -60,4 +60,12 @@ test('진행 점검은 검토처럼 회사 설정의 비서실장 모델로 실�
   assert.deepEqual(resolveControlChief(chief, { phase: 'progress', tools }), chief);
   assert.deepEqual(resolveControlChief(chief, { phase: 'review', tools }), chief);
   assert.deepEqual(resolveControlChief(chief, { phase: 'plan', tools }), { engine: 'claude', model: 'opus', effort: 'high' });
+});
+
+test('업무 예산: 기본 40회·60분, 80%에서 확인, 범위 밖은 거부', () => {
+  assert.deepEqual({ ...DEFAULT_TASK_BUDGET }, { calls: 40, minutes: 60 });
+  assert.equal(BUDGET_WARN_RATIO, 0.8);
+  assert.deepEqual(validateTaskBudget(undefined), { calls: 40, minutes: 60 });
+  assert.deepEqual(validateTaskBudget({ calls: 500, minutes: 5 }), { calls: 500, minutes: 5 });
+  for (const bad of [{ calls: 4 }, { calls: 501 }, { minutes: 1441 }, { minutes: '60' }]) assert.throws(() => validateTaskBudget(bad), /업무 예산/);
 });

@@ -8,11 +8,11 @@ import { validatePlan, compactPlan, normalizePlanInputs } from '../lib/plan.mjs'
 import { appendEvent, redact, redactContext } from '../lib/events.mjs';
 import { loadTasks, updateTask, completeTask } from '../lib/tasks.mjs';
 import { insideRel } from '../lib/outputs.mjs';
-import { codexRole } from '../lib/settings.mjs';
+import { codexRole, loadSettings } from '../lib/settings.mjs';
 import { parseVerdict } from '../scripts/codex-review.mjs';
 import { stageResult, outputIssues, HTML_BRIEF } from '../lib/work-result.mjs';
 import { programRoot } from '../lib/paths.mjs';
-import { MAX_PLAN_REVISIONS, MAX_PROGRESS_CHECKS, externalActionPolicy } from '../lib/guardrails.mjs';
+import { BUDGET_WARN_RATIO, MAX_PLAN_REVISIONS, MAX_PROGRESS_CHECKS, externalActionPolicy } from '../lib/guardrails.mjs';
 import { preparePublications } from '../lib/publications.mjs';
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';
@@ -30,7 +30,7 @@ export function checkpointFile(root, rootId) {
   return join(root, '.office', 'orchestrations', `${rootId}.json`);
 }
 
-export async function orchestrate({ root, run, prompt, execute, signal, maxParallel = 4, resume = false, onDecision = () => {}, outbound = null, intent = null, judge = null }) {
+export async function orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel = 4, resume = false, onDecision = () => {}, outbound = null, intent = null, judge = null }) {
   const task = run.task;
   const taskDir = join(root, 'outputs', ...task.split('/'));
   const file = checkpointFile(root, run.rootId);
@@ -56,6 +56,15 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
     // 진행 점검·계획 수정 횟수는 대표 피드백으로 새로 시작할 때 다시 센다. 수정 이력은 남긴다
     progressChecks: saved.delivered ? 0 : saved.progressChecks || 0, revisionCount: saved.delivered ? 0 : saved.revisionCount || 0,
     revisions: [...(saved.revisions || [])] };
+  // 업무 예산(guardrails): AI 호출 수·작업 시간. 대표 피드백으로 새로 시작하면 다시 센다. 답장을 기다린 시간은 세지 않는다
+  const unattended = Boolean(run.schedule || run.monitorId);
+  if (!saved.budget || saved.delivered) {
+    const { calls, minutes } = loadSettings(root).budget;
+    state.budget = { calls: 0, activeMs: 0, limitCalls: calls, limitMs: minutes * 60000, stepCalls: calls, stepMs: minutes * 60000 };
+  } else state.budget = { ...saved.budget };
+  const sessionStart = Date.now(), activeBase = state.budget.activeMs;
+  const activeMs = () => activeBase + (Date.now() - sessionStart);
+  const execute = (args) => { state.budget.calls++; return runAI(args); };
   // 최초 지시의 외부 작업·위임 판별(지시창에서 AI가 근거와 함께 판단한 값)은 업무 내내 유지한다
   if (!saved.originalRequest && intent) state.intent = intent;
   let answer = null;
@@ -64,6 +73,11 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
     answer = await judgeAnswer(prompt, saved.pending || [], { judge });
     if (saved.pending?.some((q) => q.phase === 'web-confirm')) state.webDecision = answer.decision === 'decline' ? 'declined'
       : answer.decision === 'approve' || answer.delegated ? 'approved' : state.webDecision;
+    // 예산 확인 답장: "그만"이면 멈추고, 그 밖에는 처음 예산만큼 늘려 이어 간다
+    if (saved.pending?.some((q) => q.phase === 'budget')) {
+      if (answer.decision === 'decline') state.budgetStop = true;
+      else { state.budget.limitCalls += state.budget.stepCalls; state.budget.limitMs += state.budget.stepMs; }
+    }
     state.decisions.push({ questions: saved.pending || [], answer: redactContext(prompt), intent: answer });
     state.pending = [];
   }
@@ -84,6 +98,7 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
   };
   const allowedActions = () => policy().actions;
   const persist = () => {
+    state.budget.activeMs = activeMs();
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
     if (process.platform !== 'win32') chmodSync(dirname(file), 0o700);
     writeFileAtomic(file, JSON.stringify(state, null, 2) + '\n', { mode: 0o600 });
@@ -104,6 +119,19 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
   };
   // 계획 전 질문으로 멈추더라도 최초 요청은 남긴다.
   persist();
+  if (state.budgetStop) {
+    state.budgetStop = false;
+    return blocked('대표 결정으로 업무를 멈췄습니다. 지금까지의 산출물은 업무 폴더에 남아 있습니다. 이어서 하려면 "이어서 해줘"라고 지시해 주세요.');
+  }
+  // 예산 점검: 80%를 쓰면 대표에게 계속할지 묻는다. 대표가 없는 예약·상시 감시 업무는 묻지 않고 100%에서 이 주기만 멈춘다
+  const budgetText = () => `AI 호출 ${state.budget.calls}/${state.budget.limitCalls}회, 작업 ${Math.round(activeMs() / 60000)}/${Math.round(state.budget.limitMs / 60000)}분`;
+  const overBudget = () => {
+    const ratio = Math.max(state.budget.calls / state.budget.limitCalls, activeMs() / state.budget.limitMs);
+    if (unattended) return ratio >= 1 ? blocked(`이번 회차 업무가 예산을 모두 써서 멈췄습니다(${budgetText()}). 다음 회차는 새 예산으로 진행합니다. 예산은 회사 설정에서 바꿀 수 있습니다.`) : null;
+    if (ratio < BUDGET_WARN_RATIO) return null;
+    return ask([{ phase: 'budget', question: `이 업무가 예산의 ${Math.min(999, Math.round(ratio * 100))}%를 썼습니다(${budgetText()}). 계속할까요? "계속"이면 처음 예산만큼 늘려 이어 가고, "그만"이면 지금까지의 결과로 멈춥니다.` }]);
+  };
+  const budgetLeft = () => `남은 예산: AI 호출 ${Math.max(0, state.budget.limitCalls - state.budget.calls)}회, 작업 ${Math.max(0, Math.round((state.budget.limitMs - activeMs()) / 60000))}분. 예산 안에서 반려·재배정·계획 수정 여부를 스스로 정하세요.`;
   const outputPath = (value) => isAbsolute(value) ? resolve(value)
     : resolve(/^outputs[\\/]/.test(value) ? root : taskDir, value);
   const safeOutput = (value, create = false) => {
@@ -340,7 +368,7 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
   const available = (id, dept) => org.roster.some((a) => a.id === id && a.department === dept && a.active !== false)
     && org.departments.some((d) => d.id === dept && d.active !== false && !(d.engine === 'codex' && codexRole(d) === 'review'));
   const transfer = async (stage, result) => {
-    if ((state.routes[stage.id] || 0) >= 2) throw new Error('자동 재배정 2회 후에도 담당을 정하지 못했습니다. 적합한 부서를 알려 주세요.');
+    // 재배정 횟수는 고정하지 않고 업무 예산이 막는다
     const route = parseObject(await execute({ phase: 'route', prompt: [
       '비서실장으로서 오전달된 단계의 담당을 정하세요. 직접 실무하지 마세요.',
       'JSON {department,agent,reason,question}. 근무중 실행 직원만 선택. 필수 전달 경로와 대표 지정 담당을 바꾸어야 하면 question에 결정을 요청하세요.',
@@ -411,6 +439,7 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
       `현재 계획: ${JSON.stringify(plan)}`,
       `완료된 단계: ${JSON.stringify(Object.keys(state.completed))}`,
       `방금 끝난 단계 산출물: ${JSON.stringify(finished.map((stage) => ({ id: stage.id, output: stage.output })))}`,
+      budgetLeft(),
     ].join('\n\n') }));
     checkStop();
     return decision;
@@ -420,6 +449,8 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
     while (true) {
       while (plan.stages.some((s) => !state.completed[s.id])) {
         checkStop();
+        const stop = overBudget();
+        if (stop) return stop;
         const ready = plan.stages.filter((s) => !state.completed[s.id] && !waiting.has(s.id) && (s.dependsOn || []).every((id) => state.completed[id]));
         if (!ready.length) {
           if (waiting.size) return ask([...waiting.values()]);
@@ -443,6 +474,8 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
         const finished = results.filter((r) => r.result.status === 'done').map((r) => r.stage);
         if (finished.length && !waiting.size && plan.stages.some((s) => !state.completed[s.id])) {
           // 진행 점검은 보조 판단이다. 응답이 깨지거나 실패하면(중지 요청 제외) 남은 계획대로 진행한다
+          const stop = overBudget();
+          if (stop) return stop;
           let decision = null;
           try { decision = await progress(finished); } catch (err) {
             checkStop();
@@ -460,6 +493,8 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
         }
       }
       checkStop();
+      const stopBeforeReview = overBudget();
+      if (stopBeforeReview) return stopBeforeReview;
       const prepared = preparePublications(plan, (path) => readFileSync(safeOutput(path), 'utf8'),
         { excludedVideos: outbound?.videoHistory?.(run.rootId) || [], videoPolicy });
       emit('flow.review_request', { summary: '단계 산출물 검토를 요청했습니다.' });
@@ -487,6 +522,7 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
         context(), HTML_BRIEF,
         `외부 작업 형식 검사: ${JSON.stringify(prepared.errors)}. 메일 문안은 수신자·출처·본문이 대표 지시와 맞는지 확인하세요. 아직 실제 전송 전이므로 보고서에서 발송·게시 완료로 쓰지 마세요. 실행기가 실제 결과를 별도로 붙입니다.`,
         `outputs/${task}/review-notes.md가 있으면 추가 검증 근거를 읽고 산출물·이미지와 대조하세요.`,
+        budgetLeft(),
         '당신이 최종 검토자입니다. 별도 검증실 부재는 공백이 아니므로 대체 검토 알림을 만들지 마세요. 요청한 전문 검토에 FIX/BLOCK/ERROR가 있거나 산출물이 없으면 pass를 내리지 마세요. 보고서에는 결과·산출물 경로·근거·확인 필요·실제 역량 공백을 포함하세요.',
       ].join('\n\n') }));
       checkStop();
@@ -500,7 +536,6 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
         let posted = 0;
         // 위임이 없으면 외부 작업(웹사이트·메일·글·댓글)을 실행 전에 한 번에 묶어 확인받는다.
         // 대표가 미리 등록한 예약·상시 감시 업무의 메일·글·댓글은 등록이 곧 지시이므로 묻지 않는다(웹사이트 작업은 기존대로 확인)
-        const unattended = Boolean(run.schedule || run.monitorId);
         const needsConfirm = (job) => job.publication.action === 'web' || !unattended;
         const confirmJobs = prepared.jobs.filter(needsConfirm);
         if (confirmJobs.length && !policy().delegated && !state.webDecision) {
@@ -578,7 +613,8 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
         emit('flow.deliver', { summary: '최종 검토를 마쳐 업무를 완료하고 결과를 전달했습니다.' });
         return report;
       }
-      if (review.verdict !== 'reject' || state.rejects >= 2) return blocked(`검토를 완료하지 못했습니다. ${review.reason || '판정 또는 산출물을 확인해 주세요.'}`);
+      // 반려 횟수는 고정하지 않고 업무 예산 안에서 비서실장이 정한다(예산 점검이 매 회차 앞에서 멈춤)
+      if (review.verdict !== 'reject') return blocked(`검토를 완료하지 못했습니다. ${review.reason || '판정 또는 산출물을 확인해 주세요.'}`);
       const stage = plan.stages.find((s) => s.id === review.stage);
       if (!stage) return blocked('반려할 단계가 명확하지 않습니다. ' + (review.reason || ''));
       state.rejects++;

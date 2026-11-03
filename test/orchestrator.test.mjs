@@ -293,15 +293,23 @@ test('잘못된 계획은 1회 수정 요청하고, 계속 틀리면 업무를 �
   assert.equal(loadTasks(f.root)[0].status, 'blocked');
 });
 
-test('검증실 BLOCK과 반려 2회 한도는 전달을 막는다', async (t) => {
-  for (const options of [{ reviewerVerdict: 'BLOCK', reviewBy: 'codex' }, { rejects: 10 }]) {
-    const f = fixture(t, options);
+test('검증실 BLOCK은 전달을 막고, 끝없는 반려는 업무 예산이 멈춰 계속할지 묻는다', async (t) => {
+  {
+    const f = fixture(t, { reviewerVerdict: 'BLOCK', reviewBy: 'codex' });
     const run = f.runner.start({ prompt: '검토가 필요한 업무' });
     await f.final(run);
     assert.equal(loadTasks(f.root)[0].status, 'blocked');
     assert.ok(f.counts.review <= 3);
-    assert.ok(f.counts.a <= 3);
   }
+  const f = fixture(t, { rejects: 100 });
+  saveSettings(f.root, { budget: { calls: 20, minutes: 60 } });
+  const run = f.runner.start({ prompt: '검토가 필요한 업무' });
+  assert.equal((await f.final(run)).needsReply, true);
+  assert.equal(loadTasks(f.root)[0].status, 'blocked');
+  assert.match(f.runner.result(run.id).text, /예산의 \d+%를 썼습니다\(AI 호출 \d+\/20회/);
+  const calls = f.calls.length;
+  assert.ok(calls <= 20, `예산(20회) 안에서 멈춘다: ${calls}회`);
+  assert.ok(f.counts.review >= 3, `고정 2회가 아니라 예산 안에서 반려를 이어 간다: ${f.counts.review}회`);
 });
 
 test('비서실장 설정은 재로딩 후 유지되고 잘못된 제공자·effort를 거부한다', async (t) => {
@@ -696,4 +704,33 @@ test('외부 글은 위임이 없으면 실행 전에 한 번 확인하고, "진
     assert.equal(loadTasks(f.root)[0].status, 'done');
     if (!expected) assert.match(readFileSync(join(f.root, 'outputs', ...loadTasks(f.root)[0].id.split('/'), 'report.md'), 'utf8'), /대표 결정으로 실행하지 않음/);
   }
+});
+
+// ── 업무 예산 ──
+test('업무 예산 80%에서 계속할지 묻고, "계속"이면 처음 예산만큼 늘려 끝내고 "그만"이면 멈춘다', async (t) => {
+  for (const [answer, done] of [['계속', true], ['그만', false]]) {
+    const f = fixture(t);
+    saveSettings(f.root, { budget: { calls: 5, minutes: 60 } });
+    const first = f.runner.start({ prompt: '자료를 조사해 보고서로 정리해 줘' });
+    assert.equal((await f.final(first)).needsReply, true);
+    assert.match(f.runner.result(first.id).text, /예산의 80%를 썼습니다\(AI 호출 4\/5회/);
+    assert.equal(f.counts.review, 0, '검토 전에 멈춘다');
+    const next = f.runner.reply(first.id, { prompt: answer });
+    await f.final(next);
+    assert.equal(loadTasks(f.root)[0].status, done ? 'done' : 'blocked', answer);
+    assert.deepEqual([f.counts.a, f.counts.b], [1, 1], '완료 단계는 반복하지 않는다');
+    if (!done) assert.match(f.runner.result(next.id).text, /대표 결정으로 업무를 멈췄습니다/);
+    const checkpoint = JSON.parse(readFileSync(join(f.root, '.office', 'orchestrations', `${first.rootId}.json`)));
+    assert.equal(checkpoint.budget.limitCalls, done ? 10 : 5);
+  }
+});
+
+test('예약 업무처럼 대표가 없는 업무는 예산을 묻지 않고, 다 쓰면 그 회차만 멈춘다', async (t) => {
+  const f = fixture(t, { rejects: 100 });
+  saveSettings(f.root, { budget: { calls: 5, minutes: 60 } });
+  const run = f.runner.start({ prompt: '자료를 조사해 보고서로 정리해 줘', schedule: { id: 'daily-1', slot: '2026-11-03' } });
+  await f.final(run);
+  assert.equal(loadTasks(f.root)[0].status, 'blocked');
+  assert.match(f.runner.result(run.id).text, /이번 회차 업무가 예산을 모두 써서 멈췄습니다\(AI 호출 5\/5회/);
+  assert.doesNotMatch(f.runner.result(run.id).text, /계속할까요/);
 });

@@ -194,13 +194,27 @@ try {
   await page.locator('#finalOutputParent:not(:disabled)').waitFor();
   const destination = join(root, '사용자 지정 저장소');
   await page.locator('#finalOutputParent').fill(destination);
+  // 업무 예산: 기본 40회·60분을 보여 주고, 바꾼 값을 저장한다
+  assert.deepEqual([await page.locator('#budgetCalls').inputValue(), await page.locator('#budgetMinutes').inputValue()], ['40', '60']);
+  await page.locator('#budgetCalls').fill('50');
+  await page.locator('#budgetMinutes').fill('90');
   await page.locator('#companySubmit').click();
   await page.waitForFunction(() => !document.querySelector('#companyDialog').open);
   await page.locator('#companyBtn').click();
   await page.locator('#finalOutputParent:not(:disabled)').waitFor();
   assert.equal(await page.locator('#finalOutputParent').inputValue(), destination);
   assert.equal(await page.locator('#finalOutputPath').textContent(), join(destination, '최종산출물'));
-  await shot('final-output-settings.png'); await page.keyboard.press('Escape');
+  assert.deepEqual([await page.locator('#budgetCalls').inputValue(), await page.locator('#budgetMinutes').inputValue()], ['50', '90']);
+  await page.locator('#budgetTitle').scrollIntoViewIfNeeded();
+  await shot('final-output-settings.png');
+  // 좁은 화면에서도 예산 입력칸이 가로로 넘치지 않는다
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('#budgetTitle').scrollIntoViewIfNeeded();
+  assert.equal(await page.locator('#companyDialog').evaluate((d) => d.scrollWidth <= d.clientWidth), true);
+  await shot('company-budget-mobile.png');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  report.checks.push({ name: '회사 설정 업무 예산: 기본값 표시·저장·재열기 유지·모바일 넘침 없음', interaction: 'click', passed: true });
+  await page.keyboard.press('Escape');
   await page.locator('#tabOutputs').click();
   await page.locator(`[data-act="out-open"][data-task="${finalTask}"]`).click();
   await page.getByRole('button', { name: '최종산출물 폴더 열기', exact: true }).waitFor();

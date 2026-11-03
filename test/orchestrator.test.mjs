@@ -601,7 +601,8 @@ test('브라우저 도구 연결 실패를 복구하면 검토된 원문·완료
 
 test('최종 저장 위치 오류는 대표에게 알리고 복구 후 완료 단계·최종 검토를 반복하지 않는다', async (t) => {
   const f = fixture(t);
-  const collision = join(f.root, '최종산출물'); writeFileSync(collision, '기존 파일 보존');
+  mkdirSync(join(f.root, '보관함'), { recursive: true });
+  const collision = join(f.root, '보관함', '최종산출물'); writeFileSync(collision, '기존 파일 보존');
   const first = f.runner.start({ prompt: '자료를 정리해 최종 보고' });
   assert.equal((await f.final(first)).needsReply, true);
   assert.equal(loadTasks(f.root)[0].status, 'blocked');

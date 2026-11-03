@@ -69,6 +69,12 @@
     },
     "dailyEvidence": {
       "type": "string"
+    },
+    "outputDir": {
+      "type": "string"
+    },
+    "outputDirEvidence": {
+      "type": "string"
     }
   },
   "required": [
@@ -83,7 +89,9 @@
     "deadline",
     "intervalMinutes",
     "dailyTime",
-    "dailyEvidence"
+    "dailyEvidence",
+    "outputDir",
+    "outputDirEvidence"
   ],
   "additionalProperties": false
 }

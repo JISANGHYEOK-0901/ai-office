@@ -82,3 +82,16 @@ test('회사 구성 백업에 비서실장 설정을 포함하며 이전 형식�
   await importOrg(dst.root, old);
   assert.deepEqual(loadSettings(dst.root).chief, chief);
 });
+
+test('업무 예산: 기본 40회·60분, 회사 설정에 저장하며 범위를 벗어나면 거부한다', async () => {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join: joinPath } = await import('node:path');
+  const root = mkdtempSync(joinPath(tmpdir(), 'office-budget-'));
+  assert.deepEqual(loadSettings(root).budget, { calls: 40, minutes: 60 });
+  assert.deepEqual(saveSettings(root, { budget: { calls: 80, minutes: 120 } }).budget, { calls: 80, minutes: 120 });
+  assert.deepEqual(loadSettings(root).budget, { calls: 80, minutes: 120 });
+  assert.equal(loadSettings(root).chief.engine, 'codex', '예산 저장이 다른 설정을 바꾸지 않는다');
+  for (const budget of [{ calls: 2, minutes: 60 }, { calls: 40, minutes: 5000 }, { calls: 1.5, minutes: 60 }])
+    assert.throws(() => saveSettings(root, { budget }), /업무 예산/);
+});

@@ -665,6 +665,9 @@ input[type="color"] { width: 44px; height: 32px; padding: 2px; border: var(--bor
 .workspace-path { margin: 6px 0; word-break: break-all; }
 .workspace-path code { font-size: 12px; }
 .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.budget-fields { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 8px; }
+.budget-fields label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.budget-fields input { width: 6.5em; }
 #confirmText { white-space: pre-line; }
 
 /* 답변 필요 · 대화 보기 · 이어서 답하기 */

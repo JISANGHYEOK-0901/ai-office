@@ -2406,6 +2406,7 @@ async function openCompany() {
   $('companyRules').disabled = true;
   $('finalOutputParent').disabled = true;
   $('finalOutputParent').value = '';
+  for (const id of ['budgetCalls', 'budgetMinutes']) { $(id).disabled = true; $(id).value = ''; }
   $('finalOutputPath').textContent = '불러오는 중…';
   $('companySubmit').disabled = true;
   $('orgImportBtn').disabled = S.demo;
@@ -2423,6 +2424,9 @@ async function openCompany() {
     $('workspaceSource').textContent = ws.label ? `(${ws.label})` : '';
     $('finalOutputParent').value = data.finalOutputs?.parent || '';
     $('finalOutputPath').textContent = data.finalOutputs?.directory || '';
+    $('budgetCalls').value = data.settings?.budget?.calls ?? 40;
+    $('budgetMinutes').value = data.settings?.budget?.minutes ?? 60;
+    for (const id of ['budgetCalls', 'budgetMinutes']) $(id).disabled = S.demo;
     $('companyRules').disabled = false;
     $('finalOutputParent').disabled = S.demo;
     $('companySubmit').disabled = S.demo;
@@ -2445,10 +2449,11 @@ async function submitCompany(ev) {
   const btn = $('companySubmit');
   btn.disabled = true;
   try {
-    const out = await api('PUT', '/api/company', { rules: $('companyRules').value, finalOutputParent: $('finalOutputParent').value });
+    const out = await api('PUT', '/api/company', { rules: $('companyRules').value, finalOutputParent: $('finalOutputParent').value,
+      budget: { calls: Number($('budgetCalls').value), minutes: Number($('budgetMinutes').value) } });
     previewCache.clear();
     $('companyDialog').close();
-    toast(`회사 규칙과 최종산출물 저장 위치를 저장했어요. 에이전트 파일 ${out?.sync?.changed?.length ?? 0}개를 갱신했어요.`);
+    toast(`회사 규칙·최종산출물 저장 위치·업무 예산을 저장했어요. 에이전트 파일 ${out?.sync?.changed?.length ?? 0}개를 갱신했어요.`);
   } catch (e) {
     $('companyError').textContent = e.message;
     $('companyError').hidden = false;

@@ -261,6 +261,7 @@ code { font-family: var(--mono); font-size: .86em; padding: 1px 5px; border-radi
 #chiefSettingsStatus:empty { display: none; }
 #chiefSettingsStatus { flex-basis: 100%; margin: 0; }
 .run-usage { color: var(--muted); font-size: 12px; }
+.run-daily-warn { color: var(--danger, #c0392b); font-weight: 600; }
 .chief-form:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
 .chief-label { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); font: 800 12px var(--mono); white-space: nowrap; }
 .chief-form input { flex: 1; min-width: 0; padding: 7px 4px; border: 0; background: transparent; }

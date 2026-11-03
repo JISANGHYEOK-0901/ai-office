@@ -69,3 +69,8 @@ test('업무 예산: 기본 40회·60분, 80%에서 확인, 범위 밖은 거부
   assert.deepEqual(validateTaskBudget({ calls: 500, minutes: 5 }), { calls: 500, minutes: 5 });
   for (const bad of [{ calls: 4 }, { calls: 501 }, { minutes: 1441 }, { minutes: '60' }]) assert.throws(() => validateTaskBudget(bad), /업무 예산/);
 });
+
+test('상시 업무 사용량 이상 기준: 평소의 3배·10회 이상, 최근 7일 중 기록 2일 이상', async () => {
+  const { USAGE_ANOMALY } = await import('../lib/guardrails.mjs');
+  assert.deepEqual({ ...USAGE_ANOMALY }, { ratio: 3, baselineDays: 7, minBaselineDays: 2, minCalls: 10 });
+});

@@ -602,9 +602,9 @@ export function chiefInputAction(text, tasks = []) {
 }
 
 // ───────────────────── 사용자 의견 필요(attention) ─────────────────────
-export const ATTENTION_KINDS = ['reply', 'approve', 'gap', 'complete'];
-const ATTN_PRIORITY = { approve: 0, reply: 1, gap: 2, complete: 3 };
-export const ATTENTION_LABEL = { reply: '답변 필요', approve: '완료 결과', complete: '업무 완료', gap: '역량 공백' };
+export const ATTENTION_KINDS = ['reply', 'approve', 'gap', 'usage', 'complete'];
+const ATTN_PRIORITY = { approve: 0, reply: 1, gap: 2, usage: 2, complete: 3 };
+export const ATTENTION_LABEL = { reply: '답변 필요', approve: '완료 결과', complete: '업무 완료', gap: '역량 공백', usage: '사용량 이상' };
 
 // state.attention(since 오름차순). 서버가 아직 주지 않으면 needsReply run으로 reply 항목을 만든다
 export function normalizeAttention(raw, runs = []) {
@@ -809,6 +809,14 @@ function saveChiefSelection(event) {
     if (!chiefSaving) renderChiefSettings();
   });
   chiefSaveQueue.catch(() => {});
+}
+
+// 상시 업무 오늘 사용량: AI 호출 수·토큰과 평소 하루 평균(기록이 쌓이면)
+export function dailyUsageLabel(usage) {
+  if (!usage?.today) return '';
+  const tokens = (n) => Number(n || 0).toLocaleString('ko-KR');
+  return `오늘 사용: AI 호출 ${usage.today.calls}회 · 입력 ${tokens(usage.today.input)} · 출력 ${tokens(usage.today.output)} 토큰`
+    + (usage.baseline ? ` · 평소 하루 ${Math.round(usage.baseline)}회` : '') + (usage.anomaly ? ` · 평소의 ${usage.ratio.toFixed(1)}배` : '');
 }
 
 export function usageLabel(run) {
@@ -1036,7 +1044,7 @@ const svgCache = {};
 // 캔버스와 같은 픽셀 비트맵으로 SVG 아이콘을 만든다(이모지 대신, 두 테마에서 같은 모양)
 function attnSvg(kind) {
   if (svgCache[kind]) return svgCache[kind];
-  const bmp = ATTENTION_ICONS[kind === 'complete' ? 'approve' : kind] || ATTENTION_ICONS.reply;
+  const bmp = ATTENTION_ICONS[kind === 'complete' ? 'approve' : kind === 'usage' ? 'gap' : kind] || ATTENTION_ICONS.reply;
   let rects = '';
   bmp.forEach((row, y) => {
     for (let x = 0; x < row.length; x++) {
@@ -1057,6 +1065,7 @@ function attnLabel(a) {
   const who = agentName(a.agent);
   if (a.kind === 'complete' || a.kind === 'approve') return `업무 완료: ${taskTitle(a.task)}`;
   if (a.kind === 'gap') return `역량 공백: ${clipText(a.text, 80)}`;
+  if (a.kind === 'usage') return `사용량 이상: ${clipText(a.text, 80)}`;
   return `${who}님이 답변을 기다립니다${a.text ? ` — ${clipText(a.text, 80)}` : ''}`;
 }
 
@@ -1082,6 +1091,8 @@ function openAttention(a) {
     const id = a.task || S.tasks.find((t) => t.status === 'review')?.id;
     return id ? openCompletion(id) : toast('확인할 업무를 찾지 못했어요.', { type: 'warn' });
   }
+  // 사용량 이상: 해당 상시 업무 대화를 연다(멈출지는 대표가 판단)
+  if (a.kind === 'usage') return a.runId && S.runs.some((r) => r.id === a.runId) ? openThread(a.runId) : toast('상시 업무를 찾지 못했어요.', { type: 'warn' });
   return openGap(a);
 }
 
@@ -1240,6 +1251,13 @@ function attentionCards() {
   for (const a of S.attention) {
     if (a.kind === 'gap') continue;
     const k = attentionKey(a);
+    if (a.kind === 'usage') {
+      cards.push(`<article class="attn-card ac-gap ac-usage">
+        <div class="ac-head">${attnSvg('usage')}<b>사용량 이상</b><time>${esc(timeAgo(a.since))}</time></div>
+        <p class="ac-text">${esc(clipText(a.text, 180))}</p>
+        <div class="ac-actions"><button type="button" class="btn btn-sm" data-act="attn" data-attn="${esc(k)}" data-key="acu-${esc(k)}">상시 업무 보기</button></div></article>`);
+      continue;
+    }
     if (a.kind === 'complete' || a.kind === 'approve') {
       const task = S.tasks.find((t) => t.id === a.task);
       cards.push(`<article class="attn-card ac-approve">
@@ -1492,6 +1510,7 @@ function renderTasks() {
       <p class="run-text">${r.parentId ? '<span class="reply-mark" title="이어서 답한 실행">↳ 답장</span> ' : ''}${esc(runText(r))}</p>
       ${r.model ? `<p class="run-usage">${esc(r.model)}${r.effort ? ` · ${esc(r.effort)}` : ''}</p>` : ''}
       ${r.continuous ? `<p class="run-monitor">${esc({ checking: '자료 확인 중', waiting: '새 자료 대기', retrying: '확인 재시도 대기', needs_decision: '감시 결정 대기', suspended: '감시 재개 대기', paused: '감시 일시정지', stopped: '감시 중지', finished: '감시 종료' }[r.monitor?.status] || '지속 감시 준비')} · ${r.monitor?.deadlineAt ? `${esc(new Date(r.monitor.deadlineAt).toLocaleString('ko-KR'))}까지` : '중지할 때까지'} · 새 자료 ${r.monitor?.discoveries || 0}건 · 보고 ${r.monitor?.deliveries || 0}건${r.monitor?.nextAt && live ? `<br>다음 확인 ${esc(new Date(r.monitor.nextAt).toLocaleTimeString('ko-KR'))}` : ''}${r.monitor?.error ? `<br>최근 오류: ${esc(r.monitor.error)}` : ''}</p>` : ''}
+      ${r.continuous && r.monitorUsage ? `<p class="run-usage run-daily${r.monitorUsage.anomaly ? ' run-daily-warn' : ''}">${esc(dailyUsageLabel(r.monitorUsage))}</p>` : ''}
       ${usageLabel(r) ? `<p class="run-usage">${esc(usageLabel(r))}</p>` : ''}
       ${runResult(r) && !live ? `<p class="run-result">${esc(String(runResult(r)).slice(0, 160))}</p>` : ''}
       <div class="run-actions">

@@ -722,6 +722,10 @@ test('업무 예산 80%에서 계속할지 묻고, "계속"이면 처음 예산�
     if (!done) assert.match(f.runner.result(next.id).text, /대표 결정으로 업무를 멈췄습니다/);
     const checkpoint = JSON.parse(readFileSync(join(f.root, '.office', 'orchestrations', `${first.rootId}.json`)));
     assert.equal(checkpoint.budget.limitCalls, done ? 10 : 5);
+    // 날짜별 사용량 기록의 호출 수는 업무 예산이 센 호출 수와 같다(상시 업무 하루 사용량 집계에 쓰임)
+    const recorded = f.runner.list().filter((r) => r.rootId === first.rootId && !r.parentId || r.id === next.id)
+      .reduce((sum, r) => sum + Object.values(r.dailyUsage || {}).reduce((n, d) => n + d.calls, 0), 0);
+    assert.equal(recorded, checkpoint.budget.calls);
   }
 });
 

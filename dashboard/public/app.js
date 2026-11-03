@@ -2340,7 +2340,7 @@ async function refreshConnections() {
   const data = await response.json(); if (!response.ok) throw new Error(data.error || '연결 계정을 불러오지 못했습니다.');
   connectionCache = data.connections;
   $('connectionList').innerHTML = data.connections.length ? data.connections.map((c) => `<article class="connection-card">
-    <div><strong>${esc(c.label)}</strong><p class="help">${esc(data.providers.find((p) => p.id === c.provider)?.name || c.provider)}${c.hosts?.length ? ` (${esc(c.hosts.join(', '))})` : ''} · ${esc(CONNECTION_LABEL[c.status] || c.status)}${c.source === 'file' ? ' · 보관함/계정.env' : c.hasCredentials ? ' · 자동 로그인 저장됨' : ''}</p></div>
+    <div><strong>${esc(c.label)}</strong><p class="help">${esc(data.providers.find((p) => p.id === c.provider)?.name || c.provider)}${c.hosts?.length ? ` (${esc(c.hosts.join(', '))})` : ''} · ${esc(CONNECTION_LABEL[c.status] || c.status)}${c.firstLoginDone === false ? ' · 처음 로그인 필요' : ''}${c.source === 'file' ? ' · 보관함/계정.env' : c.hasCredentials ? ' · 자동 로그인 저장됨' : ''}</p></div>
     <div class="connection-actions"><button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="open">${c.status === 'needs_login' ? '재연결' : '로그인 창 열기'}</button>
     ${c.source === 'file' ? '' : `<button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="credentials">${c.hasCredentials ? '로그인 정보 변경' : '자동 로그인 설정'}</button>`}
     ${c.status === 'connecting' ? `<button type="button" class="btn btn-sm btn-primary" data-connection="${esc(c.id)}" data-connection-action="confirm">연결 완료</button>` : ''}
@@ -2351,7 +2351,16 @@ async function connectionAction(action) {
   connectionBusy = true; $('connectionError').hidden = true; $('connectionSubmit').disabled = true;
   try { await action(); }
   catch (error) { $('connectionError').textContent = error.message; $('connectionError').hidden = false; }
-  finally { connectionBusy = false; $('connectionSubmit').disabled = false; await refreshConnections().catch(() => {}); }
+  finally { connectionBusy = false; $('connectionSubmit').disabled = false; await refreshConnections().catch(() => {}); watchConnections(); }
+}
+// 로그인 창이 열려 있는 동안 목록을 갱신해 자동 연결(창 닫힘)을 바로 보여 준다
+let connectionWatch = null;
+function watchConnections() {
+  clearInterval(connectionWatch);
+  connectionWatch = setInterval(() => {
+    if (!$('connectionsDialog').open || !connectionCache.some((c) => c.status === 'connecting')) { clearInterval(connectionWatch); connectionWatch = null; return; }
+    if (!connectionBusy) refreshConnections().catch(() => {});
+  }, 2000);
 }
 async function openConnections() {
   $('connectionError').hidden = true;
@@ -2370,7 +2379,7 @@ async function submitConnection(event) {
     const connection = connectionEditing ? await api('PUT', `/api/connections/${encodeURIComponent(connectionEditing)}`, body) : await api('POST', '/api/connections', body);
     resetConnectionForm();
     await api('POST', `/api/connections/${encodeURIComponent(connection.id)}/open`);
-    toast('열린 브라우저에서 로그인·추가 인증을 마친 뒤 연결 완료를 눌러 주세요.');
+    toast('열린 창에서 직접 로그인해 주세요. 로그인을 마치면 창이 자동으로 닫히고 연결됩니다. 창을 직접 닫지 마세요.');
   });
 }
 function resetConnectionForm() {

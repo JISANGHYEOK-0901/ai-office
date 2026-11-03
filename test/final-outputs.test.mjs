@@ -88,3 +88,24 @@ test('API는 저장 위치를 검증·보존하고 검토된 옛 업무의 최�
   assert.equal(res.status, 200); assert.match(await res.text(), /최종 자료/);
   assert.equal((await api('/api/outputs/file?path=' + encodeURIComponent(`@final/${task}/../../secret.txt`))).status, 404);
 });
+
+test('전달 단계 제목이 있으면 대표가 받는 파일 이름으로 쓰고, 참조 자산이 있는 HTML은 위치를 두고 이름만 바꾼다', (t) => {
+  const f = fixture(t);
+  f.write(`outputs/${task}/research/dev-1-inactive-counselors.md`, '# 리스트');
+  f.write(`outputs/${task}/research/dev-1-inactive-counselors-2.csv`, 'a,b');
+  f.write(`outputs/${task}/research/dev-1-inactive-counselors-3.md`, '# 다른 리스트');
+  f.write(`outputs/${task}/report.md`, `# 결과\n\n[리스트](outputs/${task}/research/dev-1-inactive-counselors.md), [화면](outputs/${task}/dev/page.html)`);
+  const plan = { stages: [
+    { id: 'list', title: '미활동 30일 초과 상담사 리스트', output: `outputs/${task}/research/dev-1-inactive-counselors.md`, dependsOn: [] },
+    { id: 'csv', title: '미활동 30일 초과 상담사 리스트', output: `outputs/${task}/research/dev-1-inactive-counselors-2.csv`, dependsOn: [] },
+    { id: 'again', title: '미활동 30일 초과 상담사 리스트', output: `outputs/${task}/research/dev-1-inactive-counselors-3.md`, dependsOn: [] },
+    { id: 'html', title: '제휴 제안: 상세/요약?', output: `outputs/${task}/dev/page.html`, dependsOn: [] },
+  ], deliverables: ['list', 'csv', 'again', 'html'] };
+  const result = collectFinalOutputs(f.root, { task, title: '미활동 상담사', plan });
+  const rels = result.files.map((file) => file.rel).sort();
+  assert.deepEqual(rels, ['dev/image.svg', 'dev/style.css', 'dev/제휴 제안- 상세-요약-.html', '미활동 30일 초과 상담사 리스트 (2).md', '미활동 30일 초과 상담사 리스트.csv', '미활동 30일 초과 상담사 리스트.md', '비서실장-보고.md'].sort());
+  assert.equal(readFileSync(join(result.directory, '미활동 30일 초과 상담사 리스트.md'), 'utf8'), '# 리스트');
+  const report = readFileSync(join(result.directory, '비서실장-보고.md'), 'utf8');
+  assert.match(report, /\[리스트\]\(%EB%AF%B8%ED%99%9C%EB%8F%99/);
+  assert.match(report, /\[화면\]\(dev\/%EC%A0%9C%ED%9C%B4/);
+});

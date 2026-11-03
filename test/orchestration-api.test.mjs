@@ -119,3 +119,25 @@ test('HTTP: 지시창의 일시정지·재개 문장은 새 업무를 만들지 
   assert.equal(state.runs.length, 0);
   assert.equal(state.tasks.length, 0);
 });
+
+test('HTTP: 지시창 의도는 AI 판별을 쓰고(규칙이 못 잡는 표현), 판별이 안 되면 규칙으로 처리한다', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'office-api-intent-'));
+  mkdirSync(join(root, 'org'));
+  writeFileSync(join(root, 'org/departments.json'), JSON.stringify([{ id: 'research', name: '리서치부', engine: 'codex', codexRole: 'exec' }]));
+  writeFileSync(join(root, 'org/roster.json'), JSON.stringify([{ id: 'research-1', name: '김대리', department: 'research' }]));
+  const bin = join(root, 'judge.mjs');
+  // 판별 스키마(kindEvidence)에만 응답하고 그 밖의 실행은 하지 않는 가짜 CLI
+  writeFileSync(bin, `const a=process.argv.slice(2);if(a.includes('--version')){console.log('Fixture 1.0');process.exit(0)}if(a.includes('auth')){console.log(JSON.stringify({loggedIn:true}));process.exit(0)}if(a.includes('login')){console.log('Logged in');process.exit(0)}
+let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{const s=a.includes('--json-schema')?JSON.parse(a[a.indexOf('--json-schema')+1]):{properties:{}};
+if(!s.properties.kindEvidence)process.exit(1);
+const pause=input.includes('오늘은 여기까지');console.log(JSON.stringify({type:'result',structured_output:{kind:pause?'pause':'task',kindEvidence:pause?'오늘은 여기까지':'',externalActions:[],delegated:false,delegatedEvidence:'',standing:'none',standingEvidence:'',durationMinutes:0,deadline:'',intervalMinutes:0,dailyTime:'',dailyEvidence:''}}));});`);
+  let server;
+  t.after(async () => { await server?.close(); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); });
+  server = await startServer({ root, port: 0, quiet: true, env: { ...process.env, CLAUDE_BIN: bin, CODEX_BIN: bin, AI_OFFICE_JUDGE: 'on' } });
+  const base = `http://127.0.0.1:${server.port}`;
+  const post = async (body) => (await fetch(base + '/api/runs', { method: 'POST', headers: { 'X-Office-Token': server.token, Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+  // 규칙(멈춤 단어)으로는 못 잡는 표현을 AI 판별로 일시정지 처리한다
+  assert.deepEqual(await post({ prompt: '오늘은 여기까지 하고 내일 마저 하자' }), { pauseRequested: true, paused: [] });
+  const state = await (await fetch(base + '/api/state')).json();
+  assert.equal(state.tasks.length, 0);
+});

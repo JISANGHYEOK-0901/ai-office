@@ -124,7 +124,7 @@ function fixture(t, options = {}) {
     }));
     return child;
   };
-  let runner = createRunner({ root, spawnImpl, maxConcurrent: options.maxConcurrent || 4, outbound: options.outbound,
+  let runner = createRunner({ root, spawnImpl, maxConcurrent: options.maxConcurrent || 4, outbound: options.outbound, judge: options.judge || null,
     toolStatus: () => options.tools || null });
   t.after(async () => {
     await runner.stopAll({ graceMs: 10 });
@@ -491,6 +491,31 @@ test('일반 웹사이트 업무: 위임이 없으면 실행 전에 묶어서 �
   assert.deepEqual([f.counts.plan, f.counts.review], [1, 1], '확인 답장 뒤 계획·검토를 반복하지 않는다');
   assert.equal(loadTasks(f.root)[0].status, 'done');
   assert.match(f.runner.result(second.id).text, /웹사이트 작업[\s\S]*직원 확인 완료[\s\S]*evidence\/upload-1\.png[\s\S]*확인 내용: 공개 주소 확인/);
+});
+
+test('지시창 판별(근거 확인된 외부 작업·위임)이 업무 내내 쓰이고, 답장 뜻은 AI 판별로 알아본다', async (t) => {
+  const calls = [];
+  const outbound = { connections: () => [{ id: 'erp-1', label: 'ERP', provider: 'web' }], async deliver(args) { calls.push(args); return { status: 'confirmed', summary: '완료' }; } };
+  // 규칙으로는 업로드·위임으로 보지 않는 문장이지만, 지시창 판별이 근거와 함께 넘긴 값을 쓴다
+  const delegated = fixture(t, { webPublication: true, outbound });
+  const first = delegated.runner.start({ prompt: '자료를 HTML로 만들어 ERP 제휴 화면에 걸어 두고 마무리까지 맡길게', intent: { actions: ['web'], delegated: true, source: 'ai' } });
+  assert.equal((await delegated.final(first)).needsReply, false);
+  assert.equal(calls.length, 1);
+  // 판별에 외부 작업이 없으면 계획의 웹 작업을 받아들이지 않는다(계획 재요청 뒤 막힘)
+  const none = fixture(t, { webPublication: true, outbound });
+  const blockedRun = none.runner.start({ prompt: '자료를 HTML로 만들어 줘', intent: { actions: [], delegated: false, source: 'ai' } });
+  await none.final(blockedRun);
+  assert.match(none.runner.result(blockedRun.id).text, /지시하지 않은 외부/);
+  assert.equal(calls.length, 1);
+  // 규칙이 못 알아보는 거절 표현도 AI 판별로 거절 처리한다
+  const judge = async (schema) => schema === 'intent-answer' ? { decision: 'decline', decisionEvidence: '이번엔 패스', addActions: [], removeActions: [], delegated: false, delegatedEvidence: '' } : null;
+  const asked = fixture(t, { webPublication: true, outbound, judge });
+  const run = asked.runner.start({ prompt: '자료를 HTML로 만들고 ERP 제휴 제안 페이지에 업로드해 줘' });
+  assert.equal((await asked.final(run)).needsReply, true);
+  const reply = asked.runner.reply(run.id, { prompt: '이번엔 패스' });
+  await asked.final(reply);
+  assert.equal(calls.length, 1);
+  assert.match(asked.runner.result(reply.id).text, /대표 결정으로 실행하지 않음/);
 });
 
 test('일반 웹사이트 업무: "하지 마"면 실행하지 않고, 위임 표현이 있으면 확인 없이 실행한다', async (t) => {

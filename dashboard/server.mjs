@@ -29,7 +29,8 @@ import { MAX_OUTPUT_FILES, insideRel, planOutputStatus, walkOutputFiles } from '
 import { loadTasks as loadTaskList, updateTask, saveTasks } from '../lib/tasks.mjs';
 import { readPrivate, writePrivate } from '../lib/private-state.mjs';
 import { createRunner } from './runner.mjs';
-import { pauseIntent, resumeIntent } from '../lib/pause.mjs';
+import { judgeCommand } from '../lib/intent.mjs';
+import { createJudge } from '../lib/ai-judge.mjs';
 import { buildState } from './state.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -490,7 +491,9 @@ export async function startServer({
   const connections = createConnectionStore({ root, base: connectionBase });
   const browserSessions = createBrowserSessions({ store: connections, ...browserOptions });
   const browserWork = createBrowserWork({ root, store: connections, sessions: browserSessions });
-  const runner = demo ? null : createRunner({ root, env, toolStatus: async () => { await toolProbe; return tools; }, onChange: () => scheduleBroadcast(), outbound: browserWork, keepAwake: createKeepAwake() });
+  // 지시·답장 의도 판별(짧은 AI 호출). 로그인된 도구가 없으면 규칙 판별로 대신한다
+  const judge = demo ? null : createJudge({ env, engine: () => tools.claude?.loggedIn === true ? 'claude' : tools.codex?.loggedIn === true ? 'codex' : null });
+  const runner = demo ? null : createRunner({ root, env, judge, toolStatus: async () => { await toolProbe; return tools; }, onChange: () => scheduleBroadcast(), outbound: browserWork, keepAwake: createKeepAwake() });
   const schedules = demo ? null : createSchedules({ root, now: scheduleNow, runs: () => runner.list(),
     start: (request) => runner.start(request), onChange: () => scheduleBroadcast() });
 
@@ -784,19 +787,22 @@ export async function startServer({
     if (body.agentId !== undefined && body.agentId !== null) throw new HttpError(400, '직원에게 직접 지시할 수 없습니다. 비서실장에게 업무를 지시해 주세요.');
     const model = body.model || null;
     if (model !== null && typeof model !== 'string') throw new HttpError(400, 'model은 문자열이어야 합니다.');
-    // 비서실장 지시창의 "하던 작업 멈추고 정리해 둬"/"이어서 해줘"는 새 업무가 아니라 일시정지·일괄 재개다
-    if (pauseIntent(prompt)) {
+    // 의도는 비서실장(AI)이 판별하고, 권한이 되는 판단은 대표 원문 근거가 있을 때만 쓴다(실패하면 규칙 판별)
+    await toolProbe;
+    const intent = await judgeCommand(prompt, { judge });
+    // "하던 작업 멈추고 정리해 둬"/"이어서 해줘"는 새 업무가 아니라 일시정지·일괄 재개다
+    if (intent.kind === 'pause') {
       const result = runner.pause();
       scheduleBroadcast();
       return { pauseRequested: true, ...result };
     }
-    if (resumeIntent(prompt)) {
+    if (intent.kind === 'resume') {
       const result = runner.resumeAll();
       scheduleBroadcast();
       return { resumeRequested: true, ...result };
     }
     if (body.schedule !== false) {
-      const requested = await callRunner(() => dailyScheduleRequest(prompt), '예약 시각을 확인해 주세요.');
+      const requested = intent.source === 'ai' ? intent.daily : await callRunner(() => dailyScheduleRequest(prompt), '예약 시각을 확인해 주세요.');
       if (requested) {
         const defaults = loadSettings(root).chief;
         const schedule = await callRunner(() => schedules.add({ prompt, ...requested,
@@ -804,9 +810,9 @@ export async function startServer({
         return { scheduled: true, schedule };
       }
     }
-    await toolProbe;
+    const continuous = body.continuous !== undefined ? body.continuous : intent.source === 'ai' ? (intent.continuous || false) : undefined;
     const run = await callRunner(() => runner.start({ prompt, model, engine: body.engine || null, effort: body.effort || null,
-      continuous: body.continuous }), '작업을 시작하지 못했습니다.');
+      continuous, intent: { actions: intent.actions, delegated: intent.delegated, source: intent.source } }), '작업을 시작하지 못했습니다.');
     scheduleBroadcast();
     return run;
   }

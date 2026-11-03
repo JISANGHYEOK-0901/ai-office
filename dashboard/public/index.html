@@ -60,7 +60,7 @@
         <button type="button" role="tab" id="tabOrg" aria-controls="viewOrg" aria-selected="false" data-view="org">조직</button>
         <button type="button" role="tab" id="tabOutputs" aria-controls="viewOutputs" aria-selected="false" data-view="outputs">산출물</button>
       </div>
-      <button type="button" class="btn" id="schedulesBtn">반복 예약</button>
+      <button type="button" class="btn" id="schedulesBtn">예약</button>
       <button type="button" class="btn" id="addDeptBtn">+ 부서 추가</button>
       </div>
     </div>
@@ -370,9 +370,9 @@
       <div class="win-bar"><h2 id="companyTitle">회사 설정</h2><span class="win-ctl" aria-hidden="true"></span></div>
       <div class="win-body">
         <section class="org-backup" aria-labelledby="companySchedulesTitle">
-          <h3 class="lbl" id="companySchedulesTitle">반복 업무 예약</h3>
-          <p class="help">매일 시작할 시각과 업무 내용을 등록하고 수정·일시중지할 수 있습니다. 예약 화면에서 저장한 내용은 바로 적용됩니다.</p>
-          <button type="button" class="btn" id="companySchedulesBtn">반복 예약 설정</button>
+          <h3 class="lbl" id="companySchedulesTitle">업무 예약</h3>
+          <p class="help">한 번, 정한 횟수, 매일 반복으로 업무를 예약하고 수정·일시중지할 수 있습니다. 예약 화면에서 저장한 내용은 바로 적용됩니다.</p>
+          <button type="button" class="btn" id="companySchedulesBtn">예약 설정</button>
         </section>
         <label for="companyRules"><span class="lbl">회사 공통 규칙 <small class="help-inline">모든 직원 지침 파일의 공통 머리말 다음에 들어갑니다(최대 8000자). 비우면 생략</small></span></label>
         <textarea id="companyRules" rows="12" maxlength="8000" placeholder="예: 보고서는 한국어 존댓말로 쓴다. 금액은 원 단위로 쓴다."></textarea>
@@ -432,20 +432,26 @@
 
   <dialog id="schedulesDialog" class="modal modal-wide win" aria-labelledby="schedulesTitle">
     <div class="modal-form">
-      <div class="win-bar"><h2 id="schedulesTitle">매일 반복 예약</h2><span class="win-ctl" aria-hidden="true"></span></div>
+      <div class="win-bar"><h2 id="schedulesTitle">업무 예약</h2><span class="win-ctl" aria-hidden="true"></span></div>
       <div class="win-body schedule-body">
-        <p class="help">한국 시각에 업무를 시작하고, 검색·작성·검토를 마친 뒤 게시합니다. PC와 ai-office가 켜져 있어야 합니다. 놓친 예약은 몰아서 실행하지 않습니다.</p>
+        <p class="help">한국 시각에 업무를 시작하고, 검색·작성·검토를 마친 뒤 게시합니다. PC와 ai-office가 켜져 있어야 합니다. 놓친 예약은 몰아서 실행하지 않고, 횟수를 정한 예약은 놓친 날도 한 회로 셉니다.</p>
         <section aria-labelledby="scheduleListTitle"><h3 class="sub-title" id="scheduleListTitle">등록된 예약</h3><ul id="scheduleList" class="schedule-list"></ul></section>
         <form id="scheduleForm" class="schedule-form">
           <h3 class="sub-title" id="scheduleFormTitle">예약 추가</h3>
           <input type="hidden" id="scheduleId">
-          <label for="scheduleTime">매일 시작 시각 <span class="help-inline">한국 시간</span></label>
-          <input type="time" id="scheduleTime" value="11:00" required>
+          <div class="schedule-when">
+            <div><label for="scheduleTime">시작 시각 <span class="help-inline">한국 시간</span></label>
+            <input type="time" id="scheduleTime" value="11:00" required></div>
+            <div><label for="scheduleDate">시작 날짜 <span class="help-inline">비우면 다음 그 시각</span></label>
+            <input type="date" id="scheduleDate"></div>
+            <div><label for="scheduleTimes">횟수 <span class="help-inline">1이면 한 번, 비우면 매일 계속</span></label>
+            <input type="number" id="scheduleTimes" min="1" max="365" step="1" inputmode="numeric" placeholder="매일 계속"></div>
+          </div>
           <label for="schedulePrompt">업무 지시</label>
           <textarea id="schedulePrompt" rows="4" maxlength="4000" required placeholder="예: 연결한 계정으로 지정 카페 게시판에 여행 주제의 유튜브 숏츠를 찾아 하루 2~3개씩 소개 글을 게시해 줘. 게시판 주소와 원하는 글 형식도 적어 주세요."></textarea>
           <p class="help">계정은 ‘계정 연결’에서 로그인해 주세요. 게시한 영상은 ID로 기록해 재사용을 막고, 새 영상이 부족하면 실제 게시 수와 사유를 보고합니다. 영상 기록과 예약은 내역 초기화 후에도 유지됩니다.</p>
           <p id="scheduleError" class="form-error" role="alert" hidden></p>
-          <div class="schedule-form-actions"><button type="button" class="btn" id="scheduleCancelEdit" hidden>수정 취소</button><button type="submit" class="btn btn-primary" id="scheduleSave">매일 예약하기</button></div>
+          <div class="schedule-form-actions"><button type="button" class="btn" id="scheduleCancelEdit" hidden>수정 취소</button><button type="submit" class="btn btn-primary" id="scheduleSave">예약하기</button></div>
         </form>
       </div>
       <div class="modal-actions"><button type="button" class="btn" data-close>닫기</button></div>

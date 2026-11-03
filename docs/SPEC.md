@@ -65,7 +65,7 @@ test/                     node:test
 | `runs.json`, `runs/<id>.log`, `runs/<id>.result.md` | 실행 목록(최대 200개 보존), 로그, 답변 전문(0600) |
 | `orchestrations/<rootId>.json` | 업무 체크포인트 v2(비공개 0700/0600) |
 | `continuous/<rootId>.json` | 지속 감시 체크포인트 |
-| `schedules.json` | 매일 반복 예약 |
+| `schedules.json` | 업무 예약(1회·N회·매일) |
 | `publications/` | 외부 작업 발행 증표 |
 | `video-publications.json` | 영상 게시 이력(영구) |
 | `final-outputs/settings.json`, `index.json` | 최종산출물 위치·등록 파일·해시 |
@@ -183,7 +183,7 @@ test/                     node:test
 
 - 지시창 입력은 `POST /api/runs {prompt, model?, engine?, effort?, schedule?, continuous?}`로 간다. 요청은 20000자 이하.
 - `agentId`가 있으면 400("직원에게 직접 지시할 수 없습니다. 비서실장에게 업무를 지시해 주세요.")이고 업무를 만들지 않는다.
-- 서버 처리 순서: 의도 판별 → 일시정지·재개면 처리 후 종료 → 매일 예약이면 예약만 저장 → 지시 경로 검사 → `runner.start`.
+- 서버 처리 순서: 의도 판별 → 일시정지·재개면 처리 후 종료 → 예약 지시(1회·N회·매일)면 예약만 저장 → 지시 경로 검사 → `runner.start`.
 - runner는 업무(`<날짜>/run-<id>`)를 등록하고, 요청 끝에 `[저장 위치] …` 안내를 붙여 오케스트레이터(`dashboard/orchestrator.mjs`)로 실행한다. 지속 감시면 `dashboard/continuous.mjs`로 실행한다.
 - 실제 CLI 동시 실행은 전역 4개다. 넘치면 대기열에 넣는다. 오케스트레이션 자체는 이 수에 넣지 않는다.
 - 중지: 오케스트레이션 전체와 진행 중인 모든 자식 프로세스를 끝낸다. 프로세스는 SIGTERM, 5초 뒤 SIGKILL.
@@ -193,13 +193,13 @@ test/                     node:test
 - 판단은 AI, 권한은 근거 검사로 나눈다(`lib/intent.mjs`, `lib/ai-judge.mjs`).
 - 호출: 로그인된 Claude면 `claude -p --model haiku --output-format json --json-schema <스키마> --tools ''`, 아니면 `codex exec -s read-only --output-schema … -c model_reasoning_effort="low"`. 작업 공간 밖(임시 폴더)에서 실행한다. 제한 15초.
 - 테스트용 가짜 CLI(`.js`)면 판별하지 않는다. `AI_OFFICE_JUDGE=on`으로 켜고 `off`로 끈다.
-- 지시창(`judgeCommand`, `schemas/intent.json`): kind(task/pause/resume), externalActions(mail/post/comment/web), delegated, standing(none/until_stop/duration/deadline + 분·종료 시각·간격), dailyTime, outputDir와 각 근거.
+- 지시창(`judgeCommand`, `schemas/intent.json`): kind(task/pause/resume), externalActions(mail/post/comment/web), delegated, standing(none/until_stop/duration/deadline + 분·종료 시각·간격), 예약(scheduleTime·scheduleDate·scheduleTimes), outputDir와 각 근거. 예약 날짜는 오늘부터, 횟수는 1~365만 받는다.
 - 답장(`judgeAnswer`, `schemas/intent-answer.json`): decision(approve/decline/modify/other), add/removeActions, delegated와 근거.
 - 근거 검사: 행동 권한이 되는 판단은 근거 문장(앞말·따옴표 제거 뒤)이 대표 원문에 있을 때만 인정한다.
   - 외부 작업·위임은 근거가 글자 그대로 맞지 않아도 규칙 판별이 같은 결론이면 인정한다.
   - 상시 실행은 간격 10초~24시간, 기간·종료 시각 1년 이내만 받는다. 간격이 없으면 5분이다.
   - outputDir는 전체 경로 형태이고 경로가 원문에 있을 때만 쓴다.
-- 대신 처리: 판별 실패·시간 초과·형식 오류면 규칙(`pauseIntent`, `resumeIntent`, `externalActionPolicy`, `continuousRequest`, `dailyScheduleRequest`)을 쓴다. 규칙상 분명한 "멈춰"·"이어서 해줘"는 판별을 기다리지 않는다.
+- 대신 처리: 판별 실패·시간 초과·형식 오류면 규칙(`pauseIntent`, `resumeIntent`, `externalActionPolicy`, `continuousRequest`, `scheduleRequest`)을 쓴다. 규칙상 분명한 "멈춰"·"이어서 해줘"는 판별을 기다리지 않는다.
 - 실행기가 붙인 `[저장 위치]` 안내는 판별 대상에서 뺀다.
 - 판별 결과는 `runner.start`의 `intent`(actions·delegated·outputDir)로 넘겨 체크포인트 `state.intent`에 둔다. 답장 판별은 `decisions[].intent`로 남는다. 판별 결과가 없는 예전 업무는 규칙을 쓴다. 재발송·결과 확인 문구는 규칙으로 판별한다.
 
@@ -422,7 +422,7 @@ AI 판단이 넓어져도 모든 경로가 같은 규칙을 거친다. 규칙 �
 - 요청 요약은 남긴다: request 이벤트 summary 200자, runs.json request 120자. 저장 전 redact로 가린다.
 - `summary`는 200자 이내, 줄바꿈은 공백. `password|token|secret|api[_-]?key|authorization|cookie` 패턴의 값, JSON 키 값, `Cookie:` 헤더, `--key 값`을 가린다. Bash 명령은 앞 80자만.
 
-## 7. 지속 감시·매일 반복 예약
+## 7. 지속 감시·업무 예약
 
 ### 지속 감시
 
@@ -444,13 +444,17 @@ AI 판단이 넓어져도 모든 경로가 같은 규칙을 거친다. 규칙 �
 - 상시 업무 하나의 사용량은 감시 실행, 답장으로 이어진 실행, 감시가 만든 후속 업무를 합친다(`monitorUsage`). 카드에 "오늘 사용: AI 호출·토큰·평소 하루 평균"을 보여 준다.
 - 오늘 AI 호출이 최근 7일 중 기록이 있는 날(2일 이상)의 하루 평균보다 3배 이상이고 10회 이상이면 "사용량 이상" 알림(attention `usage`)을 띄운다. 업무는 멈추지 않는다. 멈춘 상시 업무는 알리지 않는다.
 
-### 매일 반복 예약
+### 업무 예약(1회·N회·매일)
 
-- 회사 설정의 "반복 업무 예약 → 반복 예약 설정"에서 관리한다. 상단 반복 예약은 바로가기다. 예약 저장은 회사 규칙 저장과 독립이다.
-- `lib/schedules.mjs`가 Asia/Seoul 기준 매일 예약을 `.office/schedules.json`에 원자적으로 저장한다. 예약당 시각·지시·검토 AI·다음 시각·날짜별 마지막 실행을 둔다.
-- 지시가 "매일 오전 11시에 …" 형태면 `POST /api/runs`가 `{scheduled:true, schedule}`를 돌려주고 바로 실행하지 않는다. 모호한 시각은 400. `schedule:false`면 1회 실행이다.
-- 서버가 1초마다 확인한다. 시작 전에 날짜별 시도를 기록해 재시작 후 같은 회차를 다시 돌리지 않는다. 부팅 때 지난 시각과 1분을 넘긴 지연은 건너뛴다. 이전 회차가 running/queued/needsReply면 겹치지 않는다.
-- 수정·재개는 다음 미래 시각부터, 중지·삭제는 실행 중 업무를 취소하지 않는다.
+- 회사 설정의 "업무 예약 → 예약 설정"에서 관리한다. 상단 "예약"은 바로가기다. 예약 저장은 회사 규칙 저장과 독립이다.
+- `lib/schedules.mjs`가 Asia/Seoul 기준 예약을 `.office/schedules.json`에 원자적으로 저장한다. 예약당 시각(`time`)·시작 날짜(`startDate`, 선택)·횟수(`times`, 선택)·마지막 날(`untilDate`)·지시·검토 AI·다음 시각·날짜별 마지막 실행·끝남(`completed`)을 둔다.
+  - 1회: `times:1`. 지정 날짜·시각에 한 번 실행하고 끝난다. 지정 시각이 이미 지났으면 등록을 거부한다.
+  - N회: 시작일(없으면 다음 그 시각)부터 N일 동안 매일 실행한다. 놓친 날(앱 꺼짐·이전 회차 진행 중·일시중지)도 한 회로 센다. 마지막 날이 지나면 끝난다.
+  - 매일: `times` 없음. 예전 예약(시각만 있음)도 그대로 매일 반복이다.
+- 지시가 "매일 오전 11시에 …", "내일 오전 10시에 …", "11월 5일 9시에 …", "내일부터 3일간 매일 10시에 …" 형태면 `POST /api/runs`가 `{scheduled:true, schedule}`를 돌려주고 바로 실행하지 않는다. 시각이 업무 내용일 뿐인 문장("내일 10시에 있는 회의 자료 준비")은 예약이 아니다. 모호한 시각·지난 시각은 400. `schedule:false`면 바로 실행한다.
+- 예약 실행 지시에는 "지시의 날짜·시각·반복 표현은 예약으로 이미 처리했으니 지금 바로 이번 회차만 처리"하라는 안내를 붙인다.
+- 서버가 1초마다 확인한다. 시작 전에 날짜별 시도를 기록해 재시작 후 같은 회차를 다시 돌리지 않는다. 부팅 때 지난 시각과 1분을 넘긴 지연은 건너뛴다(1회 예약이면 끝남). 이전 회차가 running/queued/needsReply면 겹치지 않는다.
+- 시각·날짜·횟수를 고치면 회차를 새로 센다(끝난 예약도 다시 켜짐). 단순히 다시 켜면 남은 회차만 이어 가고, 남은 회차가 없으면 거부한다. 중지·삭제는 실행 중 업무를 취소하지 않는다.
 - 실행·답장에 `schedule:{id, slot, uniqueYoutube?, minPosts?, maxPosts?}`를 보존한다.
 
 ### 영상 게시 이력
@@ -506,14 +510,14 @@ node scripts/codex-review.mjs --target outputs/<날짜>/<slug> [--reviewers <id�
 
 ### 구성
 
-- 상단 바: 로고, 지표 칩(ACTIVE/STANDBY/IDLE/OFFLINE/TASKS/REVIEWS/TOOLS), 시각, 연결 상태, 모드 배지, 계정 연결, 반복 예약, 회사 설정.
+- 상단 바: 로고, 지표 칩(ACTIVE/STANDBY/IDLE/OFFLINE/TASKS/REVIEWS/TOOLS), 시각, 연결 상태, 모드 배지, 계정 연결, 예약, 회사 설정.
 - 뷰 탭: 관제 | 사무실 | 조직 | 산출물.
   - 관제: 부서 카드 격자(부서색 테두리, 인원/활동/대기, 진행률, LIVE 목록).
   - 사무실: 캔버스 픽셀아트. 부서마다 방, 대표실, 비서실, 회의실. 작업 중이면 모니터 발광·타이핑·도구명 말풍선, 대기 중 혼잣말. 자동 순찰, 확대·축소·드래그.
   - 조직: 부서 프리셋 그리드, 부서·직원 목록(추가·수정·삭제·근무 전환), 일괄 추가, 회사 설정.
   - 산출물: 최종산출물을 먼저 보여 주고 "전체 업무 자료"로 중간 업무를 본다. 상세의 계획·대화·자료는 접어 둔다. 폴더 열기는 등록된 최종 폴더를 연다.
 - 직원 프로필: 이름·직급·부서·담당·근무 상태·최근 활동·실행 결과, 최종 지침 미리보기, 중지·근무 전환·수정·삭제. 작업 지시 버튼은 없다.
-- 회사 설정: 회사 공통 규칙, 작업 공간 경로·폴더 열기, 최종산출물 저장 위치(기본 미리보기 `<작업 공간>/보관함/최종산출물`), 업무 예산, 반복 예약, 회사 구성 내보내기·가져오기, 내역 초기화.
+- 회사 설정: 회사 공통 규칙, 작업 공간 경로·폴더 열기, 최종산출물 저장 위치(기본 미리보기 `<작업 공간>/보관함/최종산출물`), 업무 예산, 업무 예약, 회사 구성 내보내기·가져오기, 내역 초기화.
 - 지시 폼의 설명은 항상 폼 아래에 둔다. 1366·1024·390px에서 넘침 없이 동작한다.
 - select는 폼 값을 정본으로 유지하는 DOM combobox/listbox다. 목록은 선택 상자에 붙여 화면 안에 두고, 모달 안 목록은 그 모달에 속한다.
 
@@ -638,7 +642,7 @@ node scripts/codex-review.mjs --target outputs/<날짜>/<slug> [--reviewers <id�
 | POST /api/outputs/:taskId/open, /api/workspace/open | 폴더 열기(셸 없는 open/explorer/xdg-open) |
 | POST /api/reviews | codex-review 백그라운드 실행 |
 | GET/POST /api/connections, POST /api/connections/:id/open·confirm, PUT·DELETE /api/connections/:id | 계정 연결 |
-| GET/POST /api/schedules, PUT·DELETE /api/schedules/:id | 매일 예약(`prompt, time(HH:mm), chief?`, 수정에 `enabled`) |
+| GET/POST /api/schedules, PUT·DELETE /api/schedules/:id | 예약(`prompt, time(HH:mm), startDate?(YYYY-MM-DD), times?(1~365), chief?`, 수정에 `enabled`) |
 | DELETE /api/history | 내역 정리 |
 | GET /api/org/export, POST /api/org/import | 회사 구성 백업·복원(가져오기 8MB) |
 

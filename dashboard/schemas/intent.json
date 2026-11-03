@@ -64,10 +64,16 @@
     "intervalMinutes": {
       "type": "integer"
     },
-    "dailyTime": {
+    "scheduleTime": {
       "type": "string"
     },
-    "dailyEvidence": {
+    "scheduleDate": {
+      "type": "string"
+    },
+    "scheduleTimes": {
+      "type": "integer"
+    },
+    "scheduleEvidence": {
       "type": "string"
     },
     "outputDir": {
@@ -88,8 +94,10 @@
     "durationMinutes",
     "deadline",
     "intervalMinutes",
-    "dailyTime",
-    "dailyEvidence",
+    "scheduleTime",
+    "scheduleDate",
+    "scheduleTimes",
+    "scheduleEvidence",
     "outputDir",
     "outputDirEvidence"
   ],

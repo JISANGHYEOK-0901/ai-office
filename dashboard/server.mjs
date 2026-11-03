@@ -16,7 +16,7 @@ import { createConnectionStore, CONNECTION_PROVIDERS, CUSTOM_PROVIDER, CUSTOM_PR
 import { createBrowserSessions } from '../lib/browser-session.mjs';
 import { createBrowserWork } from '../lib/browser-work.mjs';
 import { createKeepAwake } from '../lib/keep-awake.mjs';
-import { createSchedules, dailyScheduleRequest } from '../lib/schedules.mjs';
+import { createSchedules, scheduleRequest } from '../lib/schedules.mjs';
 import { collectFinalOutputs, customOutputDirectory, finalOutputs, finalOutputSettings, resolveFinalOutput, saveFinalOutputSettings } from '../lib/final-outputs.mjs';
 import { WORKSPACE_SOURCE_LABEL, WorkspaceError, kstDate, legacyItems, programRoot, resolveWorkspace, saveLocalWorkspace } from '../lib/paths.mjs';
 import { ensureWorkspace, isCompatRoot } from '../lib/workspace.mjs';
@@ -797,7 +797,7 @@ export async function startServer({
     if (model !== null && typeof model !== 'string') throw new HttpError(400, 'model은 문자열이어야 합니다.');
     // 의도는 비서실장(AI)이 판별하고, 권한이 되는 판단은 대표 원문 근거가 있을 때만 쓴다(실패하면 규칙 판별)
     await toolProbe;
-    const intent = await judgeCommand(prompt, { judge });
+    const intent = await judgeCommand(prompt, { judge, now: scheduleNow() });
     // "하던 작업 멈추고 정리해 둬"/"이어서 해줘"는 새 업무가 아니라 일시정지·일괄 재개다
     if (intent.kind === 'pause') {
       const result = runner.pause();
@@ -810,7 +810,7 @@ export async function startServer({
       return { resumeRequested: true, ...result };
     }
     if (body.schedule !== false) {
-      const requested = intent.source === 'ai' ? intent.daily : await callRunner(() => dailyScheduleRequest(prompt), '예약 시각을 확인해 주세요.');
+      const requested = intent.source === 'ai' ? intent.schedule : await callRunner(() => scheduleRequest(prompt, scheduleNow()), '예약 시각을 확인해 주세요.');
       if (requested) {
         const defaults = loadSettings(root).chief;
         const schedule = await callRunner(() => schedules.add({ prompt, ...requested,
@@ -1516,7 +1516,7 @@ export async function startServer({
   })();
 
   const timers = [
-    setInterval(() => { try { schedules?.tick(); } catch (error) { warn('반복 예약을 확인하지 못했습니다', error); } }, 1000),
+    setInterval(() => { try { schedules?.tick(); } catch (error) { warn('예약을 확인하지 못했습니다', error); } }, 1000),
     setInterval(pollFiles, POLL_MS),
     setInterval(() => { if (runner) { try { runner.restoreContinuous({ expiredOnly: true }); } catch { warn('종료 시각이 지난 감시 상태를 확인하지 못했습니다.'); } } }, 1000),
     setInterval(scheduleBroadcast, RECOMPUTE_MS),

@@ -78,10 +78,26 @@ export async function verifySchedulesUi({ browser, directory }) {
     items = server.schedules.list(); assert.equal(items.length, 2); assert.equal(items.find((item) => item.id !== first).time, '11:45');
     assert.equal((await (await page.request.get(base + '/api/state')).json()).runs.length, 0);
     checks.push({ name: '상단 자연어 매일 지시는 즉시 AI 실행 없이 예약으로 등록', interaction: 'click', passed: true });
+    // 1회 예약: 지시창 "내일 오전 10시에 …"와 예약 창의 횟수 1
+    await page.locator('#chiefInput').fill('내일 오전 10시에 가상 카페에 게시글 2개를 올려줘');
+    await page.locator('#chiefForm button[type="submit"]').click();
+    await page.waitForFunction(() => document.querySelector('#schedulesBtn').textContent.includes('3'));
+    const onceItem = server.schedules.list().find((item) => item.startDate === '2026-10-31');
+    assert.deepEqual([onceItem.time, onceItem.times], ['10:00', 1]);
+    await page.locator('#schedulesBtn').click();
+    await page.locator(`[data-schedule="${onceItem.id}"]`).filter({ hasText: '10월 31일 10:00 한 번 · 예약 중' }).waitFor();
+    await page.locator('#scheduleTime').fill('11:50'); await page.locator('#scheduleTimes').fill('1');
+    await page.locator('#schedulePrompt').fill('가상 정오 보고를 한 번 작성해 줘.');
+    await page.locator('#scheduleSave').click();
+    await page.locator('.schedule-item').filter({ hasText: '10월 30일 11:50 한 번' }).waitFor();
+    await page.locator('#schedulesDialog [data-close]').click();
+    assert.equal((await (await page.request.get(base + '/api/state')).json()).runs.length, 0);
+    checks.push({ name: '1회 예약(지시창 날짜 문장·예약 창 횟수 1) 등록과 표시', interaction: 'click', passed: true });
     await page.locator('#schedulesBtn').click();
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator('#schedulesDialog').evaluate((node) => node.scrollWidth <= node.clientWidth && document.documentElement.scrollWidth <= innerWidth), true);
     const shot = 'schedules-mobile.png'; await page.screenshot({ path: join(directory, shot) }); screenshots.push({ path: shot, viewport: page.viewportSize() });
+    assert.equal(await page.locator('#scheduleTimes').evaluate((node) => { const rect = node.getBoundingClientRect(); return rect.left >= 0 && rect.right <= innerWidth; }), true);
     await page.locator('#scheduleSave').scrollIntoViewIfNeeded();
     assert.equal(await page.locator('#scheduleSave').evaluate((node) => { const rect = node.getBoundingClientRect(); return rect.top >= 0 && rect.bottom <= document.querySelector('#schedulesDialog .modal-actions').getBoundingClientRect().top; }), true);
     await page.screenshot({ path: join(directory, 'schedules-mobile-form.png') }); screenshots.push({ path: 'schedules-mobile-form.png', viewport: page.viewportSize() });
@@ -98,14 +114,21 @@ export async function verifySchedulesUi({ browser, directory }) {
     const video = createVideoHistory(root); video.claim({ ids: ['AbCdEfGhI_1'], owner: 'fixture', scope: 'fixture' }); video.confirm({ ids: ['AbCdEfGhI_1'], owner: 'fixture', resultUrl: base + '/published/1' });
     const historyBefore = readFileSync(join(root, '.office/video-publications.json'), 'utf8');
     const response = await page.request.delete(base + '/api/history', { headers }); assert.equal(response.status(), 200);
-    assert.equal(server.schedules.list().length, 2);
+    assert.equal(server.schedules.list().length, 4);
     assert.equal(readFileSync(join(root, '.office/video-publications.json'), 'utf8'), historyBefore);
     await page.locator('#schedulesBtn').click();
     await row().getByRole('button', { name: '삭제', exact: true }).click();
     await page.locator('#confirmOk').click();
-    await page.waitForFunction(() => document.querySelectorAll('.schedule-item').length === 1);
+    await page.waitForFunction(() => document.querySelectorAll('.schedule-item').length === 3);
     assert.equal(readFileSync(join(root, '.office/video-publications.json'), 'utf8'), historyBefore);
     checks.push({ name: '예약 시각 실제 가짜 CLI 완료·결과 모달·내역 초기화/예약 삭제 후 영상 이력 보존', interaction: 'click', passed: true });
+    // (완료 창이 차례로 뜨지 않도록 마지막에 확인) 1회 예약은 실행된 뒤 '끝남'으로 표시하고 다시 켜기 버튼을 숨긴다
+    const noon = server.schedules.list().find((item) => item.time === '11:50');
+    fixture.set('2026-10-30T02:50:00Z'); server.schedules.tick();
+    await page.waitForFunction((id) => document.querySelector(`[data-schedule="${id}"]`)?.textContent.includes('끝남'), noon.id);
+    assert.equal(await page.locator(`[data-schedule="${noon.id}"] [data-schedule-action="toggle"]`).count(), 0);
+    await page.screenshot({ path: join(directory, 'schedules-once-done.png') }); screenshots.push({ path: 'schedules-once-done.png', viewport: page.viewportSize() });
+    checks.push({ name: '1회 예약 실행 후 끝남 표시·다시 켜기 숨김', interaction: 'click', passed: true });
     return { checks, screenshots };
   } catch (error) {
     writeFileSync(join(directory, 'schedules-failure.json'), JSON.stringify({ error: error.message, schedules: server?.schedules.list(), runs: (() => { try { return JSON.parse(readFileSync(join(root, '.office/runs.json'))); } catch { return []; } })() }, null, 2));

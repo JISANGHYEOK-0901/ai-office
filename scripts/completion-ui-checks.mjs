@@ -90,7 +90,7 @@ export async function verifyCompletionUi({ browser, directory }) {
     await modal.getByRole('button', { name: '닫기', exact: true }).click();
     await waitState((state) => state.tasks.find((task) => task.id === next)?.resultSeenAt);
     checks.push({ name: '새 업무의 최종 완료가 도착하면 완료 모달 자동 표시', interaction: 'click', passed: true });
-    const active = await api('POST', '/api/runs', { agentId: 'ops-1', prompt: '테스트에서 대기', continuous: false });
+    const active = await api('POST', '/api/runs', { prompt: '테스트에서 대기', continuous: false });
     await waitState((state) => state.runs.some((run) => run.id === active.id && run.status === 'running'));
     await page.locator('#clearHistoryBtn').click();
     await page.locator('#confirmOk').click();

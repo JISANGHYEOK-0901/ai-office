@@ -1,5 +1,5 @@
 // 사용자 확인: POST /api/tasks/:id/approve·reject(이어서 답하기 재사용, 세션 없으면 새 비서실장 실행),
-// 직원 직접 지시의 산출물 폴더·업무 등록·세션 연결. 실제 claude 대신 가짜 CLAUDE_BIN(.js)을 쓴다.
+// 직원 개별 지시 거부. 실제 claude 대신 가짜 CLAUDE_BIN(.js)을 쓴다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -171,25 +171,13 @@ test('reject: 세션이 없으면 새 비서실장 실행을 띄우고 새 세�
   assert.equal(read('sessions.json')[SID2], TASK);
 });
 
-test('직원 직접 지시: outputs/<날짜>/run-<id>/ 생성·업무 등록·저장 경로 덧붙임·세션 연결', async (t) => {
-  const { root, post, read, events } = await setup(t);
+test('직원 개별 지시는 제거됐다: agentId가 있으면 400이고 업무·실행을 만들지 않는다', async (t) => {
+  const { root, post } = await setup(t);
   const r = await post('/api/runs', { agentId: 'dev-2', prompt: '견적서 HTML 만들어 줘' });
-  assert.equal(r.status, 202, r.text);
-  const id = r.json.id;
-  const taskId = `${kstDate()}/run-${id}`;
-  assert.equal(r.json.task, taskId);
-  assert.ok(existsSync(join(root, 'outputs', kstDate(), `run-${id}`)));
-  const task = read('tasks.json').find((x) => x.id === taskId);
-  assert.deepEqual([task.status, task.run, task.agent], ['active', id, 'dev-2']);
-  assert.match(task.title, /^최대리: 견적서 HTML/);
-  await waitFor(() => existsSync(join(root, '.office', 'runs', `${id}.result.md`)));
-  const result = readFileSync(join(root, '.office', 'runs', `${id}.result.md`), 'utf8');
-  assert.match(result, new RegExp(`^INPUT:견적서 HTML 만들어 줘\\n\\n\\[저장 위치\\] 이 작업의 산출물은 이 폴더에 저장하세요: outputs/${taskId}/`));
-  assert.equal(read('sessions.json')[SID2], taskId);
-  const start = events().find((e) => e.kind === 'task.start');
-  assert.deepEqual([start.task, start.agent], [taskId, 'dev-2']);
-  const log = readFileSync(join(root, '.office', 'runs', `${id}.log`), 'utf8');
-  assert.doesNotMatch(log, /--append-system-prompt/, '직원 실행에는 조직도를 주입하지 않는다');
+  assert.equal(r.status, 400, r.text);
+  assert.match(r.json.error, /비서실장에게 업무를 지시/);
+  assert.ok(!existsSync(join(root, 'outputs', kstDate())));
+  assert.ok(!existsSync(join(root, '.office', 'runs.json')) || JSON.parse(readFileSync(join(root, '.office', 'runs.json'), 'utf8')).length === 0);
 });
 
 test('데모 모드에서는 승인·반려할 수 없다', async (t) => {

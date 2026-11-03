@@ -219,7 +219,7 @@ try {
   await page.locator('#tabOffice').click();
   const monitor = await page.evaluate(async () => {
     const res = await fetch('/api/runs', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Office-Token': document.querySelector('meta[name="office-token"]').content },
-      body: JSON.stringify({ agentId: 'dev-1', prompt: '계속 새 자료를 감시해 줘', continuous: { intervalMs: 60000 } }) });
+      body: JSON.stringify({ prompt: '계속 새 자료를 감시해 줘', continuous: { intervalMs: 60000 } }) });
     if (!res.ok) throw new Error('가상 감시 시작 실패'); return res.json();
   });
   await saved((state) => state.runs.some((r) => r.id === monitor.id && r.monitor?.status === 'waiting'));

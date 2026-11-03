@@ -1581,13 +1581,12 @@ function agentProfile(a) {
       <dt>id</dt><dd><code>${esc(a.id)}</code></dd>
     </dl>
     <div class="profile-actions">
-      <button type="button" class="btn btn-primary" data-act="run-agent" data-id="${esc(a.id)}" data-key="pa-run" ${off ? 'disabled aria-describedby="offHint"' : ''}>작업 지시</button>
       <button type="button" class="btn btn-danger" data-act="stop-run" data-run="${esc(run?.id || '')}" data-key="pa-stop" ${running ? '' : 'disabled'}>중지</button>
       <button type="button" class="btn" data-act="duty-agent" data-id="${esc(a.id)}" data-key="pa-duty">${a.active === false ? '근무로 전환' : '휴무로 전환'}</button>
       <button type="button" class="btn" data-act="edit-agent" data-id="${esc(a.id)}" data-key="pa-edit">수정</button>
       <button type="button" class="btn btn-ghost btn-danger-text" data-act="del-agent" data-id="${esc(a.id)}" data-key="pa-del">삭제</button>
     </div>
-    ${off ? `<p class="help" id="offHint">${a.active !== false && dept?.active === false ? '부서가 휴무 중이라' : '휴무 중인 직원은 에이전트 파일이 없어'} 작업을 받을 수 없어요.</p>` : ''}
+    ${off ? `<p class="help" id="offHint">${a.active !== false && dept?.active === false ? '부서가 휴무 중이라' : '휴무 중인 직원은 에이전트 파일이 없어'} 비서실장이 업무를 배정할 수 없어요.</p>` : ''}
     <h4 class="sub-title">최근 실행</h4>
     ${run ? `<div class="run-card run-${esc(run.status)}">
         <div class="task-top"><span class="tag r-${esc(run.status)}">${esc(runLabel(run))}</span>${replyBadge(run, 'pa-badge')}<time>${esc(timeAgo(runStart(run)))}</time></div>
@@ -2087,42 +2086,6 @@ async function submitBulk(ev) {
   }
 }
 
-// ───── 작업 지시 ─────
-let runTarget = null;
-function openRunDialog(agentId) {
-  runTarget = agentId;
-  const a = S.agents[agentId];
-  $('runTitle').textContent = `${a?.name || agentId}에게 작업 지시`;
-  $('runLabel').textContent = `${a?.specialty ? a.specialty + ' 담당 · ' : ''}요청 내용`;
-  $('runPrompt').value = '';
-  $('runModel').value = '';
-  // codex 엔진(검증실) 직원은 Claude 모델 선택 대상이 아니다
-  const engine = deptOf(a?.department)?.engine || S.settings.chief.engine;
-  $('runModelRow').hidden = false;
-  $('runEffortRow').hidden = false;
-  fillModels($('runModel'), engine, '', '기본(직원 설정)');
-  fillEfforts($('runEffort'), engine, a?.codexModel || deptOf(a?.department)?.codexModel || S.settings.chief.model, '', '기본(직원 설정)');
-  $('runError').hidden = true;
-  $('runDialog').showModal();
-  $('runPrompt').focus();
-}
-
-async function submitRun(ev) {
-  ev.preventDefault();
-  const prompt = $('runPrompt').value.trim();
-  if (!prompt) { $('runError').textContent = '요청 내용을 입력해 주세요.'; $('runError').hidden = false; return; }
-  try {
-    const model = $('runModelRow').hidden ? '' : $('runModel').value;
-    const effort = $('runEffort').value;
-    await api('POST', '/api/runs', { agentId: runTarget, prompt, ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
-    $('runDialog').close();
-    toast(`${agentName(runTarget)}에게 작업을 지시했어요.`);
-    await refresh();
-  } catch (e) {
-    $('runError').textContent = e.message; $('runError').hidden = false;
-  }
-}
-
 // 지시창 응답 안내: 예약·일시정지·일괄 재개·새 업무
 export function chiefResultMessage(result) {
   if (result.scheduled) return `매일 ${result.schedule.time}에 업무를 시작하도록 예약했어요. 반복 예약에서 관리할 수 있습니다.`;
@@ -2565,7 +2528,6 @@ function memberRow(a) {
     <span class="om-status">${statusDot(a.status)} ${esc(STATUS_LABEL[a.status] || a.status)}</span>
     ${attnButton(attnFor(a.id)?.top, `oma-${a.id}`)}
     <span class="om-actions">
-      <button type="button" class="btn btn-sm" data-act="run-agent" data-id="${esc(a.id)}" data-key="omr-${esc(a.id)}" ${off ? 'disabled title="휴무 중"' : ''}>작업 지시</button>
       <button type="button" class="btn btn-sm" data-act="duty-agent" data-id="${esc(a.id)}" data-key="omd-${esc(a.id)}">${a.active === false ? '근무로' : '휴무로'}</button>
       <button type="button" class="btn btn-sm" data-act="edit-agent" data-id="${esc(a.id)}" data-key="ome-${esc(a.id)}">수정</button>
       <button type="button" class="btn btn-sm btn-ghost btn-danger-text" data-act="del-agent" data-id="${esc(a.id)}" data-key="omx-${esc(a.id)}" aria-label="${esc(a.name || a.id)} 삭제">삭제</button>
@@ -3233,7 +3195,6 @@ async function act(btn) {
       case 'bulk': return openBulk(dept);
       case 'edit-agent': return openAgentDialog({ agent: S.agents[id] });
       case 'edit-dept': return openDeptDialog(deptOf(id));
-      case 'run-agent': return openRunDialog(id);
       case 'log-run': return showLog(run);
       case 'open-thread': return openThread(run);
       case 'feed-more': {
@@ -3426,10 +3387,6 @@ function init() {
   }, true);
   $('chiefForm').addEventListener('submit', submitChief);
   for (const id of ['chiefEngine', 'chiefModel', 'chiefEffort']) $(id).addEventListener('change', saveChiefSelection);
-  $('runModel').addEventListener('change', () => {
-    const engine = deptOf(S.agents[runTarget]?.department)?.engine || S.settings.chief.engine;
-    fillEfforts($('runEffort'), engine, $('runModel').value || S.settings.chief.model, $('runEffort').value, '기본(직원 설정)');
-  });
   $('threadModel').addEventListener('change', () => {
     const latest = threadOf(S.runs, ui.thread?.rootId).at(-1);
     fillEfforts($('threadEffort'), latest?.engine || 'codex', $('threadModel').value || latest?.model, $('threadEffort').value, '이전과 같게');
@@ -3513,7 +3470,6 @@ function init() {
   $('bulkForm').addEventListener('submit', submitBulk);
   $('bulkPreset').addEventListener('change', renderBulkList);
   $('bulkList').addEventListener('change', updateBulkPlans);
-  $('runForm').addEventListener('submit', submitRun);
   $('threadForm').addEventListener('submit', submitThread);
   $('threadPrompt').addEventListener('keydown', (ev) => {
     // Ctrl/⌘+Enter로 보내기

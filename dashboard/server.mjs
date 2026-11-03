@@ -780,22 +780,22 @@ export async function startServer({
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
     if (!prompt) throw new HttpError(400, '요청 문장(prompt)이 필요합니다.');
     if (prompt.length > MAX_PROMPT) throw new HttpError(400, `요청 문장은 ${MAX_PROMPT}자 이하여야 합니다.`);
-    const agentId = body.agentId || null;
-    if (agentId !== null && typeof agentId !== 'string') throw new HttpError(400, 'agentId는 문자열이어야 합니다.');
+    // 업무는 비서실장을 거쳐 배정·검토·전달된다. 직원 개별 지시는 제거했다(2026-11-03 사용자 결정)
+    if (body.agentId !== undefined && body.agentId !== null) throw new HttpError(400, '직원에게 직접 지시할 수 없습니다. 비서실장에게 업무를 지시해 주세요.');
     const model = body.model || null;
     if (model !== null && typeof model !== 'string') throw new HttpError(400, 'model은 문자열이어야 합니다.');
     // 비서실장 지시창의 "하던 작업 멈추고 정리해 둬"/"이어서 해줘"는 새 업무가 아니라 일시정지·일괄 재개다
-    if (!agentId && pauseIntent(prompt)) {
+    if (pauseIntent(prompt)) {
       const result = runner.pause();
       scheduleBroadcast();
       return { pauseRequested: true, ...result };
     }
-    if (!agentId && resumeIntent(prompt)) {
+    if (resumeIntent(prompt)) {
       const result = runner.resumeAll();
       scheduleBroadcast();
       return { resumeRequested: true, ...result };
     }
-    if (!agentId && body.schedule !== false) {
+    if (body.schedule !== false) {
       const requested = await callRunner(() => dailyScheduleRequest(prompt), '예약 시각을 확인해 주세요.');
       if (requested) {
         const defaults = loadSettings(root).chief;
@@ -805,7 +805,7 @@ export async function startServer({
       }
     }
     await toolProbe;
-    const run = await callRunner(() => runner.start({ agentId, prompt, model, engine: body.engine || null, effort: body.effort || null,
+    const run = await callRunner(() => runner.start({ prompt, model, engine: body.engine || null, effort: body.effort || null,
       continuous: body.continuous }), '작업을 시작하지 못했습니다.');
     scheduleBroadcast();
     return run;

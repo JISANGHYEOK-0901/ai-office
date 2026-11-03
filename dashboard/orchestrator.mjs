@@ -130,7 +130,7 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
       'review.by는 기본 chief입니다. 비서실장이 최종 검토·보고하므로 검증실 부재는 공백이 아닙니다. 대표가 별도 전문 검토를 명시한 경우만 codex 또는 해당 검토 직원 id를 씁니다.',
       `현재 최종 검토 제공자는 ${run.engine}입니다. 이 제공자가 Codex면 대표의 일반적인 Codex 검토 요청은 review.by=chief로 충족합니다. 검증실 부서를 새로 요구하지 마세요. plan.task는 반드시 ${task} 그대로 쓰며 제목을 넣지 마세요.`,
       'done은 완료 기준 문자열입니다. 근무중 exec 직원에게만 생산 단계를 배정하고 검토 직원은 stages에 넣지 마세요.',
-      '연결된 일반 웹사이트(관리자 화면 등)에서 자료를 조회·추출해야 하는 단계는 stage.connection에 그 연결 계정 id, stage.target에 시작 주소(대표가 준 링크 또는 연결의 시작 주소)를 넣으세요. 담당 직원이 읽기 전용 브라우저로 조회해 output 파일에 정리합니다. 대표가 링크를 주면 허용 도메인이 맞는 연결 계정을 고르세요. 그 밖의 단계는 connection·target을 빈 문자열로 둡니다. done에는 대표가 요구한 항목과 그 목적(예: 연락하려면 연락처)에 필요한 항목을 빠짐없이 넣으세요.',
+      '연결된 일반 웹사이트(관리자 화면 등)에서 자료를 조회·추출해야 하는 단계는 stage.connection에 그 연결 계정 id, stage.target에 시작 주소(대표가 준 링크 또는 연결의 시작 주소)를 넣으세요. 담당 직원이 읽기 전용 브라우저로 조회해 output 파일에 정리합니다. 이 단계에서는 그 연결 사이트 안의 화면만 볼 수 있고 웹 검색이나 다른 사이트(영상·기사·공개 자료 등)는 열 수 없습니다(로그인된 화면 내용이 밖으로 새지 않게). 다른 공개 웹 자료가 필요하면 connection 없는 별도 단계로 나누고 사이트 조회 결과를 inputs로 받게 하세요. 대표가 링크를 주면 허용 도메인이 맞는 연결 계정을 고르세요. 그 밖의 단계는 connection·target을 빈 문자열로 둡니다. done에는 대표가 요구한 항목과 그 목적(예: 연락하려면 연락처)에 필요한 항목을 빠짐없이 넣으세요. 대표가 조사·참고 범위를 정했으면(특정 회원의 글만, 특정 메뉴만 등) 그 범위 밖의 조회(공지·규칙·다른 게시판 둘러보기 등)는 done에 넣지 마세요. 글을 올릴 곳은 대표가 준 주소나 참고한 자료(예: 참고한 글이 있는 게시판)에서 정합니다.',
       '앞 단계 id를 inputs와 dependsOn에 넣으세요. report/summary/findings/analysis로 시작하는 .md 이름은 쓰지 마세요.',
       `파일 조회 기준 폴더는 작업 공간 ${root}입니다. .office/… 등 요청의 상대 원본 경로는 작업 공간 기준입니다. inputs에는 앞 단계 id 또는 작업 공간 내부 원본의 절대 경로를 쓰세요. 기존 업무 상대 입력도 지원합니다. 파일 부재를 묻기 전에 Read/Glob으로 작업 공간과 업무 폴더를 확인하세요. 경로 검사 실패는 먼저 계획을 수정하고 실제로 있는 원본의 복구를 대표에게 요구하지 마세요.`,
       'plan.goal은 업무를 알아보기 쉬운 짧은 한국어 이름으로 쓰세요(최종산출물 폴더 이름이 됩니다). 대표에게 전달할 단계의 title은 대표가 받는 파일 이름이 됩니다. 내용을 바로 알 수 있는 한국어 이름으로 지으세요(예: 업무 내용·대상·조건이 드러나게). 작업 파일 output 이름은 지금 규칙대로 둡니다.',
@@ -143,7 +143,7 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
       'web은 연결 계정의 일반 웹사이트(관리자 화면 등)에서 하는 작업입니다. service "web", connection에 연결된 일반 웹사이트 계정 id, target에 시작 화면 주소, instructions에 직원이 그 사이트에서 할 일(대표 지시 그대로 구체적으로), files에 첨부할 단계 id(예: 업로드할 HTML 산출물)를 씁니다. subject·content는 빈 문자열, recipients는 []입니다. 연결된 일반 웹사이트 계정이 없으면 connection을 빈 문자열로 두세요.',
       '실제 외부 작업은 산출물 작성과 비서실장 검토를 마친 뒤 실행기가 브라우저로 진행합니다. 로그인 정보는 요청하거나 파일에 적지 마세요. 계정이 없으면 connection은 빈 문자열로 두고 자료 준비를 먼저 진행합니다. 연결 계정이 여러 개면 사용할 계정을 확인하세요.',
       '제휴업체 조사 후 주소를 알아내는 메일 업무는 조사 단계 다음에 개인별 발송 문안 JSON 단계를 두세요. {messages:[{recipients:["회사 메일"],subject:"제목",body:"양식을 채운 본문"}],skipped:["연락처 미확인 업체·이유"]}를 작성하고 publication.content에 그 단계 id, recipients에는 []를 씁니다. 검토 후 실행기가 문안별로 자동 발송합니다. 주소·출처를 확인하지 못한 업체에는 보내지 않습니다.',
-      '여러 게시글은 검토할 본문 JSON 단계에 {posts:[{subject,body}],skipped:[사유]}를 작성하고 publication.content에 그 단계 id를 지정하세요. 실행기가 글마다 별도로 게시합니다. 유튜브 링크의 영상 ID는 작업 공간 공통 이력과 대조해 재게시를 차단합니다.',
+      '여러 게시글은 검토할 본문 JSON 단계에 {posts:[{subject,body,target}],skipped:[사유]}를 작성하고 publication.content에 그 단계 id를 지정하세요. 실행기가 글마다 별도로 게시합니다. 올릴 게시판이 앞 단계(사이트 조회 등)에서 정해지면 그 게시판 주소(대표가 준 주소와 같은 사이트)를 target에 넣게 하세요. 비우면 publication.target에 올립니다. 유튜브 링크의 영상 ID는 작업 공간 공통 이력과 대조해 재게시를 차단합니다.',
       `대표가 허용한 외부 작업: ${JSON.stringify(allowedActions())}. 초안만 요청한 업무를 외부에 게시하지 마세요.`,
       `연결된 계정: ${JSON.stringify(outbound?.connections() || [])}`,
       HTML_BRIEF,
@@ -285,7 +285,7 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
       try {
         text = await runStage({ phase: 'stage', agentId: stage.agent,
         prompt: `${desc}\n업무: ${task}\n${context()}\n입력: ${JSON.stringify(inputs)}\n출력: ${stage.output}\n완료 기준: ${stage.done}\n${reason}\n${HTML_BRIEF}\n` +
-          (site ? `사이트 조회: 연결 계정 브라우저(office_browser 도구)로 ${stage.target}에서 시작해 필요한 자료를 조회하세요. 읽기 전용이라 저장·등록·수정·삭제는 하지 않습니다. 대표 요청의 의도에 맞는 메뉴·탭·필터를 사이트를 둘러보며 스스로 찾아 쓰고, 목록은 browser_text의 offset으로 끝까지 읽으세요. 결과는 출력 파일에 직접 작성하고, 대표가 요구한 항목(연락처 등)은 빠뜨리지 마세요. 조건에 맞는 항목이 없으면 그 사실과 확인한 화면·조건을 출력 파일에 적으세요.\n` : '') +
+          (site ? `사이트 조회: 연결 계정 브라우저(office_browser 도구)로 ${stage.target}에서 시작해 필요한 자료를 조회하세요. 읽기 전용이라 저장·등록·수정·삭제는 하지 않습니다. 대표 요청의 의도에 맞는 메뉴·탭·필터를 사이트를 둘러보며 스스로 찾아 쓰고(대표가 범위를 정했으면 그 범위의 자료만 엽니다. 예: 특정 회원의 글이면 작성자 검색·필터를 먼저 쓰고 공지·다른 게시판은 열지 않음), 목록은 browser_text의 offset으로 끝까지 읽으세요. 결과는 출력 파일에 직접 작성하고, 대표가 요구한 항목(연락처 등)은 빠뜨리지 마세요. 조건에 맞는 항목이 없으면 그 사실과 확인한 화면·조건을 출력 파일에 적으세요. 이 단계에서는 연결 사이트 밖(웹 검색·다른 사이트)은 볼 수 없습니다. 그런 자료는 다른 단계가 맡으니 사이트 안 자료만 정리하고, 사이트 밖 자료가 없다는 이유로 대표에게 묻지 마세요.\n` : '') +
           `부서 근무중 실행 직원: ${JSON.stringify(org.roster.filter((a) => available(a.id, stage.dept)).map((a) => ({ id: a.id, name: a.name, lead: a.lead, role: a.role, specialty: a.specialty || a.description })))}\n` +
           ((plan.publications || []).some((p) => p.action === 'mail' && (p.content === stage.id || p.content === stage.output) && !p.recipients.length)
             ? '이번 산출물은 메일 문안 JSON입니다. 입력 조사 자료의 회사별 연락처·출처를 확인하고 대표 양식을 채운 messages:[{recipients:[주소],subject,body}]와 skipped:[미확인 업체·이유]를 작성하세요. 실제 메일은 지금 보내지 않습니다.\n' : '') +

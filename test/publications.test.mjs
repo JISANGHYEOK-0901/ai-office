@@ -48,3 +48,13 @@ test('확인된 연락처가 없으면 메일을 만들지 않고 수신자를 �
   const bad = preparePublications(plan, () => JSON.stringify({ messages: [{ recipients: [], subject: '제목', body: '본문' }] }));
   assert.equal(bad.errors[0].stage, 'drafts');
 });
+
+test('게시글은 앞 단계에서 정한 같은 사이트의 게시판 주소(target)로 올리고, 다른 사이트 주소는 무시한다', () => {
+  const plan = { stages: [{ id: 'drafts', output: 'posts.json' }], publications: [{ id: 'p', action: 'post', service: 'naver_cafe', content: 'drafts', subject: '', recipients: [], target: 'https://cafe.naver.com/f-e/cafes/1/menus/0' }] };
+  const result = preparePublications(plan, () => JSON.stringify({ posts: [
+    { subject: '게시판 지정', body: '본문 A', target: 'https://cafe.naver.com/f-e/cafes/1/menus/44' },
+    { subject: '다른 사이트', body: '본문 B', target: 'https://evil.example.com/write' },
+    { subject: '지정 없음', body: '본문 C' },
+  ] }));
+  assert.deepEqual(result.jobs.map((j) => j.publication.target), ['https://cafe.naver.com/f-e/cafes/1/menus/44', 'https://cafe.naver.com/f-e/cafes/1/menus/0', 'https://cafe.naver.com/f-e/cafes/1/menus/0']);
+});

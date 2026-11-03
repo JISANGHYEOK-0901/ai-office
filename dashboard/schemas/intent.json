@@ -1,0 +1,89 @@
+{
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "task",
+        "pause",
+        "resume"
+      ]
+    },
+    "kindEvidence": {
+      "type": "string"
+    },
+    "externalActions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "mail",
+              "post",
+              "comment",
+              "web"
+            ]
+          },
+          "evidence": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "evidence"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "delegated": {
+      "type": "boolean"
+    },
+    "delegatedEvidence": {
+      "type": "string"
+    },
+    "standing": {
+      "type": "string",
+      "enum": [
+        "none",
+        "until_stop",
+        "duration",
+        "deadline"
+      ]
+    },
+    "standingEvidence": {
+      "type": "string"
+    },
+    "durationMinutes": {
+      "type": "integer"
+    },
+    "deadline": {
+      "type": "string"
+    },
+    "intervalMinutes": {
+      "type": "integer"
+    },
+    "dailyTime": {
+      "type": "string"
+    },
+    "dailyEvidence": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "kindEvidence",
+    "externalActions",
+    "delegated",
+    "delegatedEvidence",
+    "standing",
+    "standingEvidence",
+    "durationMinutes",
+    "deadline",
+    "intervalMinutes",
+    "dailyTime",
+    "dailyEvidence"
+  ],
+  "additionalProperties": false
+}

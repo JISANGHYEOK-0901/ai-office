@@ -982,3 +982,14 @@ orchestration·security·ux 검토 지적을 재현해 고치며 바꾸거나 �
 - **`browser_text`:** 허용 도메인 프레임의 보이는 글자를 40000자씩 `offset`으로 이어 읽는다(모든 작업에서 사용 가능).
 - **`browser_scroll`의 ref:** 휠은 마우스 아래 요소를 스크롤하므로, ref를 주면 그 요소 위에서, 없으면 화면 가운데에서 굴린다. 보이는 행만 그리는 데이터 표(ERP 경고 상담사 표가 13행만 그림)를 안쪽 스크롤하며 끝까지 읽기 위해서다. 1차 실측에서 페이지 왼쪽 위 기준으로만 굴려 표가 움직이지 않았고, 직원은 13행만 읽고 미완료로 정직하게 보고했다.
 - **PR #10 오인 수정:** 실행기가 요청 끝에 붙이는 "[저장 위치] … 저장하세요" 때문에 ERP·페이지가 들어간 요청이 웹사이트 작업으로 오인되어 엉뚱한 질문이 나왔다. 판별에서 저장 위치 안내를 빼고, web 판별을 '업로드' 또는 '사이트·페이지·관리자·ERP에(서) … 올려·등록·입력·제출·반영'으로 좁혔다. web만 추정됐고 계획에 외부 작업이 없으면 비서실장 계획을 따른다(메일·게시는 기존처럼 확인).
+
+## AI 의도 판별 (설계 PR 1, 사용자 확정 2026-11-03)
+
+- **방향:** "AI가 알아서 하는 게 없다"는 지적에 따라 판단은 AI, 안전선은 코드로 나눈다. 첫 단계로 문장 규칙(정규식) 판별을 비서실장 판단으로 바꾼다.
+- **호출(`lib/ai-judge.mjs`):** 로그인된 Claude면 `claude -p --model haiku --output-format json --json-schema <스키마> --tools ''`, 아니면 `codex exec -s read-only --output-schema … -c model_reasoning_effort="low"`. 작업 공간 밖(임시 폴더)에서 실행해 수칙·훅을 읽지 않는다. 제한 시간 15초(실측 4.5~13초), 실패·형식 오류는 null. 테스트용 가짜 CLI(.js)면 판별하지 않는다(`AI_OFFICE_JUDGE=on`으로 켬, `off`로 끔).
+- **지시창(`judgeCommand`, 스키마 `intent.json`):** kind(task/pause/resume), externalActions(mail/post/comment/web), delegated, standing(none/until_stop/duration/deadline + 분·종료 시각·간격), dailyTime. 각 판단에 대표 원문 근거를 받는다. 실행기가 붙인 [저장 위치] 안내는 판별 대상에서 뺀다.
+- **답장(`judgeAnswer`, 스키마 `intent-answer.json`):** decision(approve/decline/modify/other), add/removeActions, delegated. 웹사이트 작업 확인 답장과 외부 작업 수정 답장 판별에 쓴다.
+- **안전선:** 외부 작업·위임·상시 실행·예약·일시정지 판단은 근거 문장(앞말·따옴표 제거 뒤)이 원문에 있을 때만 인정한다. AI가 지어낸 허가는 버린다. 상시 실행 값은 간격 10초~24시간, 기간·종료 시각 1년 이내만 받는다.
+- **대신 처리:** 판별 실패·시간 초과·형식 오류면 기존 규칙(`pauseIntent`·`resumeIntent`·`externalActionPolicy`·`continuousRequest`·`dailyScheduleRequest`)을 쓴다. 분명한 "멈춰"·"이어서 해줘"(규칙 일치)는 판별을 기다리지 않는다.
+- **전달:** 서버가 판별해 runner.start의 `intent`(근거 확인된 actions·delegated)로 넘기고, 오케스트레이터는 체크포인트 `state.intent`에 보관해 업무 내내 쓴다. 답장 판별은 `decisions[].intent`로 남긴다. 판별 결과가 없으면(예전 업무) 문장 규칙을 쓴다. 재발송·결과 확인 문구 판별은 이번 단계에서 규칙을 유지한다.
+- **실측(haiku):** 정규식이 놓치던 "오늘은 여기까지 하고 내일 마저 하자"(일시정지), "어제 하던 거 이어서 해줘"(재개)를 알아보고, "HTML 페이지 만들어서 저장해줘"를 외부 작업 없음으로, 30분 간격 "그만하라고 할 때까지"를 상시 실행으로, "매일 오전 11시"를 예약으로 판별했다.

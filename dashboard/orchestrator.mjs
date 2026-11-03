@@ -15,6 +15,7 @@ import { programRoot } from '../lib/paths.mjs';
 import { externalActionPolicy } from '../lib/browser-work.mjs';
 import { preparePublications } from '../lib/publications.mjs';
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
+import { judgeAnswer } from '../lib/intent.mjs';
 
 export function parseObject(text) {
   const value = String(text || '').trim().replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
@@ -28,7 +29,7 @@ export function checkpointFile(root, rootId) {
   return join(root, '.office', 'orchestrations', `${rootId}.json`);
 }
 
-export async function orchestrate({ root, run, prompt, execute, signal, maxParallel = 4, resume = false, onDecision = () => {}, outbound = null }) {
+export async function orchestrate({ root, run, prompt, execute, signal, maxParallel = 4, resume = false, onDecision = () => {}, outbound = null, intent = null, judge = null }) {
   const task = run.task;
   const taskDir = join(root, 'outputs', ...task.split('/'));
   const file = checkpointFile(root, run.rootId);
@@ -51,16 +52,32 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
     decisions: [...(saved.decisions || [])], completed: { ...(saved.completed || {}) },
     routes: { ...(saved.routes || {}) }, delegated: { ...(saved.delegated || {}) },
     rejects: saved.delivered ? 0 : saved.rejects || 0 };
+  // 최초 지시의 외부 작업·위임 판별(지시창에서 AI가 근거와 함께 판단한 값)은 업무 내내 유지한다
+  if (!saved.originalRequest && intent) state.intent = intent;
+  let answer = null;
   if (saved.originalRequest && !resume) {
-    // 일반 웹사이트 작업 실행 확인에 대한 대표 답장
-    if (saved.pending?.some((q) => q.phase === 'web-confirm')) state.webDecision = /하지\s*마|취소|중지|안\s*해|보류|그만/.test(prompt) ? 'declined'
-      : /진행|승인|확인|좋아|ㅇㅋ|오케이|네|예|응|해\s*줘|끝까지|ok|go/i.test(prompt) ? 'approved' : state.webDecision;
-    state.decisions.push({ questions: saved.pending || [], answer: redactContext(prompt) });
+    // 대표 답장의 뜻은 AI가 판별한다(실패하면 규칙). 일반 웹사이트 작업 확인 답장도 같은 판별을 쓴다
+    answer = await judgeAnswer(prompt, saved.pending || [], { judge });
+    if (saved.pending?.some((q) => q.phase === 'web-confirm')) state.webDecision = answer.decision === 'decline' ? 'declined'
+      : answer.decision === 'approve' || answer.delegated ? 'approved' : state.webDecision;
+    state.decisions.push({ questions: saved.pending || [], answer: redactContext(prompt), intent: answer });
     state.pending = [];
   }
   const context = () => `대표 최초 요청:\n${state.originalRequest}\n\n추가 지시·결정:\n${JSON.stringify(state.decisions)}\n\n${videoBrief}`;
   const instructionKey = () => createHash('sha256').update(JSON.stringify([state.originalRequest, state.decisions])).digest('hex');
-  const policy = () => externalActionPolicy([state.originalRequest, ...state.decisions.map((d) => d.answer)]);
+  // 외부 작업 허용: 판별 결과가 있으면 그것을, 없으면(예전 업무·판별 실패) 문장 규칙을 쓴다. 재발송·결과 확인 문구는 규칙 유지
+  const policy = () => {
+    const base = externalActionPolicy([state.originalRequest, ...state.decisions.map((d) => d.answer)]);
+    if (!state.intent) return base;
+    const actions = new Set(state.intent.actions);
+    let delegated = state.intent.delegated === true;
+    for (const d of state.decisions) {
+      const judged = d.intent || { add: externalActionPolicy([d.answer]).actions, remove: [], delegated: externalActionPolicy([d.answer]).delegated };
+      (judged.add || []).forEach((a) => actions.add(a)); (judged.remove || []).forEach((a) => actions.delete(a));
+      delegated ||= judged.delegated === true;
+    }
+    return { ...base, actions: [...actions], delegated };
+  };
   const allowedActions = () => policy().actions;
   const persist = () => {
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
@@ -136,7 +153,8 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
   checkStop();
   let response;
   let plan;
-  const publicationCorrection = answering && saved.pending?.some((q) => q.phase === 'publish') && /수정|변경|바꿔|초안|수신자|하지\s*마/.test(prompt);
+  const publicationCorrection = answering && saved.pending?.some((q) => q.phase === 'publish')
+    && (answer?.source === 'ai' ? ['modify', 'decline'].includes(answer.decision) : /수정|변경|바꿔|초안|수신자|하지\s*마/.test(prompt));
   // 옛 실행기는 검토 후 브라우저·전달 오류도 plan 질문으로 저장했다.
   // 명시 재개라면 승인된 계획을 재검사하며 완료 파일·검토를 재사용한다.
   if ((resume || answering) && saved.plan && !publicationCorrection

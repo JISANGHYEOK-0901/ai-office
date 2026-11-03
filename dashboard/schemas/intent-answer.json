@@ -1,0 +1,82 @@
+{
+  "type": "object",
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": [
+        "approve",
+        "decline",
+        "modify",
+        "other"
+      ]
+    },
+    "decisionEvidence": {
+      "type": "string"
+    },
+    "addActions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "mail",
+              "post",
+              "comment",
+              "web"
+            ]
+          },
+          "evidence": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "evidence"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "removeActions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "mail",
+              "post",
+              "comment",
+              "web"
+            ]
+          },
+          "evidence": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "evidence"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "delegated": {
+      "type": "boolean"
+    },
+    "delegatedEvidence": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "decision",
+    "decisionEvidence",
+    "addActions",
+    "removeActions",
+    "delegated",
+    "delegatedEvidence"
+  ],
+  "additionalProperties": false
+}

@@ -81,6 +81,7 @@ function fixture(t, options = {}) {
           review: { by: options.reviewBy || 'chief', criteria: '근거와 산출물을 확인한다' }, gaps: [] };
         if (options.workspaceInput) plan.stages[0].inputs = ['.office/simulation-inputs/market.json'];
         if (options.publication) plan.publications = [{ id: 'publish', action: 'post', service: 'naver_blog', connection: '', agent: 'dev-1', target: 'https://blog.naver.com/fixture', recipients: [], subject: '자료', content: 'b' }];
+        if (options.siteStage) Object.assign(plan.stages[0], { connection: 'erp-1', target: 'https://erp.example.com/erp' });
         if (options.webPublication) plan.publications = [{ id: 'upload', action: 'web', service: 'web', connection: 'erp-1', agent: 'dev-1', target: 'https://erp.example.com/erp/proposal-pages', recipients: [], subject: '', content: '', instructions: '업체 ai-office-test를 추가하고 HTML을 업로드한다', files: ['b'] }];
         if (options.independent) plan.stages.push(stage('c', 'dev', 'dev-1', []));
         if (options.relativePaths) for (const stage of plan.stages) stage.output = `${stage.dept}/${stage.agent}-${stage.id}.txt`;
@@ -443,6 +444,32 @@ test('한 단계가 결정을 기다려도 독립 업무는 완료하고 의존 
   assert.equal(loadTasks(f.root)[0].status, 'done');
 });
 
+
+test('사이트 조회 단계는 연결 계정 브라우저(쓰기 가능)로 실행하고 연결 문제는 대표에게 묻는다', async (t) => {
+  const browses = [];
+  let fail = true;
+  const permissionsFile = join(tmpdir(), 'office-fixture-permissions.json');
+  const outbound = { connections: () => [{ id: 'erp-1', label: 'ERP', provider: 'web' }], async deliver() { throw new Error('no'); },
+    async browse(args) {
+      browses.push(args);
+      if (fail) { fail = false; throw Object.assign(new Error('계정 연결 화면에서 로그인 상태를 확인해 주세요.'), { code: 'CONNECTION_REQUIRED' }); }
+      return args.execute({ url: 'http://127.0.0.1:9/tools', token: 't', permissionsFile, write: true });
+    } };
+  const f = fixture(t, { siteStage: true, outbound });
+  const first = f.runner.start({ prompt: 'ERP에서 조건에 맞는 상담사를 찾아 연락처와 함께 리스트로 정리해 줘' });
+  const asked = await f.final(first);
+  assert.equal(asked.needsReply, true);
+  assert.match(f.runner.result(first.id).text, /로그인 상태를 확인/);
+  const second = f.runner.reply(first.id, { prompt: '연결 완료, 이어서 진행' });
+  await f.final(second);
+  assert.equal(loadTasks(f.root)[0].status, 'done', f.runner.result(second.id).text);
+  assert.deepEqual(browses.map((b) => [b.connection, b.target]), [['erp-1', 'https://erp.example.com/erp'], ['erp-1', 'https://erp.example.com/erp']]);
+  const stageCall = f.calls.filter((c) => c.kind === 'a').at(-1);
+  assert.match(stageCall.input, /사이트 조회: 연결 계정 브라우저/);
+  assert.match(stageCall.args.join(' '), /office_browser/);
+  assert.equal(stageCall.args[stageCall.args.indexOf('-s') + 1], 'workspace-write', '조회 결과 파일을 쓸 수 있다');
+  assert.ok(f.calls.filter((c) => c.kind === 'b').every((c) => !c.args.join(' ').includes('office_browser')), '일반 단계에는 브라우저를 붙이지 않는다');
+});
 
 test('일반 웹사이트 업무: 위임이 없으면 실행 전에 묶어서 확인하고, "진행"이면 첨부와 함께 실행한다', async (t) => {
   const calls = [];

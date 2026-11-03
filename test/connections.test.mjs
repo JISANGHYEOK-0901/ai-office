@@ -121,4 +121,8 @@ test('웹사이트 업로드·등록 지시와 위임 표현을 판별한다', (
   assert.equal(externalActionPolicy(['업로드해 줘', '확인 없이 진행']).delegated, true);
   assert.deepEqual(externalActionPolicy(['보고서 HTML 초안만 만들어 줘']).actions, []);
   assert.deepEqual(externalActionPolicy(['HTML 만들되 업로드하지 마']).actions, []);
+  // 실행기가 붙인 저장 위치 안내·일반 문장은 웹사이트 작업 지시가 아니다(PR #10 오인 회귀)
+  for (const text of ['ERP에서 조건에 맞는 상담사를 찾아 리스트로 정리해 줘\n\n[저장 위치] 이 작업의 산출물은 이 폴더에 저장하세요: outputs/x/', 'HTML 페이지 만들어줘. 저장해줘', 'ERP에서 신규 등록 상담사 찾아줘'])
+    assert.deepEqual(externalActionPolicy([text]).actions, [], text);
+  assert.deepEqual(externalActionPolicy(['관리자 페이지에 공지 등록해 줘']).actions, ['web']);
 });

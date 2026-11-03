@@ -80,6 +80,16 @@ test('최종 전달 목록은 계획의 단계 id·산출물만 허용하고 빈
   }
 });
 
+test('사이트 조회 단계는 연결 계정과 시작 주소가 함께 있어야 한다', () => {
+  const withSite = (fields) => { const plan = goodPlan(); Object.assign(plan.stages[0], fields); return check(plan); };
+  assert.equal(withSite({ connection: '', target: '' }).ok, true);
+  assert.equal(withSite({ connection: 'erp-1', target: 'https://erp.example.com/counselor-list' }).ok, true);
+  assert.equal(withSite({ connection: 'erp-1', target: 'http://localhost:3000/erp' }).ok, true);
+  for (const fields of [{ connection: 'erp-1', target: '' }, { connection: 'erp-1', target: 'http://erp.example.com/' }, { connection: 3, target: 'https://x.example.com/' }]) {
+    const result = withSite(fields); assert.equal(result.ok, false, JSON.stringify(fields));
+  }
+});
+
 test('일반 웹사이트 업무는 연결 계정·시작 주소·지침과 계획 단계 첨부만 허용한다', () => {
   const web = (fields = {}) => ({ id: 'upload', action: 'web', service: 'web', connection: 'erp-1', agent: 'dev-2', target: 'https://erp.example.com/erp/proposal-pages',
     recipients: [], subject: '', content: '', instructions: 'HTML을 업로드한다', files: ['s2'], ...fields });

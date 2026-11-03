@@ -112,6 +112,7 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
       'review.by는 기본 chief입니다. 비서실장이 최종 검토·보고하므로 검증실 부재는 공백이 아닙니다. 대표가 별도 전문 검토를 명시한 경우만 codex 또는 해당 검토 직원 id를 씁니다.',
       `현재 최종 검토 제공자는 ${run.engine}입니다. 이 제공자가 Codex면 대표의 일반적인 Codex 검토 요청은 review.by=chief로 충족합니다. 검증실 부서를 새로 요구하지 마세요. plan.task는 반드시 ${task} 그대로 쓰며 제목을 넣지 마세요.`,
       'done은 완료 기준 문자열입니다. 근무중 exec 직원에게만 생산 단계를 배정하고 검토 직원은 stages에 넣지 마세요.',
+      '연결된 일반 웹사이트(관리자 화면 등)에서 자료를 조회·추출해야 하는 단계는 stage.connection에 그 연결 계정 id, stage.target에 시작 주소(대표가 준 링크 또는 연결의 시작 주소)를 넣으세요. 담당 직원이 읽기 전용 브라우저로 조회해 output 파일에 정리합니다. 대표가 링크를 주면 허용 도메인이 맞는 연결 계정을 고르세요. 그 밖의 단계는 connection·target을 빈 문자열로 둡니다. done에는 대표가 요구한 항목과 그 목적(예: 연락하려면 연락처)에 필요한 항목을 빠짐없이 넣으세요.',
       '앞 단계 id를 inputs와 dependsOn에 넣으세요. report/summary/findings/analysis로 시작하는 .md 이름은 쓰지 마세요.',
       `파일 조회 기준 폴더는 작업 공간 ${root}입니다. .office/… 등 요청의 상대 원본 경로는 작업 공간 기준입니다. inputs에는 앞 단계 id 또는 작업 공간 내부 원본의 절대 경로를 쓰세요. 기존 업무 상대 입력도 지원합니다. 파일 부재를 묻기 전에 Read/Glob으로 작업 공간과 업무 폴더를 확인하세요. 경로 검사 실패는 먼저 계획을 수정하고 실제로 있는 원본의 복구를 대표에게 요구하지 마세요.`,
       'plan.deliverables에는 대표에게 최종 전달할 단계 id를 고르세요. 최종 HTML·문서·첨부 등 요청 결과만 포함하고 계획·중간 조사·검토용 문안은 제외하세요. 별도 첨부가 없으면 []. 실행기가 검토 후 최종산출물/날짜/업무명 폴더로 모읍니다.',
@@ -221,13 +222,19 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
     }
     let text;
     let issue = '';
+    const site = typeof stage.connection === 'string' && stage.connection.trim();
+    // 사이트 조회 단계는 연결 계정 브라우저(읽기 전용)를 붙여 실행한다
+    const runStage = (args) => !site ? execute(args)
+      : outbound?.browse ? outbound.browse({ connection: stage.connection, target: stage.target, signal, execute: (browser) => execute({ ...args, browser }) })
+        : Promise.reject(Object.assign(new Error('사이트 조회를 위해 계정 연결을 먼저 완료해 주세요.'), { code: 'CONNECTION_REQUIRED' }));
     for (let attempt = 0; attempt < 2; attempt++) {
       checkStop();
       safeOutput(stage.output, true);
       const inputs = (stage.inputs || []).map((input) => plan.stages.find((s) => s.id === input)?.output || input);
       try {
-        text = await execute({ phase: 'stage', agentId: stage.agent,
+        text = await runStage({ phase: 'stage', agentId: stage.agent,
         prompt: `${desc}\n업무: ${task}\n${context()}\n입력: ${JSON.stringify(inputs)}\n출력: ${stage.output}\n완료 기준: ${stage.done}\n${reason}\n${HTML_BRIEF}\n` +
+          (site ? `사이트 조회: 연결 계정 브라우저(office_browser 도구)로 ${stage.target}에서 시작해 필요한 자료를 조회하세요. 읽기 전용이라 저장·등록·수정·삭제는 하지 않습니다. 대표 요청의 의도에 맞는 메뉴·탭·필터를 사이트를 둘러보며 스스로 찾아 쓰고, 목록은 browser_text의 offset으로 끝까지 읽으세요. 결과는 출력 파일에 직접 작성하고, 대표가 요구한 항목(연락처 등)은 빠뜨리지 마세요. 조건에 맞는 항목이 없으면 그 사실과 확인한 화면·조건을 출력 파일에 적으세요.\n` : '') +
           `부서 근무중 실행 직원: ${JSON.stringify(org.roster.filter((a) => available(a.id, stage.dept)).map((a) => ({ id: a.id, name: a.name, lead: a.lead, role: a.role, specialty: a.specialty || a.description })))}\n` +
           ((plan.publications || []).some((p) => p.action === 'mail' && (p.content === stage.id || p.content === stage.output) && !p.recipients.length)
             ? '이번 산출물은 메일 문안 JSON입니다. 입력 조사 자료의 회사별 연락처·출처를 확인하고 대표 양식을 채운 messages:[{recipients:[주소],subject,body}]와 skipped:[미확인 업체·이유]를 작성하세요. 실제 메일은 지금 보내지 않습니다.\n' : '') +
@@ -239,6 +246,8 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
           (issue ? `앞 실행의 산출물 검사 실패: ${issue}. 수정하여 지정된 파일을 작성하세요.` : '') });
       } catch (err) {
         emit('agent.pause', { engine, agent: stage.agent, instance: `${run.id}-${stage.id}`, summary: redact(err.message) });
+        // 계정 연결·사이트 접근 문제는 대표가 해결할 수 있게 질문으로 넘긴다
+        if (site && !signal.aborted && ['CONNECTION_REQUIRED', 'BROWSER_ACTION'].includes(err.code)) return { stage, result: { status: 'needs_decision', question: redactContext(err.message) } };
         throw err;
       }
       checkStop();
@@ -378,7 +387,8 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
           return ask([{ phase: 'web-confirm', question: `아래 웹사이트 작업을 실행할까요? ("진행" 또는 "하지 마"로 답하세요. 다음부터 확인 없이 하려면 지시에 "끝까지 자동으로"를 적어 주세요.)\n`
             + webJobs.map((job, i) => `${i + 1}. [${label(job.publication.connection)}] ${job.publication.target} — ${job.body.replace(/\s+/g, ' ').slice(0, 300)}${job.files.length ? ` (첨부: ${job.files.map((f) => basename(f)).join(', ')})` : ''}`).join('\n') }]);
         }
-        if (allowedActions().length && !(plan.publications || []).length) return ask([{ phase: 'plan', question: '요청하신 외부 작업의 대상·계정·본문을 계획에서 확인하지 못했습니다. 계정 연결과 대상 주소를 확인해 주세요.' }]);
+        // 웹사이트 작업 추정은 넓은 문장 판별이라, 계획에 외부 작업이 없으면 비서실장 계획을 따른다(메일·게시는 확인)
+        if (allowedActions().some((action) => action !== 'web') && !(plan.publications || []).length) return ask([{ phase: 'plan', question: '요청하신 외부 작업의 대상·계정·본문을 계획에서 확인하지 못했습니다. 계정 연결과 대상 주소를 확인해 주세요.' }]);
         for (const { publication, body, source: content, files = [] } of prepared.jobs) {
           if (publication.action === 'web' && state.webDecision === 'declined') { publications.push(`- 웹사이트 작업 ${publication.target}: 대표 결정으로 실행하지 않음`); continue; }
           if (!outbound) return ask([{ phase: 'plan', question: '외부 작업을 위해 계정 연결을 먼저 완료해 주세요.' }]);

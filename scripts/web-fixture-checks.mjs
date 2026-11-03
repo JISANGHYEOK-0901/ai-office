@@ -9,6 +9,20 @@ import { chromium } from 'playwright';
 import { createConnectionStore } from '../lib/connections.mjs';
 import { createBrowserWork } from '../lib/browser-work.mjs';
 
+const LIST = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>상담사 목록</title></head><body>
+<label>검색어<input name="q"></label><button id="sort">등록일</button><button id="save">저장</button>
+<table><tbody>${Array.from({ length: 1200 }, (_, i) => `<tr><td>상담사${i + 1}</td><td>010-0000-${String(i).padStart(4, '0')}</td><td>담당 ${i % 3 ? '김' : '이'}</td></tr>`).join('')}</tbody></table>
+<p id="searched"></p>
+<script>document.querySelector('[name=q]').addEventListener('keydown',(e)=>{if(e.key==='Enter')document.getElementById('searched').textContent='검색함:'+e.target.value;});
+document.getElementById('sort').onclick=()=>document.getElementById('searched').textContent='정렬함';
+document.getElementById('save').onclick=()=>fetch('/save',{method:'POST'});</script></body></html>`;
+// 관리자 화면의 데이터 표처럼 보이는 행만 그리는 표(안쪽 스크롤)
+const GRID = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>경고 목록</title>
+<style>body{margin:0;padding:200px 40px}#grid{height:390px;overflow:auto;border:1px solid #999}#inner{position:relative}.row{position:absolute;left:0;right:0;height:30px}</style></head><body>
+<div id="grid" role="grid"><div id="inner"></div></div>
+<script>const total=445,h=30,grid=document.getElementById('grid'),inner=document.getElementById('inner');inner.style.height=(total*h)+'px';
+const draw=()=>{const first=Math.floor(grid.scrollTop/h);inner.innerHTML='';for(let i=first;i<Math.min(total,first+13);i++){const r=document.createElement('div');r.className='row';r.tabIndex=-1;r.style.top=(i*h)+'px';r.textContent='경고'+(i+1)+' 최근접속 2026-09-'+String(i%28+1).padStart(2,'0');inner.append(r);}};
+grid.addEventListener('scroll',draw);draw();</script></body></html>`;
 const HTML = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>가짜 관리자 화면</title></head><body>
 <h1>제휴 제안 페이지</h1>
 <label>업체 코드<input name="code"></label><button id="add">업체 추가</button><button id="del">삭제</button>
@@ -35,7 +49,7 @@ export async function verifyWebWork() {
     site = createServer(async (req, res) => {
       const url = new URL(req.url, 'http://x');
       if (req.method === 'POST') { let body = ''; for await (const c of req) body += c; events.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), body }); res.end('ok'); return; }
-      res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(HTML);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(url.pathname === '/list' ? LIST : url.pathname === '/grid' ? GRID : HTML);
     });
     await new Promise((resolve) => site.listen(0, '127.0.0.1', resolve));
     const origin = `http://127.0.0.1:${site.address().port}`;
@@ -116,8 +130,45 @@ export async function verifyWebWork() {
     await assert.rejects(broker.deliver({ scope: 's2', publication: { ...publication('x'), target: 'https://outside.example.invalid/' }, body: instructions, allowedActions: ['web'], instructionKey: 'k', execute: execute(), signal: new AbortController().signal }), /허용 도메인 밖/);
     await assert.rejects(broker.deliver({ scope: 's2', publication: publication('x'), body: instructions, allowedActions: ['web'], instructionKey: 'k', files: [{ name: 'none.html', path: join(taskDir, 'none.html') }], execute: execute(), signal: new AbortController().signal }), /첨부 파일이 없습니다/);
     assert.equal(runs, 2);
+    // 사이트 조회 단계: 읽기 전용으로 긴 목록을 끝까지 읽고, 검색·정렬은 되며 저장·제출·첨부는 막는다
+    const read = await broker.browse({ connection: account.id, target: `${origin}/list`, signal: new AbortController().signal, execute: async ({ url, token, write }) => {
+      assert.equal(write, true, '조회 결과를 산출물 파일로 쓸 수 있다');
+      const call = async (name, args = {}) => {
+        const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name, arguments: args }) });
+        const data = await res.json(); if (data.error) throw new Error(`${name}: ${data.code} ${data.error}`); return data.result;
+      };
+      const r = Object.fromEntries((await call('browser_snapshot')).frames.flatMap((f) => f.controls).map((c) => [c.label, c.ref]));
+      await call('browser_type', { ref: r.q, text: '이' });
+      await call('browser_press_key', { key: 'Enter' });
+      await call('browser_click', { ref: r['등록일'] });
+      await assert.rejects(call('browser_click', { ref: r['저장'] }), /읽기 전용/);
+      await assert.rejects(call('browser_submit', { ref: r['저장'] }), /읽기 전용/);
+      await assert.rejects(call('browser_attach', { ref: r.q, file: 'proposal.html' }), /읽기 전용/);
+      let text = '', offset = 0;
+      for (;;) { const part = await call('browser_text', { offset }); text += part.text; if (part.next === null) break; offset = part.next; }
+      return { rows: (text.match(/상담사\d+/g) || []).length, last: text.includes('상담사1200'), phone: text.includes('010-0000-1199'), sorted: text.includes('정렬함') };
+    } });
+    assert.deepEqual(read, { rows: 1200, last: true, phone: true, sorted: true });
+    assert.ok(!events.some((e) => e.path === '/save'), '읽기 전용 조회에서 저장 요청이 없어야 한다');
+    // 보이는 행만 그리는 표: 표 안의 행을 기준으로 스크롤하며 읽으면 전체 행을 모을 수 있다
+    const seen = await broker.browse({ connection: account.id, target: `${origin}/grid`, signal: new AbortController().signal, execute: async ({ url, token }) => {
+      const call = async (name, args = {}) => {
+        const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name, arguments: args }) });
+        const data = await res.json(); if (data.error) throw new Error(`${name}: ${data.code} ${data.error}`); return data.result;
+      };
+      const ids = new Set();
+      for (let i = 0; i < 80 && ids.size < 445; i++) {
+        for (const m of (await call('browser_text')).text.matchAll(/경고(\d+)/g)) ids.add(Number(m[1]));
+        const row = (await call('browser_snapshot')).frames.flatMap((f) => f.controls).find((c) => /^경고\d+/.test(c.label));
+        await call('browser_scroll', { deltaY: 360, ref: row.ref });
+      }
+      return ids.size;
+    } });
+    assert.equal(seen, 445, '표 안쪽 스크롤로 보이지 않던 행까지 모두 읽는다');
     return [{ name: '일반 웹사이트: 자유 입력·지정 파일 첨부·되돌리기 어려운 버튼 submit·결과 캡처 증표', interaction: 'click', passed: true },
-      { name: '일반 웹사이트: 삭제·외부 링크·허용 밖 이동·목록 밖 첨부 차단, 재실행·불확실 재시도 차단', interaction: 'click', passed: true }];
+      { name: '일반 웹사이트: 삭제·외부 링크·허용 밖 이동·목록 밖 첨부 차단, 재실행·불확실 재시도 차단', interaction: 'click', passed: true },
+      { name: '사이트 조회 단계: 읽기 전용 검색·정렬, 긴 목록 이어 읽기, 저장·제출·첨부 차단', interaction: 'click', passed: true },
+      { name: '사이트 조회 단계: 보이는 행만 그리는 표를 안쪽 스크롤로 끝까지 읽기', interaction: 'scroll', passed: true }];
   } finally {
     await broker?.close(); await browser?.close(); site?.close();
     await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });

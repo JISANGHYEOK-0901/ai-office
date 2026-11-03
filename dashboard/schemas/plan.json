@@ -71,6 +71,12 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "connection": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
               }
             },
             "required": [
@@ -82,7 +88,9 @@
               "done",
               "parallelGroup",
               "inputs",
-              "dependsOn"
+              "dependsOn",
+              "connection",
+              "target"
             ],
             "additionalProperties": false
           }

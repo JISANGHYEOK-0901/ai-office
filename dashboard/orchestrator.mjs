@@ -12,7 +12,7 @@ import { codexRole } from '../lib/settings.mjs';
 import { parseVerdict } from '../scripts/codex-review.mjs';
 import { stageResult, outputIssues, HTML_BRIEF } from '../lib/work-result.mjs';
 import { programRoot } from '../lib/paths.mjs';
-import { externalActionPolicy } from '../lib/guardrails.mjs';
+import { MAX_PLAN_REVISIONS, MAX_PROGRESS_CHECKS, externalActionPolicy } from '../lib/guardrails.mjs';
 import { preparePublications } from '../lib/publications.mjs';
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';
@@ -52,7 +52,10 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
     originalRequest: saved.originalRequest || redactContext(prompt),
     decisions: [...(saved.decisions || [])], completed: { ...(saved.completed || {}) },
     routes: { ...(saved.routes || {}) }, delegated: { ...(saved.delegated || {}) },
-    rejects: saved.delivered ? 0 : saved.rejects || 0 };
+    rejects: saved.delivered ? 0 : saved.rejects || 0,
+    // 진행 점검·계획 수정 횟수는 대표 피드백으로 새로 시작할 때 다시 센다. 수정 이력은 남긴다
+    progressChecks: saved.delivered ? 0 : saved.progressChecks || 0, revisionCount: saved.delivered ? 0 : saved.revisionCount || 0,
+    revisions: [...(saved.revisions || [])] };
   // 최초 지시의 외부 작업·위임 판별(지시창에서 AI가 근거와 함께 판단한 값)은 업무 내내 유지한다
   if (!saved.originalRequest && intent) state.intent = intent;
   let answer = null;
@@ -121,6 +124,16 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
       return createHash('sha256').update(content).digest('hex');
     } catch { return null; }
   };
+  // 외부 작업·전달 대상의 파일 경로를 단계 id로 맞추고, 메일 대상 주소가 비었으면 서비스 기본 주소로 채운다
+  const normalizeRefs = (candidate) => {
+    const ref = (value) => candidate.stages.find((s) => s.id === value || outputPath(s.output) === outputPath(value))?.id || value;
+    return { ...candidate,
+      ...(candidate.publications ? { publications: candidate.publications.map((publication) => ({ ...publication,
+        ...(publication.action === 'mail' && !publication.target ? { target: CONNECTION_PROVIDERS[serviceProvider(publication.service)]?.loginUrl || publication.target } : {}),
+        content: ref(publication.content),
+        ...(Array.isArray(publication.files) ? { files: publication.files.map(ref) } : {}) })) } : {}),
+      ...(candidate.deliverables ? { deliverables: candidate.deliverables.map(ref) } : {}) };
+  };
   const planning = async (extra = '') => {
     const text = await execute({ phase: 'plan', prompt: [
       '당신은 비서실장입니다. 직접 실무·파일 작성·도구 위임을 하지 말고 계획 JSON만 응답하세요.',
@@ -141,6 +154,7 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
       'plan.publications는 대표가 지시한 외부 작업 배열입니다. 외부 작업이 없으면 []. 각 항목은 {id,action,service,connection,agent,target,recipients,subject,content}입니다.',
       'action은 mail/post/comment/web입니다. mail/post/comment의 service는 naverworks_mail/naver_blog/naver_cafe/daum_cafe/tistory/brunch이고, content에는 검토할 본문 산출물 단계 id 또는 파일 경로를 씁니다. 메일은 recipients 배열을 채우고, 글은 target에 해당 블로그/게시판/댓글 원문 주소를 지정하세요. 이때 instructions는 빈 문자열, files는 []입니다.',
       'web은 연결 계정의 일반 웹사이트(관리자 화면 등)에서 하는 작업입니다. service "web", connection에 연결된 일반 웹사이트 계정 id, target에 시작 화면 주소, instructions에 직원이 그 사이트에서 할 일(대표 지시 그대로 구체적으로), files에 첨부할 단계 id(예: 업로드할 HTML 산출물)를 씁니다. subject·content는 빈 문자열, recipients는 []입니다. 연결된 일반 웹사이트 계정이 없으면 connection을 빈 문자열로 두세요.',
+      '글·댓글 하나를 올리는 것처럼 단순한 게시 업무는 조사·작성·게시를 같은 직원 한 명에게 맡기세요(단계마다 직원을 바꾸지 않음). 여러 부서의 전문성이 필요한 업무만 나눕니다.',
       '실제 외부 작업은 산출물 작성과 비서실장 검토를 마친 뒤 실행기가 브라우저로 진행합니다. 로그인 정보는 요청하거나 파일에 적지 마세요. 계정이 없으면 connection은 빈 문자열로 두고 자료 준비를 먼저 진행합니다. 연결 계정이 여러 개면 사용할 계정을 확인하세요.',
       '제휴업체 조사 후 주소를 알아내는 메일 업무는 조사 단계 다음에 개인별 발송 문안 JSON 단계를 두세요. {messages:[{recipients:["회사 메일"],subject:"제목",body:"양식을 채운 본문"}],skipped:["연락처 미확인 업체·이유"]}를 작성하고 publication.content에 그 단계 id, recipients에는 []를 씁니다. 검토 후 실행기가 문안별로 자동 발송합니다. 주소·출처를 확인하지 못한 업체에는 보내지 않습니다.',
       '여러 게시글은 검토할 본문 JSON 단계에 {posts:[{subject,body,target}],skipped:[사유]}를 작성하고 publication.content에 그 단계 id를 지정하세요. 실행기가 글마다 별도로 게시합니다. 올릴 게시판이 앞 단계(사이트 조회 등)에서 정해지면 그 게시판 주소(대표가 준 주소와 같은 사이트)를 target에 넣게 하세요. 비우면 publication.target에 올립니다. 유튜브 링크의 영상 ID는 작업 공간 공통 이력과 대조해 재게시를 차단합니다.',
@@ -207,12 +221,7 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
   plan = normalizePlanInputs(plan, { root, taskId: task, fileExists: existsSync });
   plan = { ...plan, stages: plan.stages.map((stage) => ({ ...stage,
     output: relative(root, outputPath(stage.output)).replace(/\\/g, '/') })) };
-  if (plan.publications) plan.publications = plan.publications.map((publication) => ({ ...publication,
-    // 메일 대상 주소가 비었으면 그 서비스의 기본 주소로 채운다(계획 안내는 메일에 주소를 요구하지 않음)
-    ...(publication.action === 'mail' && !publication.target ? { target: CONNECTION_PROVIDERS[serviceProvider(publication.service)]?.loginUrl || publication.target } : {}),
-    content: plan.stages.find((s) => s.id === publication.content || outputPath(s.output) === outputPath(publication.content))?.id || publication.content,
-    ...(Array.isArray(publication.files) ? { files: publication.files.map((ref) => plan.stages.find((s) => s.id === ref || outputPath(s.output) === outputPath(ref))?.id || ref) } : {}) }));
-  if (plan.deliverables) plan.deliverables = plan.deliverables.map((ref) => plan.stages.find((s) => s.id === ref || outputPath(s.output) === outputPath(ref))?.id || ref);
+  plan = normalizeRefs(plan);
   const invalidate = new Set(response.rerunStages || []);
   for (const stage of plan.stages) {
     const previous = saved.plan?.stages?.find((s) => s.id === stage.id);
@@ -320,7 +329,7 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
   const savePlan = (candidate) => {
     const check = validatePlan(candidate, { root, org, taskId: task, fileExists: existsSync });
     if (!check.ok) throw new Error(check.errors.join('\n'));
-    candidate = normalizePlanInputs(candidate, { root, taskId: task, fileExists: existsSync });
+    candidate = normalizeRefs(normalizePlanInputs(candidate, { root, taskId: task, fileExists: existsSync }));
     plan = { ...candidate, stages: candidate.stages.map((stage) => ({ ...stage,
       output: relative(root, safeOutput(stage.output, true)).replace(/\\/g, '/') })) };
     state.plan = plan;
@@ -367,6 +376,45 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
     state.delegated[stage.id] = children.map((c) => c.id);
     persist();
   };
+  // 진행 점검: 단계 묶음이 끝날 때마다 비서실장이 결과를 보고 남은 계획을 그대로 갈지, 고칠지, 대표에게 물을지 정한다
+  // 수정·거부·건너뜀 이력은 최근 50건만 남긴다(대표 피드백이 반복돼도 체크포인트가 커지지 않게)
+  const note = (entry) => { state.revisions = [...state.revisions, { at: new Date().toISOString(), ...entry }].slice(-50); persist(); };
+  const applyRevision = (candidate, reason) => {
+    if (state.revisionCount >= MAX_PLAN_REVISIONS) throw new Error(`계획 수정은 업무당 ${MAX_PLAN_REVISIONS}회까지입니다. 남은 계획대로 진행합니다.`);
+    if (!candidate || !Array.isArray(candidate.stages)) throw new Error('수정한 계획이 비어 있습니다.');
+    if ((candidate.publications || []).some((p) => !allowedActions().includes(p.action))) throw new Error('대표가 지시하지 않은 외부 작업은 계획에 넣을 수 없습니다.');
+    const previous = plan;
+    savePlan({ ...candidate, task });
+    // 완료된 단계는 지우거나 바꾸지 않는다(다시 해야 하면 새 단계를 추가). 어기면 원래 계획으로 되돌린다
+    const same = (id) => JSON.stringify(plan.stages.find((s) => s.id === id)) === JSON.stringify(previous.stages.find((s) => s.id === id));
+    const broken = Object.keys(state.completed).filter((id) => previous.stages.some((s) => s.id === id) && !same(id));
+    if (broken.length) { savePlan(previous); throw new Error(`완료된 단계(${broken.join(', ')})는 바꾸거나 지울 수 없습니다.`); }
+    const before = new Set(previous.stages.map((s) => s.id)), after = new Set(plan.stages.map((s) => s.id));
+    const changed = plan.stages.filter((s) => before.has(s.id) && !same(s.id)).map((s) => s.id);
+    clearDependents(new Set(changed));
+    state.revisionCount++;
+    note({ reason: redactContext(String(reason || '')).slice(0, 500),
+      added: [...after].filter((id) => !before.has(id)), removed: [...before].filter((id) => !after.has(id)), changed });
+  };
+  const progress = async (finished) => {
+    if (state.progressChecks >= MAX_PROGRESS_CHECKS) return null;
+    state.progressChecks++;
+    persist();
+    const decision = parseObject(await execute({ phase: 'progress', prompt: [
+      '당신은 비서실장입니다. 방금 끝난 단계의 산출물을 읽기 전용으로 확인하고, 남은 계획을 그대로 진행할지 판단하세요. 직접 실무·파일 작성은 하지 말고 JSON만 응답하세요.',
+      '{action:"continue"|"revise"|"question",reason:"판단 근거",question:"대표 질문 또는 빈 문자열",revisedPlan:"수정한 전체 계획 또는 null"}',
+      'continue: 남은 단계를 그대로 진행합니다(기본). revisedPlan은 null.',
+      `revise: 결과가 부족하거나 방향을 바꿔야 할 때만 쓰고, 단계를 추가·변경·취소한 전체 계획(계획 형식과 같음)을 revisedPlan에 주세요. 완료된 단계는 지우거나 바꾸지 말고 그대로 두며, 다시 해야 하면 새 단계를 추가하세요. 대표가 허용한 외부 작업만 publications에 둡니다. 남은 수정 가능 횟수: ${MAX_PLAN_REVISIONS - state.revisionCount}회.`,
+      'question: 대표 결정 없이는 더 진행할 수 없을 때만 question에 한 번에 묶어 쓰세요. revisedPlan은 null.',
+      `대표가 허용한 외부 작업: ${JSON.stringify(allowedActions())}`,
+      buildOrgMap(org), context(),
+      `현재 계획: ${JSON.stringify(plan)}`,
+      `완료된 단계: ${JSON.stringify(Object.keys(state.completed))}`,
+      `방금 끝난 단계 산출물: ${JSON.stringify(finished.map((stage) => ({ id: stage.id, output: stage.output })))}`,
+    ].join('\n\n') }));
+    checkStop();
+    return decision;
+  };
   try {
     const waiting = new Map();
     while (true) {
@@ -389,6 +437,25 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
           } catch (err) {
             checkStop();
             waiting.set(stage.id, { phase: 'plan', stage: stage.id, question: err.message });
+          }
+        }
+        // 남은 단계가 있으면 비서실장이 결과를 보고 다음 행동을 정한다(마지막 묶음 뒤는 최종 검토가 맡음)
+        const finished = results.filter((r) => r.result.status === 'done').map((r) => r.stage);
+        if (finished.length && !waiting.size && plan.stages.some((s) => !state.completed[s.id])) {
+          // 진행 점검은 보조 판단이다. 응답이 깨지거나 실패하면(중지 요청 제외) 남은 계획대로 진행한다
+          let decision = null;
+          try { decision = await progress(finished); } catch (err) {
+            checkStop();
+            note({ skipped: redactContext(err.message).slice(0, 300) });
+          }
+          if (decision?.action === 'question' && decision.question?.trim()) return ask([{ phase: 'progress', question: decision.question }]);
+          if (decision?.action === 'revise') {
+            try {
+              applyRevision(decision.revisedPlan, decision.reason);
+            } catch (err) {
+              // 받을 수 없는 수정은 버리고 남은 계획대로 진행한다(이유는 이력에 남김)
+              note({ rejected: redactContext(err.message).slice(0, 300), reason: redactContext(String(decision.reason || '')).slice(0, 300) });
+            }
           }
         }
       }
@@ -431,17 +498,28 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
         state.approvedReview = { signature: reviewSignature, review, evidence }; persist();
         const publications = [];
         let posted = 0;
-        const webJobs = prepared.jobs.filter((job) => job.publication.action === 'web');
-        // 위임이 없으면 일반 웹사이트 작업을 실행 전에 한 번에 묶어 확인받는다.
-        if (webJobs.length && !policy().delegated && !state.webDecision) {
-          const label = (id) => (outbound?.connections() || []).find((c) => c.id === id)?.label || id || '연결 계정 미지정';
-          return ask([{ phase: 'web-confirm', question: `아래 웹사이트 작업을 실행할까요? ("진행" 또는 "하지 마"로 답하세요. 다음부터 확인 없이 하려면 지시에 "끝까지 자동으로"를 적어 주세요.)\n`
-            + webJobs.map((job, i) => `${i + 1}. [${label(job.publication.connection)}] ${job.publication.target} — ${job.body.replace(/\s+/g, ' ').slice(0, 300)}${job.files.length ? ` (첨부: ${job.files.map((f) => basename(f)).join(', ')})` : ''}`).join('\n') }]);
+        // 위임이 없으면 외부 작업(웹사이트·메일·글·댓글)을 실행 전에 한 번에 묶어 확인받는다.
+        // 대표가 미리 등록한 예약·상시 감시 업무의 메일·글·댓글은 등록이 곧 지시이므로 묻지 않는다(웹사이트 작업은 기존대로 확인)
+        const unattended = Boolean(run.schedule || run.monitorId);
+        const needsConfirm = (job) => job.publication.action === 'web' || !unattended;
+        const confirmJobs = prepared.jobs.filter(needsConfirm);
+        if (confirmJobs.length && !policy().delegated && !state.webDecision) {
+          const list = outbound?.connections() || [];
+          // 계정이 계획에 비어 있으면 실행 때처럼 그 서비스의 유일한 계정을 보여 준다
+          const label = (p) => {
+            const chosen = p.connection ? list.find((c) => c.id === p.connection)
+              : p.action === 'web' ? null : (({ length, 0: only }) => length === 1 ? only : null)(list.filter((c) => c.provider === serviceProvider(p.service)));
+            return chosen?.label || p.connection || '연결 계정 미지정';
+          };
+          const kind = { web: '웹사이트 작업', mail: '메일', post: '글', comment: '댓글' };
+          const what = confirmJobs.every((job) => job.publication.action === 'web') ? '웹사이트 작업' : '외부 작업';
+          return ask([{ phase: 'web-confirm', question: `아래 ${what}을 실행할까요? ("진행" 또는 "하지 마"로 답하세요. 다음부터 확인 없이 하려면 지시에 "끝까지 자동으로"를 적어 주세요.)\n`
+            + confirmJobs.map(({ publication: p, body, files = [] }, i) => `${i + 1}. ${p.action === 'web' ? '' : `${kind[p.action] || p.action} `}[${label(p)}] ${p.recipients?.length ? `받는사람 ${p.recipients.join(', ')}` : p.target}${p.subject ? ` · 제목: ${p.subject}` : ''} — ${body.replace(/\s+/g, ' ').slice(0, 300)}${files.length ? ` (첨부: ${files.map((f) => basename(f)).join(', ')})` : ''}`).join('\n') }]);
         }
         // 웹사이트 작업 추정은 넓은 문장 판별이라, 계획에 외부 작업이 없으면 비서실장 계획을 따른다(메일·게시는 확인)
         if (allowedActions().some((action) => action !== 'web') && !(plan.publications || []).length) return ask([{ phase: 'plan', question: '요청하신 외부 작업의 대상·계정·본문을 계획에서 확인하지 못했습니다. 계정 연결과 대상 주소를 확인해 주세요.' }]);
         for (const { publication, body, source: content, files = [] } of prepared.jobs) {
-          if (publication.action === 'web' && state.webDecision === 'declined') { publications.push(`- 웹사이트 작업 ${publication.target}: 대표 결정으로 실행하지 않음`); continue; }
+          if (state.webDecision === 'declined' && needsConfirm({ publication })) { publications.push(`- ${publication.action === 'web' ? '웹사이트 작업' : `${publication.service} ${publication.action}`} ${publication.target}: 대표 결정으로 실행하지 않음`); continue; }
           if (!outbound) return ask([{ phase: 'plan', question: '외부 작업을 위해 계정 연결을 먼저 완료해 주세요.' }]);
           const instance = `${run.id}-publish-${publication.id || publications.length}`;
           const engine = org.departments.find((d) => d.id === org.roster.find((a) => a.id === publication.agent)?.department)?.engine || 'claude';

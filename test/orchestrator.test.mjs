@@ -70,7 +70,7 @@ function fixture(t, options = {}) {
     child.stdin.on('data', (data) => { input += data; });
     child.stdin.on('finish', () => setImmediate(() => {
       call.input = input;
-      const schema = args.includes('--json-schema') ? (JSON.parse(args[args.indexOf('--json-schema') + 1]).properties.plan ? 'plan.json' : JSON.parse(args[args.indexOf('--json-schema') + 1]).properties.status ? 'stage.json' : JSON.parse(args[args.indexOf('--json-schema') + 1]).properties.verdict ? 'review.json' : 'route.json') : args[args.indexOf('--output-schema') + 1] || '';
+      const schema = args.includes('--json-schema') ? (JSON.parse(args[args.indexOf('--json-schema') + 1]).properties.plan ? 'plan.json' : JSON.parse(args[args.indexOf('--json-schema') + 1]).properties.status ? 'stage.json' : JSON.parse(args[args.indexOf('--json-schema') + 1]).properties.verdict ? 'review.json' : JSON.parse(args[args.indexOf('--json-schema') + 1]).properties.revisedPlan ? 'progress.json' : 'route.json') : args[args.indexOf('--output-schema') + 1] || '';
       if (schema.endsWith('plan.json')) {
         call.kind = 'plan'; counts.plan++;
         const task = input.match(/업무 id: ([\d-]+\/run-[\w-]+)\./)?.[1];
@@ -89,6 +89,9 @@ function fixture(t, options = {}) {
         finish(JSON.stringify({ plan, question: options.question || (options.planQuestion && counts.plan === 1 ? '대상 지역을 알려 주세요.' : ''),
           needsMeeting: options.meeting && counts.plan === 1, meetingAgents: ['research-1', 'dev-1'],
           rerunStages: counts.plan > 1 && options.feedback ? ['b'] : [] }));
+      } else if (schema.endsWith('progress.json')) {
+        call.kind = 'progress'; counts.progress = (counts.progress || 0) + 1;
+        finish(JSON.stringify(options.progress ? options.progress(counts.progress, input) : { action: 'continue', reason: '계획대로 진행', question: '', revisedPlan: null }));
       } else if (schema.endsWith('route.json')) {
         call.kind = 'route'; finish(JSON.stringify({ department: 'dev', agent: 'dev-1', reason: '개발부 소관', question: '' }));
       } else if (schema.endsWith('review.json')) {
@@ -546,7 +549,7 @@ test('필요한 계정이 없으면 작업 전에 묻고, 등록 뒤 이어서 �
   const outbound = { connections: () => accounts, async deliver(args) { delivered.push(args); return { status: 'confirmed', resultUrl: 'https://blog.naver.com/x/1' }; },
     browse: (args) => args.execute({ url: 'http://127.0.0.1:9/tools', token: 't', permissionsFile: join(tmpdir(), 'office-fixture-permissions.json'), write: true }) };
   const f = fixture(t, { publication: true, outbound });
-  const first = f.runner.start({ prompt: '자료를 정리하고 블로그에 게시해 줘' });
+  const first = f.runner.start({ prompt: '자료를 정리하고 블로그에 게시해 줘. 끝까지 자동으로 진행해' });
   assert.equal((await f.final(first)).needsReply, true);
   assert.match(f.runner.result(first.id).text, /네이버 블로그·카페 계정[\s\S]*보관함\/계정\.env/);
   assert.deepEqual([f.counts.a, f.counts.b], [0, 0], '계정 확인 전에는 작업을 시작하지 않는다');
@@ -584,7 +587,7 @@ test('계정 재연결은 검토된 원문을 그대로 이어 발행하고 비�
     if (++deliveries === 1) throw new ConnectionRequired('계정 연결이 필요합니다.');
     return { status: 'confirmed', resultUrl: 'https://blog.naver.com/fixture/1' };
   } } });
-  const first = f.runner.start({ prompt: '자료를 정리하고 블로그에 게시해 줘' });
+  const first = f.runner.start({ prompt: '자료를 정리하고 블로그에 게시해 줘. 끝까지 자동으로 진행해' });
   assert.equal((await f.final(first)).needsReply, true);
   const second = f.runner.reply(first.id, { prompt: '계정 연결 완료, 이어서 진행' });
   await f.final(second);
@@ -600,7 +603,7 @@ test('브라우저 도구 연결 실패를 복구하면 검토된 원문·완료
     if (++deliveries === 1) throw new Error('브라우저 실행 도구가 연결되지 않았습니다.');
     return { status: 'confirmed', resultUrl: 'https://blog.naver.com/fixture/1' };
   } } });
-  const first = f.runner.start({ prompt: '자료를 정리하고 블로그에 게시해 줘' });
+  const first = f.runner.start({ prompt: '자료를 정리하고 블로그에 게시해 줘. 끝까지 자동으로 진행해' });
   assert.equal((await f.final(first)).needsReply, true);
   const file = join(f.root, '.office', 'orchestrations', `${first.rootId}.json`);
   const checkpoint = JSON.parse(readFileSync(file));
@@ -624,4 +627,72 @@ test('최종 저장 위치 오류는 대표에게 알리고 복구 후 완료 �
   await f.final(second);
   assert.deepEqual([f.counts.plan, f.counts.a, f.counts.b, f.counts.review], [1, 1, 1, 1]);
   assert.equal(loadTasks(f.root)[0].status, 'done');
+});
+
+// ── 비서실장 진행 루프 ──
+const currentPlan = (input) => JSON.parse(input.match(/현재 계획: (.*)/)[1]);
+test('진행 점검: 비서실장이 결과를 보고 단계를 추가하면 새 단계를 실행하고, 완료 단계는 반복하지 않으며 수정 이력을 남긴다', async (t) => {
+  const f = fixture(t, { progress: (n, input) => {
+    if (n !== 1) return { action: 'continue', reason: '계획대로', question: '', revisedPlan: null };
+    const plan = currentPlan(input);
+    const a = plan.stages.find((s) => s.id === 'a');
+    const c = { id: 'c', title: '보충 조사', dept: 'marketing', agent: 'research-1', inputs: ['a'], dependsOn: ['a'], output: a.output.replace(/-a\.txt$/, '-c.txt'), done: '부족한 근거를 보충한다', parallelGroup: '' };
+    plan.stages = [...plan.stages.map((s) => s.id === 'b' ? { ...s, inputs: ['a', 'c'], dependsOn: ['a', 'c'] } : s), c];
+    return { action: 'revise', reason: '근거가 부족해 보충 조사를 추가', question: '', revisedPlan: plan };
+  } });
+  const first = f.runner.start({ prompt: '자료를 조사해 보고서로 정리해 줘' });
+  await f.final(first);
+  assert.equal(loadTasks(f.root)[0].status, 'done', f.runner.result(first.id).text);
+  assert.deepEqual([f.counts.a, f.counts.c, f.counts.b], [1, 1, 1]);
+  const checkpoint = JSON.parse(readFileSync(join(f.root, '.office', 'orchestrations', `${first.rootId}.json`)));
+  assert.equal(checkpoint.revisionCount, 1);
+  assert.deepEqual(checkpoint.revisions[0].added, ['c']);
+  assert.match(checkpoint.revisions[0].reason, /보충 조사/);
+  assert.ok(checkpoint.plan.stages.some((s) => s.id === 'c'));
+  assert.match(f.calls.find((c) => c.kind === 'plan').input, /단순한 게시 업무는 조사·작성·게시를 같은 직원 한 명에게/);
+  assert.match(f.calls.find((c) => c.kind === 'progress').input, /완료된 단계는 지우거나 바꾸지 말고/);
+});
+
+test('진행 점검: 완료된 단계를 바꾸는 수정은 받지 않고 남은 계획대로 진행한다', async (t) => {
+  const f = fixture(t, { progress: (n, input) => {
+    const plan = currentPlan(input);
+    plan.stages = plan.stages.map((s) => s.id === 'a' ? { ...s, done: '완료 기준을 몰래 바꿈' } : s);
+    return { action: 'revise', reason: '완료 단계 수정 시도', question: '', revisedPlan: plan };
+  } });
+  const first = f.runner.start({ prompt: '자료를 조사해 보고서로 정리해 줘' });
+  await f.final(first);
+  assert.equal(loadTasks(f.root)[0].status, 'done');
+  assert.deepEqual([f.counts.a, f.counts.b], [1, 1]);
+  const checkpoint = JSON.parse(readFileSync(join(f.root, '.office', 'orchestrations', `${first.rootId}.json`)));
+  assert.equal(checkpoint.revisionCount, 0);
+  assert.match(checkpoint.revisions[0].rejected, /완료된 단계\(a\)/);
+  assert.equal(checkpoint.plan.stages.find((s) => s.id === 'a').done, '내용을 작성한다');
+});
+
+test('진행 점검: 대표 결정이 필요하면 묻고, 답하면 완료 단계를 반복하지 않고 이어 간다', async (t) => {
+  const f = fixture(t, { progress: (n) => n === 1 ? { action: 'question', reason: '방향 확인 필요', question: '보고서를 요약본으로 할까요, 상세본으로 할까요?', revisedPlan: null }
+    : { action: 'continue', reason: '답을 반영', question: '', revisedPlan: null } });
+  const first = f.runner.start({ prompt: '자료를 조사해 보고서로 정리해 줘' });
+  const asked = await f.final(first);
+  assert.equal(asked.needsReply, true);
+  assert.match(f.runner.result(first.id).text, /요약본으로 할까요/);
+  await f.final(f.runner.reply(first.id, { prompt: '상세본으로 해줘' }));
+  assert.equal(loadTasks(f.root)[0].status, 'done');
+  assert.deepEqual([f.counts.a, f.counts.b], [1, 1]);
+});
+
+test('외부 글은 위임이 없으면 실행 전에 한 번 확인하고, "진행"이면 올리고 "하지 마"면 올리지 않는다', async (t) => {
+  for (const [answer, expected] of [['진행', 1], ['하지 마', 0]]) {
+    let deliveries = 0;
+    const f = fixture(t, { publication: true, outbound: { connections: () => [{ id: 'naver-1', label: '네이버', provider: 'naver', status: 'connected' }],
+      async deliver() { deliveries++; return { status: 'confirmed', resultUrl: 'https://blog.naver.com/fixture/1' }; } } });
+    const first = f.runner.start({ prompt: '자료를 정리하고 블로그에 게시해 줘' });
+    assert.equal((await f.final(first)).needsReply, true);
+    assert.match(f.runner.result(first.id).text, /외부 작업을 실행할까요[\s\S]*글 \[네이버\] https:\/\/blog\.naver\.com\/fixture/);
+    assert.equal(deliveries, 0, '확인 전에는 올리지 않는다');
+    await f.final(f.runner.reply(first.id, { prompt: answer }));
+    assert.equal(deliveries, expected, answer);
+    assert.equal(loadTasks(f.root)[0].status, 'done');
+    if (!expected) assert.match(readFileSync(join(f.root, 'outputs', ...loadTasks(f.root)[0].id.split('/'), 'report.md'), 'utf8'), /대표 결정으로 실행하지 않음/);
+  }
 });

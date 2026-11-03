@@ -639,7 +639,7 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
         if (r.status === 'done') settle.resolveChild(text || r.summary || '');
         else settle.rejectChild(new Error(r.summary || '직원 실행을 완료하지 못했습니다.'));
       };
-      const childRun = addRun(childSpec, agentId || 'chief', phase === 'stage' ? prompt : `${phase === 'plan' ? '업무 계획' : phase === 'meeting' ? '업무 회의' : '산출물 검토'}: ${run.request}`,
+      const childRun = addRun(childSpec, agentId || 'chief', phase === 'stage' ? prompt : `${phase === 'plan' ? '업무 계획' : phase === 'meeting' ? '업무 회의' : phase === 'progress' ? '진행 점검' : '산출물 검토'}: ${run.request}`,
         { parentId: run.id, rootId: run.rootId, task: run.task });
       children.add(childRun.id);
       if (deadlineAt !== null) {

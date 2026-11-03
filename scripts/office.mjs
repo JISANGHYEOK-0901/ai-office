@@ -19,7 +19,7 @@ import { TASK_STATUSES, loadTasks as loadTaskList, saveTasks as saveTaskList } f
 import { compactPlan, isTaskId, validatePlan } from '../lib/plan.mjs';
 import { MAX_OUTPUT_FILES, planOutputStatus, resolveTaskDir, walkOutputFiles } from '../lib/outputs.mjs';
 import { countReviewRejects } from '../lib/flow.mjs';
-import { MAX_REVIEW_REJECTS } from '../lib/chief-guard.mjs';
+import { MAX_REVIEW_REJECTS } from '../lib/guardrails.mjs';
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 
 const STATUSES = TASK_STATUSES;

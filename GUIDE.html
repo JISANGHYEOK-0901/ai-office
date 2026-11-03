@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Office 사용 가이드</title>
+<meta name="description" content="IntelliJ 설치부터 AI Office 서버 켜기, 업무 지시, 내 마음대로 고쳐 쓰기까지 처음 쓰는 사람을 위한 안내서">
+<style>
+  :root {
+    --bg: #f6f7fb;
+    --card: #ffffff;
+    --ink: #1c2230;
+    --muted: #5b6475;
+    --line: #e3e6ee;
+    --accent: #2f6df6;
+    --accent-soft: #e8efff;
+    --ok: #13855c;
+    --ok-soft: #e4f6ee;
+    --warn: #a15c00;
+    --warn-soft: #fff3df;
+    --code-bg: #1e2433;
+    --code-ink: #e8ecf5;
+    --shadow: 0 1px 2px rgba(20, 30, 60, .06), 0 4px 16px rgba(20, 30, 60, .05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151c;
+      --card: #1a1f2a;
+      --ink: #e7eaf1;
+      --muted: #a3abbb;
+      --line: #2b3240;
+      --accent: #6d9bff;
+      --accent-soft: #1f2a44;
+      --ok: #4fd1a0;
+      --ok-soft: #173329;
+      --warn: #f2b25c;
+      --warn-soft: #362a17;
+      --code-bg: #0c0f15;
+      --code-ink: #e8ecf5;
+      --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151c;
+    --card: #1a1f2a;
+    --ink: #e7eaf1;
+    --muted: #a3abbb;
+    --line: #2b3240;
+    --accent: #6d9bff;
+    --accent-soft: #1f2a44;
+    --ok: #4fd1a0;
+    --ok-soft: #173329;
+    --warn: #f2b25c;
+    --warn-soft: #362a17;
+    --code-bg: #0c0f15;
+    --code-ink: #e8ecf5;
+    --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Malgun Gothic", "맑은 고딕", "Noto Sans KR", sans-serif;
+    font-size: 17px;
+    line-height: 1.7;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 32px 16px 80px; }
+  header.hero { padding: 24px 0 8px; }
+  .hero h1 { font-size: 34px; line-height: 1.3; margin: 0 0 12px; letter-spacing: -0.02em; }
+  .hero p.lead { font-size: 19px; color: var(--muted); margin: 0; }
+  .os-switch {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin: 24px -16px 8px; padding: 10px 16px;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--line);
+  }
+  .os-switch span { font-weight: 600; margin-right: 4px; }
+  .os-switch button, .copy {
+    font: inherit; cursor: pointer; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    padding: 6px 16px; font-size: 15px;
+  }
+  .os-switch button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .os-switch .theme { margin-left: auto; }
+  nav.toc {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 18px 22px; box-shadow: var(--shadow); margin: 16px 0 28px;
+  }
+  nav.toc strong { display: block; margin-bottom: 6px; }
+  nav.toc ol { margin: 0; padding-left: 22px; columns: 2; column-gap: 32px; }
+  nav.toc a { color: var(--accent); text-decoration: none; }
+  nav.toc a:hover { text-decoration: underline; }
+  section.part { margin: 40px 0 0; scroll-margin-top: 64px; }
+  section.part > h2 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  section.part > p.sub { color: var(--muted); margin: 0 0 16px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 20px 22px; margin: 14px 0; box-shadow: var(--shadow);
+  }
+  .step { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; }
+  .step > div, .cmd code { min-width: 0; }
+  .num {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: var(--accent); color: #fff; font-weight: 700; font-size: 20px;
+    display: grid; place-items: center;
+  }
+  .step h3 { margin: 6px 0 8px; font-size: 20px; }
+  .step ol, .step ul, .card ul, .card ol { margin: 8px 0; padding-left: 22px; }
+  .step li, .card li { margin: 4px 0; }
+  .btnlike {
+    display: inline-block; padding: 0 8px; border-radius: 6px;
+    background: var(--accent-soft); color: var(--accent); font-weight: 600; white-space: nowrap;
+  }
+  kbd {
+    font-family: inherit; font-size: 14px; padding: 1px 7px; border-radius: 6px;
+    border: 1px solid var(--line); border-bottom-width: 2px; background: var(--card); white-space: nowrap;
+  }
+  .cmd {
+    display: flex; align-items: center; gap: 10px; margin: 10px 0;
+    background: var(--code-bg); color: var(--code-ink); border-radius: 12px; padding: 12px 12px 12px 16px;
+  }
+  .cmd code { flex: 1; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 15px; overflow-x: auto; white-space: pre; }
+  .cmd .copy { background: #2d3548; color: #fff; border-color: #3b4660; padding: 4px 12px; font-size: 14px; flex: none; }
+  .say {
+    margin: 10px 0; padding: 12px 16px; border-radius: 12px;
+    background: var(--accent-soft); border-left: 4px solid var(--accent); font-weight: 600;
+  }
+  .say::before { content: "AI에게 이렇게 말하기 · "; font-weight: 400; color: var(--muted); font-size: 14px; display: block; }
+  .tip, .warn, .ok {
+    border-radius: 12px; padding: 12px 16px; margin: 12px 0; font-size: 16px;
+  }
+  .tip { background: var(--accent-soft); }
+  .ok { background: var(--ok-soft); }
+  .warn { background: var(--warn-soft); }
+  .tip b:first-child, .ok b:first-child, .warn b:first-child { margin-right: 6px; }
+  .ok b:first-child { color: var(--ok); }
+  .warn b:first-child { color: var(--warn); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid2 .card { margin: 0; }
+  .grid2 h3 { margin: 0 0 6px; font-size: 18px; }
+  .check { list-style: none; padding-left: 0 !important; }
+  .check li { padding-left: 30px; position: relative; }
+  .check li::before { content: "☐"; position: absolute; left: 4px; color: var(--accent); }
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+  .flow span.box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; font-size: 15px; }
+  .flow span.arrow { color: var(--muted); }
+  details { border-top: 1px solid var(--line); padding: 10px 0; }
+  details:first-of-type { border-top: 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  details p, details ul { margin: 8px 0 0; color: var(--ink); }
+  a { color: var(--accent); }
+  footer { margin-top: 48px; color: var(--muted); font-size: 14px; text-align: center; }
+  [data-os="win"] .only-mac, [data-os="mac"] .only-win,
+  [data-ai="codex"] .only-claude, [data-ai="claude"] .only-codex { display: none !important; }
+  .os-switch .ai-label { margin-left: 12px; }
+  @media (max-width: 640px) {
+    body { font-size: 16px; }
+    .hero h1 { font-size: 27px; }
+    nav.toc ol { columns: 1; }
+    .grid2 { grid-template-columns: 1fr; }
+    .step { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+    .num { width: 36px; height: 36px; font-size: 17px; }
+    .card { padding: 16px; }
+    .os-switch .theme, .os-switch .ai-label { margin-left: 0; }
+  }
+  @media print {
+    .os-switch, .copy { display: none !important; }
+    body { background: #fff; }
+    .card { box-shadow: none; break-inside: avoid; }
+  }
+</style>
+</head>
+<body data-os="mac" data-ai="claude">
+<div class="wrap">
+
+<header class="hero">
+  <h1>AI Office 사용 가이드</h1>
+  <p class="lead">AI 직원들에게 사무 업무를 나눠 맡기는 프로그램입니다. Claude와 Codex(ChatGPT) 중 하나만 있어도 되고, 둘 다 쓸 수도 있습니다. 컴퓨터를 잘 몰라도 이 순서대로만 따라 하면 됩니다. 처음 한 번 준비하는 데 30분쯤 걸립니다.</p>
+</header>
+
+<div class="os-switch" role="group" aria-label="내 환경 선택">
+  <span>내 컴퓨터:</span>
+  <button type="button" data-set-os="mac" aria-pressed="true">맥 (Mac)</button>
+  <button type="button" data-set-os="win" aria-pressed="false">윈도우 (Windows)</button>
+  <span class="ai-label">쓸 AI:</span>
+  <button type="button" data-set-ai="claude" aria-pressed="true">Claude</button>
+  <button type="button" data-set-ai="codex" aria-pressed="false">Codex (ChatGPT)</button>
+  <button type="button" class="theme" id="themeBtn">화면 밝기 바꾸기</button>
+</div>
+
+<nav class="toc" aria-label="목차">
+  <strong>목차</strong>
+  <ol>
+    <li><a href="#what">AI Office는 무엇인가요</a></li>
+    <li><a href="#ready">준비물</a></li>
+    <li><a href="#install">처음 한 번만: 설치하기</a></li>
+    <li><a href="#start">서버 켜기</a></li>
+    <li><a href="#use">대시보드 사용법</a></li>
+    <li><a href="#custom">내 마음대로 고쳐 쓰기</a></li>
+    <li><a href="#daily">매일 쓰는 순서</a></li>
+    <li><a href="#safe">꼭 지켜 주세요</a></li>
+    <li><a href="#help">막혔을 때</a></li>
+  </ol>
+</nav>
+
+<section class="part" id="what">
+  <h2>1. AI Office는 무엇인가요</h2>
+  <p class="sub">내 컴퓨터 안에 작은 회사를 하나 차린다고 생각하면 됩니다.</p>
+  <div class="card">
+    <ul>
+      <li><b>대표는 나</b>입니다. 화면에 업무를 적으면 <b>비서실장</b>(AI)이 받아서 일을 나눕니다.</li>
+      <li>마케팅부·문서제작부 같은 <b>부서와 AI 직원</b>을 내가 만들고, 직원들이 조사·문서 작성·검토를 나눠 합니다.</li>
+      <li>진행 상황은 브라우저의 <b>대시보드</b>(관제 화면)에서 실시간으로 보입니다. 다 끝나면 결과 파일을 보여 줍니다.</li>
+      <li>모든 것이 <b>내 컴퓨터에서만</b> 돌아갑니다. 인터넷에 따로 서버를 올리지 않습니다.</li>
+    </ul>
+    <div class="flow" aria-label="업무 흐름">
+      <span class="box">대표가 지시</span><span class="arrow">→</span>
+      <span class="box">비서실장이 분담</span><span class="arrow">→</span>
+      <span class="box">직원들이 작업</span><span class="arrow">→</span>
+      <span class="box">비서실장 검토</span><span class="arrow">→</span>
+      <span class="box">결과 전달</span>
+    </div>
+  </div>
+  <div class="tip"><b>알아 두기</b>이 가이드에서는 명령어를 외울 필요가 없습니다. 설치 때 딱 한 줄만 복사해서 붙여 넣고, 그다음부터는 터미널의 <b>AI(Claude 또는 Codex)에게 말로 부탁</b>하면 AI가 대신 처리합니다. 위쪽 <b>쓸 AI</b>에서 Claude나 Codex를 고르면 그에 맞는 설명만 보입니다.</div>
+</section>
+
+<section class="part" id="ready">
+  <h2>2. 준비물</h2>
+  <p class="sub">시작하기 전에 아래를 확인해 주세요.</p>
+  <div class="card">
+    <ul class="check">
+      <li><b>컴퓨터</b>: 맥(macOS 13 이상) 또는 윈도우(10 이상). 인터넷 연결.</li>
+      <li><b>AI 유료 구독 계정 하나 이상</b>: 비서실장과 직원들이 이 계정으로 일합니다. 둘 중 하나만 있어도 됩니다.
+        <ul>
+          <li><b>Claude</b> (Pro 또는 Max): <a href="https://claude.ai" target="_blank" rel="noopener">claude.ai</a>에서 가입</li>
+          <li><b>Codex</b> = ChatGPT 유료 구독 (Plus·Pro 등): <a href="https://chatgpt.com" target="_blank" rel="noopener">chatgpt.com</a>에서 가입</li>
+        </ul>
+      </li>
+      <li><b>둘 다 있으면</b> 기본 설정 그대로 씁니다. 계획·실무는 Claude가, 최종 검토는 Codex가 맡습니다.</li>
+      <li><b>컴퓨터 관리자 비밀번호</b>: 프로그램을 설치할 때 물어볼 수 있습니다.</li>
+    </ul>
+  </div>
+  <div class="warn"><b>주의</b>계정은 <b>반드시 본인 것</b>을 쓰세요. 한 사람의 계정을 여러 명이 같이 쓰면 사용량 한도가 금방 찹니다.</div>
+</section>
+
+<section class="part" id="install">
+  <h2>3. 처음 한 번만: 설치하기</h2>
+  <p class="sub">위에서 내 컴퓨터 종류(맥/윈도우)를 먼저 고르면 그에 맞는 설명만 보입니다.</p>
+
+  <div class="card step">
+    <div class="num">1</div>
+    <div>
+      <h3>Node.js 설치하기</h3>
+      <p>AI Office를 돌리는 데 필요한 기본 프로그램입니다.</p>
+      <ol>
+        <li><a href="https://nodejs.org/ko" target="_blank" rel="noopener">nodejs.org</a>에 들어갑니다.</li>
+        <li>초록색 <span class="btnlike">LTS</span>라고 적힌 다운로드 버튼을 누릅니다.</li>
+        <li>받은 설치 파일을 열고 <span class="btnlike">계속</span> / <span class="btnlike">Next</span>만 눌러 끝까지 설치합니다.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">2</div>
+    <div>
+      <h3>IntelliJ IDEA 설치하기</h3>
+      <p>프로그램 파일을 받고, AI와 대화할 터미널(검은 글씨 창)을 여는 데 씁니다.</p>
+      <ol>
+        <li><a href="https://www.jetbrains.com/ko-kr/idea/download/" target="_blank" rel="noopener">IntelliJ IDEA 다운로드 페이지</a>에 들어갑니다.</li>
+        <li class="only-mac">맥은 내 컴퓨터 칩에 맞는 파일을 고릅니다. 잘 모르면 화면 왼쪽 위 사과 메뉴 → <b>이 Mac에 관하여</b>에서 <b>Apple M1·M2·M3…</b>이면 <b>Apple Silicon</b>, <b>Intel</b>이면 <b>Intel</b>을 고릅니다.</li>
+        <li><b>무료로 쓸 수 있는 버전</b>을 받아 설치합니다. 결제하지 않아도 됩니다.</li>
+        <li class="only-mac">받은 파일을 열고, IntelliJ 아이콘을 <b>응용 프로그램(Applications)</b> 폴더로 끌어다 놓습니다.</li>
+        <li class="only-win">받은 설치 파일을 열고 <span class="btnlike">Next</span>를 눌러 끝까지 설치합니다.</li>
+        <li>IntelliJ를 처음 켜면 약관 동의·설정 화면이 나옵니다. 기본값 그대로 넘어가면 됩니다.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">3</div>
+    <div>
+      <h3>AI Office 받기 (깃 클론)</h3>
+      <p>인터넷에 있는 AI Office 프로그램을 내 컴퓨터로 복사해 오는 단계입니다.</p>
+      <ol>
+        <li>IntelliJ 첫 화면에서 <span class="btnlike">Clone Repository</span>를 누릅니다. (버전에 따라 <span class="btnlike">Get from VCS</span> 또는 <span class="btnlike">저장소 복제</span>로 보일 수 있습니다.)</li>
+        <li><b>URL</b> 칸에 아래 주소를 붙여 넣습니다.
+          <div class="cmd"><code>https://github.com/JISANGHYEOK-0901/ai-office.git</code><button type="button" class="copy">복사</button></div>
+        </li>
+        <li><b>Directory</b>(저장할 위치)는 그대로 둬도 됩니다.</li>
+        <li><span class="btnlike">Clone</span>을 누릅니다.</li>
+        <li>“Git이 없습니다”라는 안내가 나오면 <span class="btnlike">Download and Install</span>(다운로드 및 설치)을 누르고 기다립니다.<span class="only-mac"> 맥에서 “개발자 도구를 설치하겠습니까?” 창이 뜨면 <span class="btnlike">설치</span>를 누릅니다.</span></li>
+        <li>“이 프로젝트를 신뢰하시겠습니까?” 창이 나오면 <span class="btnlike">Trust Project</span>(신뢰)를 누릅니다.</li>
+      </ol>
+      <div class="ok"><b>완료</b>왼쪽에 <b>ai-office</b> 폴더와 파일 목록이 보이면 성공입니다.</div>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">4</div>
+    <div>
+      <h3>터미널 열기</h3>
+      <ol>
+        <li>IntelliJ 화면 <b>왼쪽 아래</b>의 <b>터미널 아이콘</b>(<code>&gt;_</code> 모양)을 누릅니다.<br>
+          또는 단축키 <span class="only-mac"><kbd>⌥ Option</kbd> + <kbd>F12</kbd></span><span class="only-win"><kbd>Alt</kbd> + <kbd>F12</kbd></span>를 누릅니다.</li>
+        <li>아래쪽에 글자를 입력할 수 있는 창이 열립니다. 이 창을 <b>터미널</b>이라고 부릅니다.</li>
+      </ol>
+      <div class="tip"><b>팁</b>메뉴에서 찾으려면 <b>View(보기) → Tool Windows(도구 창) → Terminal(터미널)</b>입니다.</div>
+    </div>
+  </div>
+
+  <div class="card step only-claude">
+    <div class="num">5</div>
+    <div>
+      <h3>Claude 설치하기 (복사·붙여넣기 한 번)</h3>
+      <p>아래 한 줄을 <span class="btnlike">복사</span>해서 터미널에 붙여 넣고 <kbd>Enter</kbd>를 누릅니다. 설치가 끝날 때까지 1~2분 기다립니다.</p>
+      <div class="only-mac">
+        <div class="cmd"><code>curl -fsSL https://claude.ai/install.sh | bash</code><button type="button" class="copy">복사</button></div>
+        <p>붙여 넣기: <kbd>⌘ Command</kbd> + <kbd>V</kbd></p>
+      </div>
+      <div class="only-win">
+        <div class="cmd"><code>irm https://claude.ai/install.ps1 | iex</code><button type="button" class="copy">복사</button></div>
+        <p>붙여 넣기: <kbd>Ctrl</kbd> + <kbd>V</kbd> (안 되면 마우스 오른쪽 클릭)</p>
+      </div>
+      <ol>
+        <li>설치가 끝나면 터미널 창 위쪽의 <b>＋</b> 버튼을 눌러 <b>새 터미널</b>을 엽니다. (또는 IntelliJ를 껐다 켭니다.)</li>
+      </ol>
+      <div class="tip"><b>팁</b>설치 마지막에 “PATH에 추가하세요”처럼 영어 안내가 나오면, 그 안내 줄을 그대로 복사해 붙여 넣고 <kbd>Enter</kbd>를 누른 뒤 새 터미널을 엽니다.</div>
+    </div>
+  </div>
+
+  <div class="card step only-codex">
+    <div class="num">5</div>
+    <div>
+      <h3>Codex 설치하기 (복사·붙여넣기 한 번)</h3>
+      <p>아래 한 줄을 <span class="btnlike">복사</span>해서 터미널에 붙여 넣고 <kbd>Enter</kbd>를 누릅니다. 설치가 끝날 때까지 1~2분 기다립니다.</p>
+      <div class="cmd"><code>npm install -g @openai/codex</code><button type="button" class="copy">복사</button></div>
+      <p class="only-mac">붙여 넣기: <kbd>⌘ Command</kbd> + <kbd>V</kbd></p>
+      <p class="only-win">붙여 넣기: <kbd>Ctrl</kbd> + <kbd>V</kbd> (안 되면 마우스 오른쪽 클릭)</p>
+      <ol>
+        <li>설치가 끝나면 터미널 창 위쪽의 <b>＋</b> 버튼을 눌러 <b>새 터미널</b>을 엽니다. (또는 IntelliJ를 껐다 켭니다.)</li>
+      </ol>
+      <div class="tip only-mac"><b>팁</b>“permission denied” 또는 “EACCES”라는 글자가 나오면 아래 줄을 대신 붙여 넣고, 맥 로그인 비밀번호를 입력한 뒤 <kbd>Enter</kbd>를 누릅니다. 비밀번호는 입력해도 화면에 보이지 않는 것이 정상입니다.
+        <div class="cmd"><code>sudo npm install -g @openai/codex</code><button type="button" class="copy">복사</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card step only-claude">
+    <div class="num">6</div>
+    <div>
+      <h3>Claude 실행하고 로그인하기</h3>
+      <ol>
+        <li>터미널에 <code>claude</code>라고 입력하고 <kbd>Enter</kbd>를 누릅니다.
+          <div class="cmd"><code>claude</code><button type="button" class="copy">복사</button></div>
+        </li>
+        <li>화면 색 고르기가 나오면 방향키로 고르고 <kbd>Enter</kbd>.</li>
+        <li>로그인 방법은 <b>Claude 구독 계정(Claude account with subscription)</b>을 고릅니다.</li>
+        <li>브라우저가 열리면 내 Claude 계정으로 로그인하고 <span class="btnlike">승인(Authorize)</span>을 누릅니다. 다시 IntelliJ로 돌아옵니다.</li>
+        <li>“이 폴더의 파일을 신뢰하나요?”라고 물으면 <span class="btnlike">Yes, proceed</span>를 고릅니다.</li>
+      </ol>
+      <div class="ok"><b>완료</b>입력창(<code>&gt;</code>)이 보이면 이제 Claude와 대화할 수 있습니다. 여기서부터는 <b>명령어 대신 한국어로 말하면</b> 됩니다.</div>
+    </div>
+  </div>
+
+  <div class="card step only-codex">
+    <div class="num">6</div>
+    <div>
+      <h3>Codex 실행하고 로그인하기</h3>
+      <ol>
+        <li>터미널에 <code>codex</code>라고 입력하고 <kbd>Enter</kbd>를 누릅니다.
+          <div class="cmd"><code>codex</code><button type="button" class="copy">복사</button></div>
+        </li>
+        <li>로그인 방법은 <b>ChatGPT로 로그인(Sign in with ChatGPT)</b>을 고릅니다.</li>
+        <li>브라우저가 열리면 내 ChatGPT 계정으로 로그인하고 허용합니다. 다시 IntelliJ로 돌아옵니다.</li>
+        <li>“이 폴더를 신뢰하나요?”처럼 물으면 <b>Yes</b>(신뢰)를 고릅니다.</li>
+      </ol>
+      <div class="ok"><b>완료</b>입력창이 보이면 이제 Codex와 대화할 수 있습니다. 여기서부터는 <b>명령어 대신 한국어로 말하면</b> 됩니다.</div>
+    </div>
+  </div>
+
+  <div class="tip"><b>둘 다 쓰고 싶다면</b>위쪽 <b>쓸 AI</b>를 바꿔 5~6단계를 한 번 더 하면 됩니다. 또는 먼저 설치한 AI에게 <b>“Codex도 설치해줘”</b>(또는 “Claude도 설치해줘”)라고 부탁합니다. 로그인은 브라우저 창이 뜨면 직접 해 주세요.</div>
+</section>
+
+<section class="part" id="start">
+  <h2>4. 서버 켜기</h2>
+  <p class="sub">“서버”는 AI Office 대시보드를 내 컴퓨터에서 돌아가게 하는 것입니다.</p>
+  <div class="card">
+    <p>Claude 또는 Codex 입력창에 이렇게 적고 <kbd>Enter</kbd>를 누릅니다.</p>
+    <div class="say">AI Office 서버 켜줘</div>
+    <ul>
+      <li>처음에는 AI가 필요한 부품을 설치하고 환경을 점검합니다. 몇 분 걸릴 수 있습니다.</li>
+      <li>중간에 <b>“이 작업을 실행해도 될까요?”</b>(Claude: Do you want to proceed? / Codex: Allow command?)라고 물으면, 설명을 읽고 <b>Yes</b>를 고릅니다.</li>
+      <li>끝나면 브라우저에 대시보드가 열립니다. 직접 열려면 주소창에 <b>http://127.0.0.1:4777</b> 을 입력합니다.</li>
+    </ul>
+    <div class="warn"><b>주의</b>서버를 켠 <b>IntelliJ 터미널 창은 닫지 마세요.</b> 창을 닫거나 AI를 끝내면 서버도 꺼질 수 있습니다.</div>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <h3>서버 끄기</h3>
+      <div class="say">서버 꺼줘</div>
+    </div>
+    <div class="card">
+      <h3>잘 안 될 때</h3>
+      <div class="say">서버가 안 켜져. 원인 찾아서 고쳐줘</div>
+    </div>
+  </div>
+</section>
+
+<section class="part" id="use">
+  <h2>5. 대시보드 사용법</h2>
+  <p class="sub">처음에는 회사가 비어 있습니다. 부서와 직원부터 만듭니다.</p>
+
+  <div class="card step">
+    <div class="num">1</div>
+    <div>
+      <h3>부서 만들기</h3>
+      <ul>
+        <li>처음 화면의 <span class="btnlike">첫 부서 만들기</span> 카드나 <span class="btnlike">+ 부서 추가</span>를 누릅니다.</li>
+        <li>마케팅·리서치·운영·재무처럼 <b>미리 만들어 둔 부서(프리셋)</b>를 고르면 편합니다. <span class="btnlike">인원까지 추가</span>를 누르면 직원도 한 번에 채워집니다.</li>
+        <li class="only-codex">Codex만 쓴다면 부서를 만들 때 <b>엔진</b>을 <b>Codex</b>로, 역할을 <b>실행</b>으로 고릅니다.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">2</div>
+    <div>
+      <h3>직원 추가하기</h3>
+      <ul>
+        <li>부서 카드의 <span class="btnlike">+ 직원 추가</span>를 누르고 이름(예: 김대리), 직급, 담당 업무를 정합니다.</li>
+        <li>직원마다 <b>근무 / 휴무</b>를 바꿀 수 있습니다. 휴무인 직원은 일을 받지 않습니다.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">3</div>
+    <div>
+      <h3>업무 지시하기</h3>
+      <ul>
+        <li>화면 위쪽 <b>비서실장</b> 입력창에 하고 싶은 일을 평소 말투로 적고 <span class="btnlike">지시하기</span>를 누릅니다.</li>
+        <li>예: “경쟁사 3곳 가격 정책 조사해서 보고서로 정리해 줘”, “마케팅부가 조사하고 문서제작부가 HTML로 만들어 줘”</li>
+        <li>담당을 적지 않으면 비서실장이 관련 부서와 <b>회의</b>를 열어 알아서 나눕니다.</li>
+        <li>입력창 옆의 <b>Codex / Claude</b> 선택은 <b>최종 검토</b>를 누가 할지 정합니다.
+          <span class="only-claude">Claude만 쓴다면 <b>Claude</b>로 바꿔 주세요.</span>
+          <span class="only-codex">Codex만 쓴다면 그대로 <b>Codex</b>에 둡니다. Claude가 없으면 계획·실무·검토를 모두 Codex가 맡습니다.</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">4</div>
+    <div>
+      <h3>진행 보기와 답하기</h3>
+      <ul>
+        <li><b>관제</b> 탭: 부서별 진행 상황, <b>사무실</b> 탭: 직원들이 움직이는 모습, 오른쪽 <b>실시간 피드</b>: 누가 무엇을 하는지.</li>
+        <li>AI가 물어볼 것이 있으면 <b>“답변 필요”</b> 표시가 뜹니다. 눌러서 답을 적고 <span class="btnlike">보내기</span>. 잘 모르겠으면 <b>“기본값으로 진행”</b>이라고만 써도 됩니다.</li>
+        <li>업무가 끝나면 <b>완료 창</b>에 결과 파일이 나옵니다. HTML 파일은 <span class="btnlike">새 탭에서 열기</span>로 봅니다. 지난 결과는 <b>산출물</b> 탭에 모여 있습니다.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">5</div>
+    <div>
+      <h3>그 밖에 자주 쓰는 기능</h3>
+      <ul>
+        <li><span class="btnlike">회사 설정</span>: 모든 직원이 지킬 회사 규칙, 회사 구성 <b>내보내기(백업)·가져오기</b>.</li>
+        <li><span class="btnlike">반복 예약</span>: “매일 오전 11시에 이 업무 하기”처럼 정해진 시간에 자동으로 일을 시킵니다. 컴퓨터와 서버가 켜져 있어야 실행됩니다.</li>
+        <li><span class="btnlike">계정 연결</span>: 메일 발송·카페 글 게시처럼 바깥 사이트에서 할 일이 있을 때 내 계정을 연결합니다. 비밀번호는 연결 창에만 입력합니다.</li>
+        <li><span class="btnlike">내역 초기화</span>: 끝난 업무·실행 기록을 정리합니다. 결과 파일과 계정은 지워지지 않습니다.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="part" id="custom">
+  <h2>6. 내 마음대로 고쳐 쓰기</h2>
+  <p class="sub">AI Office는 쓰면서 내 일에 맞게 계속 바꿔 나가는 프로그램입니다.</p>
+  <div class="grid2">
+    <div class="card">
+      <h3>화면에서 바로 바꾸기</h3>
+      <ul>
+        <li>부서·직원 추가, 수정, 삭제</li>
+        <li>직원 담당 업무와 상세 지침</li>
+        <li>직원마다 쓸 AI 모델</li>
+        <li>회사 공통 규칙, 반복 예약</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>AI에게 말로 바꾸기</h3>
+      <ul>
+        <li>화면 모양, 버튼, 색깔</li>
+        <li>새 기능 추가</li>
+        <li>불편한 동작 고치기</li>
+        <li>사용법 질문</li>
+      </ul>
+    </div>
+  </div>
+  <div class="card">
+    <p>IntelliJ 터미널의 Claude 또는 Codex에게 이렇게 말해 보세요.</p>
+    <div class="say">대시보드 실시간 피드 글씨를 더 크게 바꿔줘</div>
+    <div class="say">완료된 업무를 엑셀 파일로 내려받는 버튼을 만들어줘</div>
+    <div class="say">방금 고친 거 잘 되는지 확인하고 서버 다시 켜줘</div>
+    <div class="say">반복 예약은 어떻게 쓰는 거야?</div>
+    <ul>
+      <li><b>한 번에 하나씩</b> 부탁하면 결과가 더 정확합니다.</li>
+      <li>고친 뒤 마음에 안 들면 <b>“방금 바꾼 거 되돌려줘”</b>라고 하면 됩니다.</li>
+      <li>AI가 고친 뒤 스스로 검사(테스트)를 돌려 확인합니다.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="part" id="daily">
+  <h2>7. 매일 쓰는 순서</h2>
+  <div class="card">
+    <div class="flow">
+      <span class="box">IntelliJ 열기</span><span class="arrow">→</span>
+      <span class="box">터미널 열기</span><span class="arrow">→</span>
+      <span class="box"><code class="only-claude">claude</code><code class="only-codex">codex</code> 입력</span><span class="arrow">→</span>
+      <span class="box">“서버 켜줘”</span><span class="arrow">→</span>
+      <span class="box">브라우저에서 업무 지시</span>
+    </div>
+    <ul>
+      <li>다 쓰면 AI에게 <b>“서버 꺼줘”</b>라고 하거나 IntelliJ를 닫습니다.</li>
+      <li>새 버전이 나왔다고 들으면 이렇게 부탁합니다.</li>
+    </ul>
+    <div class="say">AI Office 최신 버전으로 업데이트해줘. 내가 고친 부분은 유지해줘</div>
+  </div>
+</section>
+
+<section class="part" id="safe">
+  <h2>8. 꼭 지켜 주세요</h2>
+  <div class="card">
+    <ul>
+      <li><b>비밀번호·카드번호·인증번호를 AI 대화창이나 업무 지시에 적지 마세요.</b> 바깥 사이트 계정은 <span class="btnlike">계정 연결</span> 창에서만 로그인합니다.</li>
+      <li>메일 발송·글 게시처럼 <b>밖으로 나가는 일</b>은 내가 지시한 경우에만 실행됩니다. 지시하지 않으면 초안까지만 만듭니다. 송금·결제·세금 신고·계약은 AI가 하지 않습니다.</li>
+      <li>AI가 만든 숫자와 사실은 <b>중요한 곳에 쓰기 전에 꼭 원본과 확인</b>하세요. 결과 보고서의 “확인 필요” 항목을 먼저 봅니다.</li>
+      <li>모든 작업은 <b>내 Claude·ChatGPT 계정 사용량</b>을 씁니다. 큰 업무를 한꺼번에 많이 맡기면 한도가 빨리 찰 수 있습니다.</li>
+      <li>회사 데이터(부서·직원·결과 파일)는 내 컴퓨터의 <b>AIOffice</b> 폴더에 있습니다. 컴퓨터를 바꾸기 전에는 <span class="btnlike">회사 설정 → 회사 구성 내보내기</span>로 백업하세요.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="part" id="help">
+  <h2>9. 막혔을 때</h2>
+  <p class="sub">대부분은 터미널의 AI에게 화면에 보이는 그대로 말하면 해결됩니다.</p>
+  <div class="card">
+    <details>
+      <summary><code>claude</code>나 <code>codex</code>를 입력했더니 “찾을 수 없다(command not found)”고 나와요</summary>
+      <p>터미널 창 위의 <b>＋</b>로 새 터미널을 열거나 IntelliJ를 껐다 켠 뒤 다시 입력합니다. 그래도 안 되면 <a href="#install">3-5단계</a>의 설치 줄을 한 번 더 붙여 넣습니다.</p>
+    </details>
+    <details>
+      <summary>AI가 자꾸 “실행해도 될까요?”라고 물어봐요</summary>
+      <p>AI가 내 컴퓨터에서 무언가를 실행하기 전에 허락을 받는 정상 동작입니다. 설명을 읽고 괜찮으면 <b>Yes</b>를 고릅니다. 모르겠으면 <b>“이거 뭐 하는 거야?”</b>라고 물어보세요.</p>
+    </details>
+    <details>
+      <summary>브라우저에 대시보드가 안 열려요</summary>
+      <p>주소창에 <b>http://127.0.0.1:4777</b> 을 직접 입력합니다. 그래도 안 되면 AI에게 <b>“서버 상태 확인해줘”</b>라고 말합니다.</p>
+    </details>
+    <details>
+      <summary>화면 위에 “Claude/Codex가 설치되지 않았습니다”라고 떠요</summary>
+      <p>둘 중 하나만 쓰기로 했다면 안 쓰는 쪽 안내는 무시해도 됩니다. Claude만 쓰면 상단 검토 선택을 <b>Claude</b>로 바꿉니다. Codex만 쓰면 Codex가 계획·실무·검토를 모두 맡습니다. 나중에 다른 쪽도 쓰고 싶으면 AI에게 <b>“Codex도 설치해줘”</b>(또는 “Claude도 설치해줘”)라고 말합니다.</p>
+    </details>
+    <details>
+      <summary>업무가 멈춘 것 같아요</summary>
+      <p>오른쪽 <b>업무 · 실행</b> 목록에서 상태를 봅니다. “답변 필요”라면 답을 적어 주세요. 멈췄다면 그 실행을 중지한 뒤 대화창에 <b>“이어서 재개”</b>라고 답하면 끝난 단계는 건너뛰고 이어서 합니다.</p>
+    </details>
+    <details>
+      <summary>“사용량 한도에 도달했습니다”라고 나와요</summary>
+      <p>내 Claude 또는 ChatGPT 구독의 사용량을 다 쓴 상태입니다. 안내된 시간이 지나면 다시 쓸 수 있습니다. 둘 다 있다면 다른 쪽 AI로 바꿔 써도 됩니다.</p>
+    </details>
+    <details>
+      <summary>그 밖의 문제</summary>
+      <p>화면에 나온 오류 문장을 그대로 복사해서 AI에게 붙여 넣고 <b>“이거 해결해줘”</b>라고 말합니다.</p>
+    </details>
+  </div>
+</section>
+
+<footer>
+  AI Office · 이 가이드는 프로그램 폴더의 <code>GUIDE.html</code>입니다. 더 자세한 설명은 <code>README.md</code>에 있습니다.
+</footer>
+
+</div>
+<script>
+(function () {
+  var body = document.body;
+  var store = {
+    get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  };
+  function setOs(os) {
+    body.setAttribute('data-os', os);
+    document.querySelectorAll('[data-set-os]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-set-os') === os));
+    });
+    store.set('aio-guide-os', os);
+  }
+  function setAi(ai) {
+    body.setAttribute('data-ai', ai);
+    document.querySelectorAll('[data-set-ai]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-set-ai') === ai));
+    });
+    store.set('aio-guide-ai', ai);
+  }
+  var savedAi = store.get('aio-guide-ai');
+  setAi(savedAi === 'codex' ? 'codex' : 'claude');
+  document.querySelectorAll('[data-set-ai]').forEach(function (b) {
+    b.addEventListener('click', function () { setAi(b.getAttribute('data-set-ai')); });
+  });
+  var saved = store.get('aio-guide-os');
+  setOs(saved === 'mac' || saved === 'win' ? saved : (/Win/i.test(navigator.platform || navigator.userAgent) ? 'win' : 'mac'));
+  document.querySelectorAll('[data-set-os]').forEach(function (b) {
+    b.addEventListener('click', function () { setOs(b.getAttribute('data-set-os')); });
+  });
+
+  var root = document.documentElement;
+  var theme = store.get('aio-guide-theme');
+  if (theme === 'light' || theme === 'dark') root.setAttribute('data-theme', theme);
+  document.getElementById('themeBtn').addEventListener('click', function () {
+    var dark = root.getAttribute('data-theme') === 'dark' ||
+      (!root.getAttribute('data-theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    var next = dark ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    store.set('aio-guide-theme', next);
+  });
+
+  document.querySelectorAll('.copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var text = btn.parentNode.querySelector('code').textContent;
+      function done() { btn.textContent = '복사됨'; setTimeout(function () { btn.textContent = '복사'; }, 1500); }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, fallback);
+      } else { fallback(); }
+      function fallback() {
+        var t = document.createElement('textarea');
+        t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
+        document.body.appendChild(t); t.select();
+        try { document.execCommand('copy'); done(); } catch (e) { btn.textContent = '직접 선택해 복사'; }
+        document.body.removeChild(t);
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>

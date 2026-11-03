@@ -1596,9 +1596,7 @@ async function main() {
   }
   console.log(`AI Office 대시보드${opts.demo ? ' (DEMO)' : ''}: ${handle.accessUrl}`);
   console.log(`작업 공간: ${handle.root} (${WORKSPACE_SOURCE_LABEL[ws.source]})`);
-  if (handle.compat) {
-    console.log('호환 모드: 회사 데이터가 아직 프로그램 폴더 안에 있어 그대로 씁니다. 서버를 끄고 npm run migrate로 작업 공간에 옮기세요.');
-  } else if (handle.legacyPending) {
+  if (!handle.compat && handle.legacyPending) {
     console.log('프로그램 폴더에 예전 회사 데이터가 남아 있습니다. 서버를 끄고 npm run migrate로 이 작업 공간에 옮기세요.');
   }
   if (handle.remote) {

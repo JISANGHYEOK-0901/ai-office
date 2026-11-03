@@ -1,7 +1,7 @@
 // Codex 비서실장은 계획·검토만 한다. 배정·재시도·반려 한도·인계는 프로그램이 진행한다.
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { loadOrg, writeFileAtomic } from '../lib/org.mjs';
 import { buildOrgMap } from '../lib/orgmap.mjs';
 import { validatePlan, compactPlan, normalizePlanInputs } from '../lib/plan.mjs';
@@ -52,6 +52,9 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
     routes: { ...(saved.routes || {}) }, delegated: { ...(saved.delegated || {}) },
     rejects: saved.delivered ? 0 : saved.rejects || 0 };
   if (saved.originalRequest && !resume) {
+    // 일반 웹사이트 작업 실행 확인에 대한 대표 답장
+    if (saved.pending?.some((q) => q.phase === 'web-confirm')) state.webDecision = /하지\s*마|취소|중지|안\s*해|보류|그만/.test(prompt) ? 'declined'
+      : /진행|승인|확인|좋아|ㅇㅋ|오케이|네|예|응|해\s*줘|끝까지|ok|go/i.test(prompt) ? 'approved' : state.webDecision;
     state.decisions.push({ questions: saved.pending || [], answer: redactContext(prompt) });
     state.pending = [];
   }
@@ -116,7 +119,8 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
       '피드백이면 rerunStages에 수정할 단계 id만 넣으세요. 후속 단계는 프로그램이 다시 실행합니다.',
       '부서 팀장에게 배정하면 팀장은 구조화된 delegate 응답으로 같은 부서 직원에게 분담할 수 있습니다. 전달 부서의 필수/권장을 확인하세요.',
       'plan.publications는 대표가 지시한 외부 작업 배열입니다. 외부 작업이 없으면 []. 각 항목은 {id,action,service,connection,agent,target,recipients,subject,content}입니다.',
-      'action은 mail/post/comment, service는 naverworks_mail/naver_blog/naver_cafe/daum_cafe/tistory/brunch입니다. content에는 검토할 본문 산출물 단계 id 또는 파일 경로를 씁니다. 메일은 recipients 배열을 채우고, 글은 target에 해당 블로그/게시판/댓글 원문 주소를 지정하세요.',
+      'action은 mail/post/comment/web입니다. mail/post/comment의 service는 naverworks_mail/naver_blog/naver_cafe/daum_cafe/tistory/brunch이고, content에는 검토할 본문 산출물 단계 id 또는 파일 경로를 씁니다. 메일은 recipients 배열을 채우고, 글은 target에 해당 블로그/게시판/댓글 원문 주소를 지정하세요. 이때 instructions는 빈 문자열, files는 []입니다.',
+      'web은 연결 계정의 일반 웹사이트(관리자 화면 등)에서 하는 작업입니다. service "web", connection에 연결된 일반 웹사이트 계정 id, target에 시작 화면 주소, instructions에 직원이 그 사이트에서 할 일(대표 지시 그대로 구체적으로), files에 첨부할 단계 id(예: 업로드할 HTML 산출물)를 씁니다. subject·content는 빈 문자열, recipients는 []입니다. 연결된 일반 웹사이트 계정이 없으면 connection을 빈 문자열로 두세요.',
       '실제 외부 작업은 산출물 작성과 비서실장 검토를 마친 뒤 실행기가 브라우저로 진행합니다. 로그인 정보는 요청하거나 파일에 적지 마세요. 계정이 없으면 connection은 빈 문자열로 두고 자료 준비를 먼저 진행합니다. 연결 계정이 여러 개면 사용할 계정을 확인하세요.',
       '제휴업체 조사 후 주소를 알아내는 메일 업무는 조사 단계 다음에 개인별 발송 문안 JSON 단계를 두세요. {messages:[{recipients:["회사 메일"],subject:"제목",body:"양식을 채운 본문"}],skipped:["연락처 미확인 업체·이유"]}를 작성하고 publication.content에 그 단계 id, recipients에는 []를 씁니다. 검토 후 실행기가 문안별로 자동 발송합니다. 주소·출처를 확인하지 못한 업체에는 보내지 않습니다.',
       '여러 게시글은 검토할 본문 JSON 단계에 {posts:[{subject,body}],skipped:[사유]}를 작성하고 publication.content에 그 단계 id를 지정하세요. 실행기가 글마다 별도로 게시합니다. 유튜브 링크의 영상 ID는 작업 공간 공통 이력과 대조해 재게시를 차단합니다.',
@@ -181,7 +185,8 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
   plan = { ...plan, stages: plan.stages.map((stage) => ({ ...stage,
     output: relative(root, outputPath(stage.output)).replace(/\\/g, '/') })) };
   if (plan.publications) plan.publications = plan.publications.map((publication) => ({ ...publication,
-    content: plan.stages.find((s) => s.id === publication.content || outputPath(s.output) === outputPath(publication.content))?.id || publication.content }));
+    content: plan.stages.find((s) => s.id === publication.content || outputPath(s.output) === outputPath(publication.content))?.id || publication.content,
+    ...(Array.isArray(publication.files) ? { files: publication.files.map((ref) => plan.stages.find((s) => s.id === ref || outputPath(s.output) === outputPath(ref))?.id || ref) } : {}) }));
   if (plan.deliverables) plan.deliverables = plan.deliverables.map((ref) => plan.stages.find((s) => s.id === ref || outputPath(s.output) === outputPath(ref))?.id || ref);
   const invalidate = new Set(response.rerunStages || []);
   for (const stage of plan.stages) {
@@ -366,17 +371,37 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
         state.approvedReview = { signature: reviewSignature, review, evidence }; persist();
         const publications = [];
         let posted = 0;
+        const webJobs = prepared.jobs.filter((job) => job.publication.action === 'web');
+        // 위임이 없으면 일반 웹사이트 작업을 실행 전에 한 번에 묶어 확인받는다.
+        if (webJobs.length && !policy().delegated && !state.webDecision) {
+          const label = (id) => (outbound?.connections() || []).find((c) => c.id === id)?.label || id || '연결 계정 미지정';
+          return ask([{ phase: 'web-confirm', question: `아래 웹사이트 작업을 실행할까요? ("진행" 또는 "하지 마"로 답하세요. 다음부터 확인 없이 하려면 지시에 "끝까지 자동으로"를 적어 주세요.)\n`
+            + webJobs.map((job, i) => `${i + 1}. [${label(job.publication.connection)}] ${job.publication.target} — ${job.body.replace(/\s+/g, ' ').slice(0, 300)}${job.files.length ? ` (첨부: ${job.files.map((f) => basename(f)).join(', ')})` : ''}`).join('\n') }]);
+        }
         if (allowedActions().length && !(plan.publications || []).length) return ask([{ phase: 'plan', question: '요청하신 외부 작업의 대상·계정·본문을 계획에서 확인하지 못했습니다. 계정 연결과 대상 주소를 확인해 주세요.' }]);
-        for (const { publication, body, source: content } of prepared.jobs) {
+        for (const { publication, body, source: content, files = [] } of prepared.jobs) {
+          if (publication.action === 'web' && state.webDecision === 'declined') { publications.push(`- 웹사이트 작업 ${publication.target}: 대표 결정으로 실행하지 않음`); continue; }
           if (!outbound) return ask([{ phase: 'plan', question: '외부 작업을 위해 계정 연결을 먼저 완료해 주세요.' }]);
           const instance = `${run.id}-publish-${publication.id || publications.length}`;
           const engine = org.departments.find((d) => d.id === org.roster.find((a) => a.id === publication.agent)?.department)?.engine || 'claude';
           emit('agent.start', { engine, agent: publication.agent, instance, summary: '검토된 원문의 브라우저 업무를 시작합니다.' });
           try {
+            const web = publication.action === 'web';
+            const attachments = files.map((f) => ({ name: basename(f), path: safeOutput(f) }));
             const result = await outbound.deliver({ scope: run.rootId, publication, body, allowedActions: allowedActions(), instructionKey: instructionKey(), ...policy(), schedule: videoPolicy, signal,
+              files: attachments, evidenceDir: join(taskDir, 'evidence'),
               execute: async (browser) => {
                 const text = await execute({ phase: 'publish', agentId: publication.agent, browser,
-                prompt: ['대표가 이번 업무에서 지시하고 비서실장이 검토한 외부 작업을 실행합니다. 아래 원문의 내용과 대상을 바꾸지 마세요.',
+                prompt: web ? [
+                  '대표가 이번 업무에서 지시한 웹사이트 작업을 연결 계정의 브라우저로 실행합니다. 아래 지침대로 진행하고 지침에 없는 변경은 하지 마세요.',
+                  `시작 주소: ${publication.target}`, `지침:\n${body}`,
+                  attachments.length ? `첨부할 파일(browser_attach의 file 값): ${attachments.map((a) => a.name).join(', ')}` : '첨부 파일 없음',
+                  'office_browser 도구만 사용해 화면을 읽고 조작하세요. browser_snapshot의 ref를 쓰고, 입력은 browser_type, 파일은 browser_attach로 넣습니다.',
+                  '업로드·저장·제출·등록·추가처럼 되돌리기 어려운 버튼은 browser_submit으로 누릅니다. 같은 버튼을 다시 누르지 말고 결과 화면을 확인하세요.',
+                  '파일 칸이 숨겨져 있으면 파일 선택 창을 여는 버튼("파일 선택" 등)의 ref로 browser_attach를 호출하세요.',
+                  '마지막에 결과 화면에서 확인한 내용(만든 항목, 공개 주소, 하지 못한 일과 이유)을 summary에 적고, 지침을 끝까지 마쳤으면 completed:true, 아니면 completed:false로 browser_finish를 호출하세요. 그다음 끝까지 마쳤으면 status:done, 아니면 status:needs_decision과 질문을 JSON으로 보고하세요. 로그인·추가 인증·권한 문제나 지침이 모호해도 needs_decision입니다.',
+                  '쿠키·비밀번호·개인 프로필 파일을 읽거나 출력하지 않습니다. 삭제·결제·계정 변경은 하지 않습니다.',
+                ].join('\n\n') : ['대표가 이번 업무에서 지시하고 비서실장이 검토한 외부 작업을 실행합니다. 아래 원문의 내용과 대상을 바꾸지 마세요.',
                   `작업: ${JSON.stringify({ ...publication, content: undefined })}`, `본문 파일: ${content}`,
                   'office_browser 도구만 사용해 사이트의 화면을 읽고 조작하세요. 쿠키·비밀번호·로그인 코드·개인 프로필 파일을 읽거나 출력하지 않습니다.',
                   'browser_snapshot의 ref를 사용하고 제목/수신자/본문은 browser_fill_content로 입력합니다. 마지막 발송·발행·등록은 browser_submit으로만 실행합니다.',
@@ -387,7 +412,8 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
                 if (result.status === 'needs_decision') throw new Error(result.question || '외부 작업에 필요한 계정·권한을 확인해 주세요.');
                 return text;
               } });
-            publications.push(`- ${publication.service} ${publication.action}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : '브라우저 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}`);
+            publications.push(web ? `- 웹사이트 작업 ${publication.target}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : '직원 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}${result.evidence ? ` · 증거 evidence/${result.evidence}` : ''}${result.summary ? `\n  - 확인 내용: ${redactContext(result.summary)}` : ''}`
+              : `- ${publication.service} ${publication.action}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : '브라우저 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}`);
             if (publication.action === 'post') posted++;
             emit('agent.stop', { engine, agent: publication.agent, instance, summary: '실제 외부 작업 결과를 확인했습니다.' });
           } catch (error) {

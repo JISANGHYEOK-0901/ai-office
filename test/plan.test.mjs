@@ -80,6 +80,18 @@ test('최종 전달 목록은 계획의 단계 id·산출물만 허용하고 빈
   }
 });
 
+test('일반 웹사이트 업무는 연결 계정·시작 주소·지침과 계획 단계 첨부만 허용한다', () => {
+  const web = (fields = {}) => ({ id: 'upload', action: 'web', service: 'web', connection: 'erp-1', agent: 'dev-2', target: 'https://erp.example.com/erp/proposal-pages',
+    recipients: [], subject: '', content: '', instructions: 'HTML을 업로드한다', files: ['s2'], ...fields });
+  for (const item of [web(), web({ files: [] }), web({ files: [`outputs/${TASK}/dev/index.html`] }), web({ target: 'http://localhost:3000/erp/proposal-pages' })])
+    assert.equal(check({ ...goodPlan(), publications: [item] }).ok, true, JSON.stringify(item));
+  for (const [item, message] of [[web({ instructions: ' ' }), 'instructions'], [web({ files: ['../../비밀.txt'] }), '첨부'], [web({ files: ['brief.md'] }), '첨부'],
+    [web({ target: 'http://erp.example.com/' }), '시작 주소'], [web({ service: 'naver_blog' }), '시작 주소'], [web({ agent: 'dev-3' }), '근무중']]) {
+    const result = check({ ...goodPlan(), publications: [item] });
+    assert.equal(result.ok, false); assert.ok(result.errors.some((e) => e.includes(message)), `${message}: ${result.errors}`);
+  }
+});
+
 test('단계 산출물 이름이 report·summary·findings·analysis로 시작하는 .md면 거부한다(서브에이전트 쓰기 차단)', () => {
   for (const name of ['summary.md', 'Report-final.md', 'findings.md', 'ANALYSIS_v2.md']) {
     const plan = goodPlan();

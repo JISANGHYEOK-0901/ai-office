@@ -962,3 +962,13 @@ orchestration·security·ux 검토 지적을 재현해 고치며 바꾸거나 �
 - **자동 로그인:** 일반 웹사이트는 허용 도메인 안의 비밀번호 입력 화면에서만 저장한 값을 넣는다. 로드(`load`·`networkidle`)를 기다리고, 입력값이 남았는지 확인해 사라졌으면 다시 넣고, 아이디·비밀번호가 모두 유지된 경우에만 제출한다(로컬 hongcafe ERP 실측에서 Next.js 준비 중 입력이 지워진 채 빈 칸으로 제출되던 결함).
 - **아직 아님:** 일반 웹사이트에서의 직원 업무(자유 입력·파일 첨부·위임 수준)와 외부 작업 계획의 서비스 일반화는 다음 단계다.
 - **검증:** 단위·API 테스트, `verify:browser`의 늦은 화면 준비 로그인 회귀(수정 전 실패 확인), 로컬 hongcafe(admin-api·admin-web, 데이터 변경 차단 설정)에서 대시보드로 연결 → 자동 로그인 → 연결 완료 → 저장 세션으로 `/erp/proposal-pages` 재사용 → 허용 밖 주소 차단.
+
+## 범용 브라우저 업무 (사용자 결정 2026-11-03)
+
+- **계획:** `plan.publications[].action`에 `web`을 추가했다. `{service:'web', connection:<일반 웹사이트 연결 id>, target:<시작 화면 https 또는 localhost>, instructions:<할 일>, files:[단계 id·산출물], subject:'', content:'', recipients:[]}`. 스키마가 엄격 형식이라 mail·post·comment도 `instructions:''`, `files:[]`를 함께 낸다. 검사(`validatePlan`)는 근무중 실행 직원, 지침 4000자 이하, 첨부 20개 이하(계획 단계 산출물만)를 본다. 주소 허용은 실행 때 연결 정보로 다시 확인한다.
+- **지시 판별:** `requestedExternalActions`가 업로드·사이트/관리자/ERP에 올리기·등록·입력·제출·반영 지시를 `web`으로 인식한다. "업로드하지 마"·"초안만"은 제외한다. `externalActionPolicy().delegated`는 대표 대화 어디든 "끝까지·자동으로·확인 없이·묻지 말고·알아서·전부 맡·위임"이 있으면 참이다.
+- **확인:** 검토 통과 뒤 web 작업이 있고 위임이 없으면 `phase:'web-confirm'` 질문 하나로 작업 목록(연결 이름·주소·지침·첨부)을 묻는다. 답장이 "하지 마·취소·중지·보류"면 `declined`(보고서에 미실행 기록), "진행·승인·확인·네" 등이면 `approved`. 답장 뒤 계획·검토는 재사용한다.
+- **도구:** `browser_type`(자유 입력, 파일 칸 제외), `browser_attach`(지정 첨부 파일 이름만. 파일 칸이면 바로 넣고, 숨긴 파일 칸을 여는 "파일 선택" 버튼이면 클릭으로 열린 파일 선택 창에 넣는다. 5초 안에 창이 안 열리면 거부)를 추가했고 web 작업에서만 허용한다. web 작업에서 `browser_fill_content`는 거부한다. 업로드·저장·제출·적용·반영·생성·추가 등(`FINAL_WEB`)은 `browser_click` 대신 `browser_submit`으로만 누르며 누를 때마다 `committing`을 기록한다. 삭제·탈퇴·로그아웃·결제·송금·비밀번호 버튼은 모든 작업에서 거부한다. 주소·프레임·링크·탭은 연결의 허용 도메인으로 검사한다.
+- **증표:** web 작업의 `browser_finish`는 summary(확인한 결과)와 completed(지침을 끝까지 마쳤는지)가 필요하다. 결과 화면 전체 캡처를 업무 폴더 `evidence/`에 저장한다. completed=true면 `{status:'confirmed', confirmedBy:'staff-report', resultUrl, summary, evidence}`, false면 `status:'incomplete'`로 남기고 "웹사이트 작업을 끝내지 못했습니다. 직원 보고: …"로 대표 확인을 요청한다(완료로 닫지 않음). 직원이 결과를 확인한 미완료라 불확실과 구분하며, 대표가 이어서 지시하면 다시 시도한다(로컬 hongcafe 1차 실측에서 업로드 실패가 완료로 닫히던 결함). 보고서 외부 작업 결과에 주소·증거 파일·확인 내용을 붙인다.
+- **중복·불확실:** 기록 키는 대화·연결·주소·작업 id. 같은 지침·첨부 내용이 이미 confirmed면 다시 실행하지 않는다. 제출 뒤 결과를 잃으면 `uncertain`으로 남기고, 재실행·확인 지시 전에는 다시 실행하지 않는다.
+- **검증:** 단위(계획 검사·판별·위임 확인 흐름), `verify:browser`의 가짜 관리자 사이트(숨긴 파일 칸·첨부·업로드·캡처, 미완료 보고, 금지·차단, 재실행·불확실), 로컬 hongcafe 실측(실제 Claude 계획·작성·검토·직원 브라우저로 stage 업체 추가·HTML 업로드 v1 공개 확인, 이후 테스트 업체 삭제).

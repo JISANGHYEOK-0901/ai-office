@@ -20,7 +20,7 @@ for (const mode of ['normal', 'race', 'empty']) test(`예약 영상 게시: ${mo
   const delivered = [], prompts = [];
   const result = await orchestrate({ root, run: { id: 'run', rootId: 'run', task, engine: 'codex', schedule: { id: 'daily', slot: '2026-10-30', uniqueYoutube: true, minPosts: 2, maxPosts: 3 } },
     prompt: '주제에 맞는 유튜브 숏츠를 카페에 게시해 줘', signal: new AbortController().signal,
-    outbound: { connections: () => [], videoHistory: () => ['AbCdEfGhI_1'], deliver: async (request) => {
+    outbound: { connections: () => [{ id: 'naver-1', label: '카페 계정', provider: 'naver', status: 'connected' }], videoHistory: () => ['AbCdEfGhI_1'], deliver: async (request) => {
       assert.equal(request.schedule.maxPosts, 3);
       if (mode === 'race' && !delivered.length) { delivered.push('race-skip'); const error = new Error('다른 예약이 먼저 게시한 영상'); error.code = 'VIDEO_DUPLICATE'; throw error; }
       delivered.push(request.body); return { status: 'confirmed', resultUrl: `https://cafe.naver.com/fixture/${delivered.length}` };

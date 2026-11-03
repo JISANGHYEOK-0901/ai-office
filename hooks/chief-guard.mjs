@@ -49,6 +49,13 @@ async function main() {
   try { input = JSON.parse(raw); } catch { return null; }
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
 
+  // 계정 보호: 직원 포함 모든 에이전트가 보관함/계정.env·계정 저장소를 읽거나 고치지 못한다
+  {
+    const { decideSecretGuard } = await import('../lib/chief-guard.mjs');
+    const secret = decideSecretGuard(input, { root: ROOT });
+    if (secret) return deny(secret.reason);
+  }
+
   // 프로그램 레포 보호: 작업 공간 세션이면 직원 포함 모든 에이전트에 적용한다(레포에서 연 세션·호환 모드는 대상이 아님)
   if (ROOT !== HERE_ROOT) {
     const { decideRepoGuard } = await import('../lib/chief-guard.mjs');

@@ -449,7 +449,7 @@ test('사이트 조회 단계는 연결 계정 브라우저(쓰기 가능)로 �
   const browses = [];
   let fail = true;
   const permissionsFile = join(tmpdir(), 'office-fixture-permissions.json');
-  const outbound = { connections: () => [{ id: 'erp-1', label: 'ERP', provider: 'web' }], async deliver() { throw new Error('no'); },
+  const outbound = { connections: () => [{ id: 'erp-1', label: 'ERP', provider: 'web', status: 'connected' }], async deliver() { throw new Error('no'); },
     async browse(args) {
       browses.push(args);
       if (fail) { fail = false; throw Object.assign(new Error('계정 연결 화면에서 로그인 상태를 확인해 주세요.'), { code: 'CONNECTION_REQUIRED' }); }
@@ -473,7 +473,7 @@ test('사이트 조회 단계는 연결 계정 브라우저(쓰기 가능)로 �
 
 test('일반 웹사이트 업무: 위임이 없으면 실행 전에 묶어서 확인하고, "진행"이면 첨부와 함께 실행한다', async (t) => {
   const calls = [];
-  const f = fixture(t, { webPublication: true, outbound: { connections: () => [{ id: 'erp-1', label: '홍카페 ERP', provider: 'web' }], async deliver(args) {
+  const f = fixture(t, { webPublication: true, outbound: { connections: () => [{ id: 'erp-1', label: '홍카페 ERP', provider: 'web', status: 'connected' }], async deliver(args) {
     calls.push(args); return { status: 'confirmed', resultUrl: 'https://erp.example.com/erp/proposal-pages/1', summary: '공개 주소 확인', evidence: 'upload-1.png' };
   } } });
   const first = f.runner.start({ prompt: '자료를 정리해 HTML로 만들고 ERP 제휴 제안 페이지에 업로드해 줘' });
@@ -495,7 +495,7 @@ test('일반 웹사이트 업무: 위임이 없으면 실행 전에 묶어서 �
 
 test('지시창 판별(근거 확인된 외부 작업·위임)이 업무 내내 쓰이고, 답장 뜻은 AI 판별로 알아본다', async (t) => {
   const calls = [];
-  const outbound = { connections: () => [{ id: 'erp-1', label: 'ERP', provider: 'web' }], async deliver(args) { calls.push(args); return { status: 'confirmed', summary: '완료' }; } };
+  const outbound = { connections: () => [{ id: 'erp-1', label: 'ERP', provider: 'web', status: 'connected' }], async deliver(args) { calls.push(args); return { status: 'confirmed', summary: '완료' }; } };
   // 규칙으로는 업로드·위임으로 보지 않는 문장이지만, 지시창 판별이 근거와 함께 넘긴 값을 쓴다
   const delegated = fixture(t, { webPublication: true, outbound });
   const first = delegated.runner.start({ prompt: '자료를 HTML로 만들어 ERP 제휴 화면에 걸어 두고 마무리까지 맡길게', intent: { actions: ['web'], delegated: true, source: 'ai' } });
@@ -520,7 +520,7 @@ test('지시창 판별(근거 확인된 외부 작업·위임)이 업무 내내 
 
 test('일반 웹사이트 업무: "하지 마"면 실행하지 않고, 위임 표현이 있으면 확인 없이 실행한다', async (t) => {
   const calls = [];
-  const outbound = { connections: () => [{ id: 'erp-1', label: 'ERP', provider: 'web' }], async deliver(args) { calls.push(args); return { status: 'confirmed', summary: '완료' }; } };
+  const outbound = { connections: () => [{ id: 'erp-1', label: 'ERP', provider: 'web', status: 'connected' }], async deliver(args) { calls.push(args); return { status: 'confirmed', summary: '완료' }; } };
   const f = fixture(t, { webPublication: true, outbound });
   const first = f.runner.start({ prompt: '자료를 정리해 HTML로 만들고 ERP 제휴 제안 페이지에 업로드해 줘' });
   await f.final(first);
@@ -534,9 +534,41 @@ test('일반 웹사이트 업무: "하지 마"면 실행하지 않고, 위임 �
   assert.equal(calls.length, 1);
 });
 
+test('필요한 계정이 없으면 작업 전에 묻고, 등록 뒤 이어서 진행한다(웹사이트 계정은 계획을 다시 세운다)', async (t) => {
+  let accounts = [];
+  const delivered = [];
+  const outbound = { connections: () => accounts, async deliver(args) { delivered.push(args); return { status: 'confirmed', resultUrl: 'https://blog.naver.com/x/1' }; },
+    browse: (args) => args.execute({ url: 'http://127.0.0.1:9/tools', token: 't', permissionsFile: join(tmpdir(), 'office-fixture-permissions.json'), write: true }) };
+  const f = fixture(t, { publication: true, outbound });
+  const first = f.runner.start({ prompt: '자료를 정리하고 블로그에 게시해 줘' });
+  assert.equal((await f.final(first)).needsReply, true);
+  assert.match(f.runner.result(first.id).text, /네이버 블로그·카페 계정[\s\S]*보관함\/계정\.env/);
+  assert.deepEqual([f.counts.a, f.counts.b], [0, 0], '계정 확인 전에는 작업을 시작하지 않는다');
+  accounts = [{ id: 'naver-1', label: '홍보용', provider: 'naver', status: 'disconnected', hasCredentials: true, source: 'file' }];
+  await f.final(f.runner.reply(first.id, { prompt: '계정 넣었어, 이어서 재개' }));
+  assert.equal(delivered.length, 1);
+  assert.deepEqual([f.counts.plan, f.counts.a, f.counts.b], [1, 1, 1], '블로그 계정은 계획을 다시 세우지 않는다');
+  // 같은 서비스 계정이 여럿이면 어느 계정을 쓸지 묻는다
+  accounts = [{ id: 'n1', label: 'A', provider: 'naver', status: 'connected' }, { id: 'n2', label: 'B', provider: 'naver', status: 'connected' }];
+  const g = fixture(t, { publication: true, outbound });
+  const second = g.runner.start({ prompt: '자료를 정리하고 블로그에 게시해 줘' });
+  await g.final(second);
+  assert.match(g.runner.result(second.id).text, /계정 2개 중 사용할 계정/);
+  // 웹사이트 계정이 계획에 없으면 등록 뒤 계획을 다시 세운다
+  accounts = [];
+  const h = fixture(t, { siteStage: true, outbound });
+  const third = h.runner.start({ prompt: 'ERP에서 자료를 조회해 정리해 줘' });
+  await h.final(third);
+  assert.match(h.runner.result(third.id).text, /조회용 계정/);
+  accounts = [{ id: 'erp-1', label: 'ERP', provider: 'web', status: 'connected' }];
+  await h.final(h.runner.reply(third.id, { prompt: '이어서 재개' }));
+  assert.equal(h.counts.plan, 2, '계획 당시 없던 계정 id라 등록 뒤 계획을 다시 세운다');
+  assert.equal(loadTasks(h.root)[0].status, 'done');
+});
+
 test('계정 재연결은 검토된 원문을 그대로 이어 발행하고 비서실장 검토를 반복하지 않는다', async (t) => {
   let deliveries = 0;
-  const f = fixture(t, { publication: true, outbound: { connections: () => [], async deliver() {
+  const f = fixture(t, { publication: true, outbound: { connections: () => [{ id: 'naver-1', label: '네이버', provider: 'naver', status: 'connected' }], async deliver() {
     if (++deliveries === 1) throw new ConnectionRequired('계정 연결이 필요합니다.');
     return { status: 'confirmed', resultUrl: 'https://blog.naver.com/fixture/1' };
   } } });
@@ -552,7 +584,7 @@ test('계정 재연결은 검토된 원문을 그대로 이어 발행하고 비�
 
 test('브라우저 도구 연결 실패를 복구하면 검토된 원문·완료 단계를 반복하지 않는다', async (t) => {
   let deliveries = 0;
-  const f = fixture(t, { publication: true, outbound: { connections: () => [], async deliver() {
+  const f = fixture(t, { publication: true, outbound: { connections: () => [{ id: 'naver-1', label: '네이버', provider: 'naver', status: 'connected' }], async deliver() {
     if (++deliveries === 1) throw new Error('브라우저 실행 도구가 연결되지 않았습니다.');
     return { status: 'confirmed', resultUrl: 'https://blog.naver.com/fixture/1' };
   } } });

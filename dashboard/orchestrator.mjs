@@ -16,6 +16,7 @@ import { externalActionPolicy } from '../lib/browser-work.mjs';
 import { preparePublications } from '../lib/publications.mjs';
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';
+import { CONNECTION_PROVIDERS, serviceProvider } from '../lib/connections.mjs';
 
 export function parseObject(text) {
   const value = String(text || '').trim().replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
@@ -158,7 +159,9 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
     && (answer?.source === 'ai' ? ['modify', 'decline'].includes(answer.decision) : /수정|변경|바꿔|초안|수신자|하지\s*마/.test(prompt));
   // 옛 실행기는 검토 후 브라우저·전달 오류도 plan 질문으로 저장했다.
   // 명시 재개라면 승인된 계획을 재검사하며 완료 파일·검토를 재사용한다.
-  if ((resume || answering) && saved.plan && !publicationCorrection
+  // 계정이 비어 있던 계획은 계정을 등록한 뒤 다시 세워 새 계정을 쓰게 한다
+  const accountReplan = answering && saved.pending?.some((q) => q.phase === 'account' && q.replan);
+  if ((resume || answering) && saved.plan && !publicationCorrection && !accountReplan
       && (resume && saved.approvedReview || !saved.pending?.some((q) => q.phase === 'plan'))) {
     response = { plan: saved.plan, rerunStages: [] };
     plan = saved.plan;
@@ -230,6 +233,32 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
   writeFileAtomic(join(taskDir, 'brief.md'), `# ${redactContext(plan.goal)}\n\n${plan.stages.map((s) => `- ${s.id}: ${s.agent} / ${s.output} / ${s.done}`).join('\n')}`);
   persist();
   emit('plan.set', { plan: compactPlan(plan, { taskId: task, root }) });
+  // 필요한 계정은 작업 전에 확인한다(조사·작성을 다 마친 뒤 마지막 게시 단계에서야 묻지 않게)
+  {
+    const list = outbound?.connections?.() || [];
+    const usable = (c) => Boolean(c) && (c.status === 'connected' || c.hasCredentials === true);
+    const needs = [];
+    let replan = false;
+    for (const p of plan.publications || []) {
+      if (!allowedActions().includes(p.action)) continue;
+      if (p.action === 'web') {
+        const chosen = list.find((c) => c.id === p.connection);
+        if (!usable(chosen)) { needs.push(`${p.target} 웹사이트 작업용 계정`); replan ||= !chosen; }
+        continue;
+      }
+      const provider = serviceProvider(p.service), name = CONNECTION_PROVIDERS[provider]?.name || p.service;
+      const candidates = list.filter((c) => c.provider === provider);
+      const chosen = p.connection ? list.find((c) => c.id === p.connection) : candidates.length === 1 ? candidates[0] : null;
+      if (!chosen && candidates.length > 1) needs.push(`${name} 계정 ${candidates.length}개 중 사용할 계정(답장에 계정 이름을 적어 주세요)`);
+      else if (!usable(chosen)) needs.push(`${name} 계정`);
+    }
+    for (const stage of plan.stages) {
+      if (typeof stage.connection !== 'string' || !stage.connection.trim()) continue;
+      const chosen = list.find((c) => c.id === stage.connection);
+      if (!usable(chosen)) { needs.push(`${stage.target} 조회용 계정`); replan ||= !chosen; }
+    }
+    if (needs.length) return ask([{ phase: 'account', replan, question: `이 업무에는 다음 계정이 필요합니다: ${[...new Set(needs)].join(', ')}. 상단 '계정 연결'에서 로그인하거나 보관함/계정.env에 사이트 주소·아이디·비밀번호를 적은 뒤 "이어서 재개"라고 답해 주세요.` }]);
+  }
   const executeStage = async (stage, reason = '') => {
     const desc = `${reason ? '[반려] ' : ''}${stage.title}`;
     const engine = org.departments.find((d) => d.id === stage.dept)?.engine || 'claude';

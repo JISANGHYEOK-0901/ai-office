@@ -23,3 +23,5 @@ org/company.json
 /.codex/hooks.json
 /.claude/settings.local.json
 최종산출물/
+# 보관함: 사이트별 계정(계정.env)과 최종산출물. 서버만 계정 파일을 읽는다
+보관함/

@@ -12,7 +12,7 @@ import { codexRole } from '../lib/settings.mjs';
 import { parseVerdict } from '../scripts/codex-review.mjs';
 import { stageResult, outputIssues, HTML_BRIEF } from '../lib/work-result.mjs';
 import { programRoot } from '../lib/paths.mjs';
-import { externalActionPolicy } from '../lib/browser-work.mjs';
+import { externalActionPolicy } from '../lib/guardrails.mjs';
 import { preparePublications } from '../lib/publications.mjs';
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';

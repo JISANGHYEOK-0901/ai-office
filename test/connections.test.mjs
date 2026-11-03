@@ -5,7 +5,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createConnectionStore, allowedServiceUrl, connectionDirectory, connectionAllowsUrl, connectionLoginUrl, normalizeSite } from '../lib/connections.mjs';
-import { externalActionPolicy } from '../lib/browser-work.mjs';
+import { externalActionPolicy } from '../lib/guardrails.mjs';
 import { attachBrowser } from '../lib/browser-cli.mjs';
 import { credentialLoginUrl } from '../lib/browser-session.mjs';
 

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { evidenceIn, judgeAnswer, judgeCommand } from '../lib/intent.mjs';
+import { judgeAnswer, judgeCommand } from '../lib/intent.mjs';
+import { evidenceIn } from '../lib/guardrails.mjs';
 import { parseJudge } from '../lib/ai-judge.mjs';
 
 const ai = (fields) => async () => ({ kind: 'task', kindEvidence: '', externalActions: [], delegated: false, delegatedEvidence: '', standing: 'none', standingEvidence: '',

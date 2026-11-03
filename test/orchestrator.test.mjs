@@ -25,7 +25,8 @@ const ORG = {
   ],
 };
 const waitFor = async (fn) => {
-  const until = Date.now() + 4000;
+  // 느린 CI(Windows)에서도 여러 업무 동시 실행이 끝나도록 넉넉히 기다린다(조건이 맞으면 바로 끝남)
+  const until = Date.now() + 15000;
   while (!fn()) {
     if (Date.now() > until) throw new Error('가짜 실행 시간 초과');
     await new Promise((resolve) => setTimeout(resolve, 10));

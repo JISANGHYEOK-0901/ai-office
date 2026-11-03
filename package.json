@@ -7,6 +7,9 @@
   },
   "scripts": {
     "office": "node dashboard/server.mjs",
+    "office:start": "node scripts/office-bg.mjs start",
+    "office:stop": "node scripts/office-bg.mjs stop",
+    "office:status": "node scripts/office-bg.mjs status",
     "demo": "node dashboard/server.mjs --demo",
     "sync": "node scripts/sync-agents.mjs --write",
     "check": "node scripts/check.mjs",

@@ -41,8 +41,9 @@ export async function runContinuous({ root, run, prompt, options, execute, dispa
   };
   persist();
   const recordStop = () => {
+    // 서버 종료는 다음 시작 때 자동 재개, 대표 일시정지(user-pause)는 "이어서 해줘"로 재개, 중지는 종료
     state.desired = signal.reason === 'server-shutdown';
-    publish(state.desired ? 'suspended' : 'stopped');
+    publish(state.desired ? 'suspended' : signal.reason === 'user-pause' ? 'paused' : 'stopped');
     updateTask(root, run.task, (task) => { task.status = 'blocked'; return true; });
   };
   signal.addEventListener('abort', recordStop, { once: true });

@@ -130,6 +130,9 @@ test('buildState: runner가 남긴 run-<id> 이벤트와 run을 이중으로 세
 // 리더는 SIGTERM에 끝나고, 손자는 SIGTERM을 무시하며 stdio를 분리한다.
 // 손자가 신호 처리기를 단 뒤에 직접 pid 파일을 써서, 준비 전에 신호가 가는 경쟁을 없앤다
 const FAKE_CLAUDE = (root) => `const { spawn } = require('node:child_process');
+// 서버 시작 때의 로그인·버전 점검은 바로 끝낸다(실제 작업 실행에서만 손자 프로세스를 만든다)
+if (process.argv.includes('--version')) { console.log('Fixture 1.0'); process.exit(0); }
+if (process.argv.includes('auth')) { console.log(JSON.stringify({ loggedIn: true })); process.exit(0); }
 const pidFile = ${JSON.stringify(join(root, 'grandchild.pid'))};
 const code = 'process.on("SIGTERM",()=>{});require("fs").writeFileSync(' + JSON.stringify(pidFile) + ',String(process.pid));setInterval(()=>{},1000)';
 spawn(process.execPath, ['-e', code], { stdio: 'ignore' });
@@ -178,17 +181,19 @@ test('서버 종료(close)는 실행 중인 프로세스 그룹을 끝내고 대
     const handle = await startServer({ root, port: 0, publicDir, quiet: true });
     const base = `http://127.0.0.1:${handle.port}`;
     const headers = { 'X-Office-Token': handle.token, Origin: base, 'Content-Type': 'application/json' };
-    const res = await request(base, 'POST', '/api/runs', { body: { agentId: 'research-1', prompt: '일' }, headers });
+    const res = await request(base, 'POST', '/api/runs', { body: { prompt: '일' }, headers });
     assert.equal(res.status, 202);
     const pidFile = join(root, 'grandchild.pid');
     await waitFor(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8').length > 0);
     const grandchild = Number(readFileSync(pidFile, 'utf8'));
-    const leader = res.json.pid;
+    // 비서실장 업무의 계획 실행(자식 프로세스 그룹 리더)
+    const leader = (await request(base, 'GET', '/api/state')).json.runs.find((r) => Number.isInteger(r.pid))?.pid;
+    assert.ok(leader);
     await handle.close();
     assert.ok(!alive(leader), '리더가 남으면 안 된다');
     await waitFor(() => !alive(grandchild), 2000);
     const runs = JSON.parse(readFileSync(join(root, '.office', 'runs.json'), 'utf8'));
-    assert.equal(runs[0].status, 'stopped');
+    assert.ok(runs.every((r) => !['running', 'queued'].includes(r.status)));
   });
 });
 

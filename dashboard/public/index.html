@@ -338,28 +338,6 @@
     </form>
   </dialog>
 
-  <!-- 작업 지시 -->
-  <dialog id="runDialog" class="modal win" aria-labelledby="runTitle">
-    <form method="dialog" id="runForm" class="modal-form">
-      <div class="win-bar"><h2 id="runTitle">작업 지시</h2><span class="win-ctl" aria-hidden="true"></span></div>
-      <div class="win-body">
-        <label for="runPrompt" id="runLabel">요청 내용</label>
-        <textarea id="runPrompt" rows="6" maxlength="4000" required placeholder="무엇을 해 주면 좋을지 구체적으로 적어 주세요"></textarea>
-        <label class="run-model" id="runModelRow">모델
-          <select id="runModel">
-            <option value="">기본(직원 설정)</option><option value="haiku">haiku</option><option value="sonnet">sonnet</option><option value="opus">opus</option>
-          </select>
-        </label>
-        <label class="run-model" id="runEffortRow" hidden>effort<select id="runEffort"><option value="">직원 기본</option></select></label>
-        <p class="form-error" id="runError" role="alert" hidden></p>
-      </div>
-      <div class="modal-actions">
-        <button type="button" class="btn" data-close>취소</button>
-        <button type="submit" class="btn btn-primary" value="default">지시하기</button>
-      </div>
-    </form>
-  </dialog>
-
   <dialog id="connectionsDialog" class="modal modal-wide win" aria-labelledby="connectionsTitle">
     <div class="modal-form">
       <div class="win-bar"><h2 id="connectionsTitle">외부 계정 연결</h2><span class="win-ctl" aria-hidden="true"></span></div>

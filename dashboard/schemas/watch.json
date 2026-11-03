@@ -1,0 +1,9 @@
+{
+  "type": "object", "properties": {
+    "cursor": {"type": "string"}, "summary": {"type": "string"}, "question": {"type": "string"},
+    "items": {"type": "array", "items": {"type": "object", "properties": {
+      "key": {"type": "string"}, "title": {"type": "string"}, "url": {"type": "string"},
+      "summary": {"type": "string"}, "observedAt": {"type": "string"}
+    }, "required": ["key", "title", "url", "summary", "observedAt"], "additionalProperties": false}}
+  }, "required": ["cursor", "summary", "question", "items"], "additionalProperties": false
+}

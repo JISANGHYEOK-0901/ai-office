@@ -44,6 +44,13 @@ const decide = (tool, toolInput = {}, extra = {}) => decideChiefGuard(
   { root: ROOT, sessions: { [SID]: TASK }, getOrg: org },
 );
 
+test('Claude JSON schema의 StructuredOutput은 업무 연결 전후 모두 응답 도구로 허용한다', () => {
+  assert.equal(decide('StructuredOutput', { plan: { stages: [] } }), null);
+  assert.equal(decideChiefGuard({ session_id: SID, tool_name: 'StructuredOutput', tool_input: { question: '예산 확인' } },
+    { root: ROOT, sessions: {}, getOrg: org, chiefRun: true }), null);
+  assert.ok(decide('Write', { file_path: join(ROOT, 'unassigned-result.html') }));
+});
+
 test('onDutyAgents: 근무중·운영 중 부서·claude 엔진 직원만', () => {
   assert.deepEqual(onDutyAgents(org()).map((a) => a.id), ['marketing-1', 'dev-2']);
   assert.deepEqual(onDutyAgents({}), []);
@@ -295,7 +302,7 @@ test('office.mjs 하위 명령 허용 목록: org·task status done/review 거�
     assert.ok(d.reason.includes(TASK), cmd);
   }
   assert.match(decide('Bash', { command: 'node scripts/office.mjs org export x.json --yes' }).reason, /대표가 직접/);
-  assert.match(decide('PowerShell', { command: `node scripts/office.mjs task status ${TASK} done` }).reason, /대시보드에서 승인/);
+  assert.match(decide('PowerShell', { command: `node scripts/office.mjs task status ${TASK} done` }).reason, /검토 통과와 보고서/);
   for (const cmd of [
     `node scripts/office.mjs task status ${TASK} blocked`,
     `node scripts/office.mjs task status ${TASK} active`,

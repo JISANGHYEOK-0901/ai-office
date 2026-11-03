@@ -10,7 +10,12 @@
     "demo": "node dashboard/server.mjs --demo",
     "sync": "node scripts/sync-agents.mjs --write",
     "check": "node scripts/check.mjs",
+    "verify:ui": "node scripts/verify-ui.mjs",
+    "verify:browser": "node --test test/browser.integration.mjs",
     "doctor": "node scripts/doctor.mjs",
     "migrate": "node scripts/migrate.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.62.1"
   }
 }

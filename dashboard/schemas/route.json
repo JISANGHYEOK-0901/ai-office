@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "department": {"type": "string"},
+    "agent": {"type": "string"},
+    "reason": {"type": "string"},
+    "question": {"type": "string"}
+  },
+  "required": ["department", "agent", "reason", "question"],
+  "additionalProperties": false
+}

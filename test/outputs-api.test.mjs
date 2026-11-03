@@ -216,6 +216,6 @@ test('state: plan.json이 있으면 업무에 계획표 단계와 사용자 확�
   const task = r.json.tasks.find((t) => t.id === TASK);
   assert.deepEqual(task.plan.stages.map((p) => [p.id, p.status]), [['s', 'pending']]);
   assert.equal(task.plan.goal, 'g');
-  assert.equal(task.stage, 'user');
+  assert.equal(task.stage, 'done');
   assert.deepEqual(r.json.attention.map((a) => a.kind), ['approve']);
 });

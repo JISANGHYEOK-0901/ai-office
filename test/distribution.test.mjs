@@ -288,7 +288,9 @@ test('서버: 시작 때 빠른 점검 결과를 /api/state의 tools로 알린�
       if (tools?.claude?.installed !== null && tools?.codex?.installed !== null) break;
       await new Promise((r) => setTimeout(r, 25));
     }
-    assert.deepEqual(tools, { claude: { installed: true }, codex: { installed: false } });
+    // 로그인 점검이 첫 HTTP 응답보다 먼저 끝나도 설치 여부 계약은 같다.
+    assert.equal(tools.claude.installed, true);
+    assert.equal(tools.codex.installed, false);
   }, { env });
 });
 
@@ -297,7 +299,7 @@ test('화면 로직: 도구 배너 문구와 가져오기 요약', () => {
   assert.deepEqual(toolBanners({ claude: { installed: null }, codex: { installed: null } }), [], '점검 전(null)에는 알리지 않는다');
   const banners = toolBanners({ claude: { installed: true }, codex: { installed: false } });
   assert.equal(banners.length, 1);
-  assert.match(banners[0].text, /codex가 설치되지 않아 검증실을 실행할 수 없습니다 — npm run doctor/);
+  assert.match(banners[0].text, /Codex가 설치되지 않았습니다.*Claude로 바꿔.*npm run doctor/);
   assert.equal(toolBanners({ claude: { installed: false }, codex: { installed: false } }).length, 2);
   assert.deepEqual(toolBanners({ codex: { installed: false } }, { demo: true }), [], '데모 모드에서는 배너를 띄우지 않는다');
   assert.deepEqual(normalizeState({ tools: { codex: { installed: false } } }).tools, { codex: { installed: false } });

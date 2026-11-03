@@ -118,22 +118,25 @@ test('task status 전이 규칙: done·review는 비서실장이 못 바꾸고, 
 
   let p = run('task', 'status', id, 'done');
   assert.equal(p.status, 1);
-  assert.match(p.stderr, /대시보드에서 승인/);
+  assert.match(p.stderr, /최종 검토 후/);
   p = run('task', 'status', id, 'review');
   assert.equal(p.status, 1);
   assert.match(p.stderr, /flow <업무> deliver/);
   assert.equal(status(), 'active');
 
+  assert.equal(run('flow', id, 'deliver').status, 1, '보고서 없이 완료하지 않는다');
+  writeFileSync(join(root, 'outputs', id, 'report.md'), '# 검토 보고서');
+  assert.equal(run('flow', id, 'review', '--verdict', 'pass').status, 0);
   assert.equal(run('flow', id, 'deliver').status, 0);
-  assert.equal(status(), 'review');
+  assert.equal(status(), 'done');
   for (const s of ['active', 'blocked']) {
     p = run('task', 'status', id, s);
     assert.equal(p.status, 1, s);
-    assert.match(p.stderr, /승인·반려로만/);
+    assert.match(p.stderr, /상태 직접 변경은 대표/);
   }
   p = run('flow', id, 'deliver');
   assert.equal(p.status, 1, '이미 사용자 확인 대기');
-  assert.equal(status(), 'review');
+  assert.equal(status(), 'done');
   assert.equal(eventsOf(root).filter((e) => e.kind === 'flow.user_approve').length, 0);
 
   // 완료된 업무를 deliver로 되돌리지 못한다

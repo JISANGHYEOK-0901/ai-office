@@ -55,6 +55,17 @@ test('정상 입력: 이벤트 한 줄 추가, stdout 비어 있음, exit 0', ()
   assert.equal(lines[0].agent, 'chief');
 });
 
+test('실행기 내부 자식은 사용자 요청·단계 이벤트를 중복 기록하지 않는다', () => {
+  const root = makeRoot();
+  const res = spawnSync(process.execPath, [join(root, 'hooks', 'office-event.mjs')], {
+    env: { ...process.env, OFFICE_ORCHESTRATOR_CHILD: '1' }, encoding: 'utf8',
+    input: JSON.stringify({ session_id: 'internal', hook_event_name: 'UserPromptSubmit', prompt: '계획 JSON 내부 지시' }),
+  });
+  assert.equal(res.status, 0);
+  assert.equal(res.stdout, '');
+  assert.deepEqual(readLines(root), []);
+});
+
 test('잘못된 JSON·빈 입력·배열에도 exit 0, stdout 비어 있음, 기록 없음', () => {
   const root = makeRoot();
   for (const input of ['{깨진 json', '', '[1,2]', 'null']) {

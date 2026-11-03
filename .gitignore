@@ -9,9 +9,17 @@ outputs/
 org/departments.json
 org/roster.json
 org/company.md
+org/company.json
 # 정본에서 생성되는 에이전트 파일(직접 만든 개인 에이전트 파일도 이 폴더에 두면 함께 제외된다)
 .claude/agents/
 .codex/agents/
 # 작업 공간 분리: --workspace로 고른 경로 기억, npm run migrate가 보관한 예전 데이터 원본
 .office-local.json
 .office-migrated-*/
+
+# Local communication hooks and private state
+/ai-input/
+/.workflow-hooks/
+/.codex/hooks.json
+/.claude/settings.local.json
+최종산출물/

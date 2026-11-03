@@ -59,11 +59,11 @@ test('데모: 사용자 확인 대기(deliver·review)와 답장 대기(reply.wa
   stop();
   const events = readDemo(root);
   for (const k of ['flow.review_request', 'flow.review', 'flow.deliver', 'reply.wait']) assert.ok(events.some((e) => e.kind === k), k);
-  assert.ok(events.some((e) => e.kind === 'task.update' && e.status === 'review'));
+  assert.ok(events.some((e) => e.kind === 'task.update' && e.status === 'done'));
   const state = buildState({ org: stop.org, events, demo: true });
   const kinds = new Set(state.attention.map((a) => a.kind));
-  assert.ok(kinds.has('approve') && kinds.has('reply'), JSON.stringify(state.attention));
-  assert.ok(state.tasks.some((t) => t.status === 'review' && t.stage === 'user'));
+  assert.ok(kinds.has('complete') && kinds.has('reply'), JSON.stringify(state.attention));
+  assert.ok(state.tasks.some((t) => t.status === 'done' && t.stage === 'done'));
   // 데모가 아니면 reply.wait 이벤트만으로 답장 아이콘을 만들지 않는다(실제 화면은 run의 needsReply 기준)
   assert.ok(!buildState({ org: stop.org, events }).attention.some((a) => a.kind === 'reply'));
 });

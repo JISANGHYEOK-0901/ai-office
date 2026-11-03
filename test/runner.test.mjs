@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createRunner } from '../dashboard/runner.mjs';
 import { resolveCommand } from '../lib/cli.mjs';
@@ -13,6 +14,7 @@ function makeRoot({ departments = [], roster = [] } = {}) {
   mkdirSync(join(root, 'org'));
   writeFileSync(join(root, 'org', 'departments.json'), JSON.stringify(departments));
   writeFileSync(join(root, 'org', 'roster.json'), JSON.stringify(roster));
+  writeFileSync(join(root, 'org', 'company.json'), JSON.stringify({ chief: { engine: 'claude', model: 'sonnet', effort: 'high' } }));
   return root;
 }
 
@@ -62,6 +64,20 @@ const waitFor = async (fn, ms = 3000) => {
   }
 };
 
+test('주입한 실행 환경으로 Claude·Codex 바이너리와 자식 환경을 선택하며 전역 설정을 바꾸지 않는다', async (t) => {
+  const root = makeRoot(ORG), { calls, spawnImpl } = fakeSpawner();
+  const before = { claude: process.env.CLAUDE_BIN, codex: process.env.CODEX_BIN };
+  const env = { ...process.env, CLAUDE_BIN: join(root, 'fixture-claude.mjs'), CODEX_BIN: join(root, 'fixture-codex.mjs'), OFFICE_ENV_FIXTURE: 'isolated' };
+  const runner = createRunner({ root, env, spawnImpl });
+  t.after(async () => { await runner.stopAll({ graceMs: 5 }); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); });
+  runner.start({ agentId: 'research-1', prompt: '가상 Claude 직원' });
+  runner.start({ agentId: 'verify-1', prompt: '가상 Codex 직원' });
+  assert.equal(calls[0].args[0], env.CLAUDE_BIN); assert.equal(calls[1].args[0], env.CODEX_BIN);
+  for (const call of calls) { assert.equal(call.bin, process.execPath); assert.equal(call.opts.env.OFFICE_ENV_FIXTURE, 'isolated'); call.child.finish(0); }
+  await waitFor(() => runner.list().every((r) => r.status === 'done'));
+  assert.deepEqual({ claude: process.env.CLAUDE_BIN, codex: process.env.CODEX_BIN }, before);
+});
+
 test('claude 실행 인자: 부서 권한·도구·--agent, prompt 는 stdin', async () => {
   const root = makeRoot(ORG);
   const { calls, spawnImpl } = fakeSpawner();
@@ -86,8 +102,11 @@ test('claude 실행 인자: 부서 권한·도구·--agent, prompt 는 stdin', a
   // 비서실장: --agent 없음, 기본 acceptEdits, 작업 단위 모델 지정
   // 비서실장에게는 현재 조직도를 --append-system-prompt(길면 -file)로 주입한다
   runner.start({ prompt: '업무를 나눠 줘', model: 'opus' });
-  assert.deepEqual(calls[1].args.slice(0, -2), [...cmd.prefixArgs, '-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits', '--model', 'opus']);
-  assert.ok(['--append-system-prompt', '--append-system-prompt-file'].includes(calls[1].args.at(-2)));
+  await waitFor(() => calls.length >= 2);
+  assert.deepEqual(calls[1].args.slice(0, cmd.prefixArgs.length + 10), [...cmd.prefixArgs, '-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits', '--model', 'opus', '--effort', 'high']);
+  assert.ok(calls[1].args.some((a) => ['--append-system-prompt', '--append-system-prompt-file'].includes(a)));
+  assert.ok(calls[1].args.includes('--json-schema'));
+  assert.ok(calls[1].args.includes('Read,Glob,Grep'));
   assert.equal(calls[1].opts.env.OFFICE_ORGMAP_INJECTED, '1', 'SessionStart 훅이 조직도를 또 넣지 않게 알린다');
   assert.equal(calls[0].opts.env.OFFICE_ORGMAP_INJECTED, process.env.OFFICE_ORGMAP_INJECTED, '직원 실행에는 붙이지 않는다');
   assert.equal(calls[1].opts.env.OFFICE_CHIEF_RUN, '1', '비서실장 실행은 chief-guard가 업무 등록 전에도 판정하게 알린다');
@@ -196,7 +215,7 @@ test('codex 엔진 직원: codex exec --json -s read-only, 기본 모델·강도
   const env = process.env;
   const model = env.OFFICE_CODEX_MODEL || 'gpt-6.1-sol';
   const effort = env.OFFICE_CODEX_EFFORT || 'max';
-  assert.deepEqual(args, [...cmd.prefixArgs, 'exec', '--json', '-s', 'read-only', '-C', root, '-m', model, '-c', `model_reasoning_effort="${effort}"`, '-']);
+  assert.deepEqual(args, [...cmd.prefixArgs, 'exec', '--json', '--skip-git-repo-check', '-s', 'read-only', '-C', root, '-m', model, '-c', `model_reasoning_effort="${effort}"`, '-']);
   await tick();
   assert.match(child.input, /숫자를 다시 계산한다\./);
   // codex-review.mjs 와 같은 공통 검토 기준·VERDICT 형식에 요청을 붙인다
@@ -267,27 +286,23 @@ setInterval(() => {}, 1000);
   }
 });
 
-test('비서실장 실행 중 task start로 연결된 업무(sessions.json)를 실행이 끝날 때 run.task에 남긴다', async () => {
+test('비서실장 계획 실행의 세션이 다른 업무를 가리켜도 등록한 업무를 보존한다', async () => {
   const root = makeRoot(ORG);
   const { calls, spawnImpl } = fakeSpawner();
   const runner = createRunner({ root, spawnImpl });
   const run = runner.start({ prompt: '시장 조사해서 보고서로' });
   await waitFor(() => calls.length === 1);
   const sid = '0f8fad5b-d9cb-469f-a165-70867728950e';
-  calls[0].child.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: sid }) + '\n');
-  // 훅이 OFFICE_TASK 를 보고 세션 → 업무를 기록한 상황
   mkdirSync(join(root, '.office'), { recursive: true });
   writeFileSync(join(root, '.office', 'sessions.json'), JSON.stringify({ [sid]: '2026-10-29/market-scan', other: '../x' }));
-  calls[0].child.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: '업무를 마쳤습니다.', session_id: sid }) + '\n');
+  calls[0].child.stdout.write(JSON.stringify({ type: 'result', structured_output: { question: '대상 지역을 알려 주세요.', plan: null }, session_id: sid }) + '\n');
   calls[0].child.finish(0);
   await waitFor(() => runner.list().find((r) => r.id === run.id)?.status === 'done');
-  assert.equal(runner.list().find((r) => r.id === run.id).task, '2026-10-29/market-scan');
-  assert.equal(runner.latestForTask('2026-10-29/market-scan')?.id, run.id);
-  // 연결이 없으면 task 를 붙이지 않는다
-  const run2 = runner.start({ prompt: '질문만' });
-  await waitFor(() => calls.length === 2);
-  calls[1].child.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: '답입니다.', session_id: 'a1b2c3d4-0000-4000-8000-000000000000' }) + '\n');
-  calls[1].child.finish(0);
-  await waitFor(() => runner.list().find((r) => r.id === run2.id)?.status === 'done');
-  assert.equal(runner.list().find((r) => r.id === run2.id).task ?? null, null);
+  const finished = runner.list().find((r) => r.id === run.id);
+  assert.equal(finished.task, run.task);
+  assert.equal(finished.needsReply, true);
+  assert.equal(runner.latestForTask(run.task)?.id, run.id);
+  assert.notEqual(run.task, '2026-10-29/market-scan');
+  await runner.stopAll();
+  await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });

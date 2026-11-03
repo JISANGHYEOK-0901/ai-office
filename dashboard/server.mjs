@@ -8,7 +8,15 @@ import { readFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ID_PATTERN, MAX_COMPANY_RULES, exportOrg, importOrg, loadCompanyRules, loadOrg, loadPresets, mutateOrg, saveCompanyRules, slugifyId, validateOrg } from '../lib/org.mjs';
-import { quickToolCheck } from '../lib/doctor.mjs';
+import { quickToolCheck, checkToolLogins, detectedMode } from '../lib/doctor.mjs';
+import { loadSettings, saveSettings } from '../lib/settings.mjs';
+import { modelCatalog } from '../lib/models.mjs';
+import { createConnectionStore, CONNECTION_PROVIDERS, validateLoginValues } from '../lib/connections.mjs';
+import { createBrowserSessions } from '../lib/browser-session.mjs';
+import { createBrowserWork } from '../lib/browser-work.mjs';
+import { createKeepAwake } from '../lib/keep-awake.mjs';
+import { createSchedules, dailyScheduleRequest } from '../lib/schedules.mjs';
+import { collectFinalOutputs, finalOutputs, finalOutputSettings, resolveFinalOutput, saveFinalOutputSettings } from '../lib/final-outputs.mjs';
 import { WORKSPACE_SOURCE_LABEL, WorkspaceError, kstDate, legacyItems, programRoot, resolveWorkspace, saveLocalWorkspace } from '../lib/paths.mjs';
 import { ensureWorkspace, isCompatRoot } from '../lib/workspace.mjs';
 import { acquireServerLock } from '../lib/server-lock.mjs';
@@ -18,7 +26,8 @@ import { isOffplanCall } from '../lib/flow.mjs';
 import { buildOrgMap } from '../lib/orgmap.mjs';
 import { compactPlan, isTaskId } from '../lib/plan.mjs';
 import { MAX_OUTPUT_FILES, insideRel, planOutputStatus, walkOutputFiles } from '../lib/outputs.mjs';
-import { loadTasks as loadTaskList, updateTask } from '../lib/tasks.mjs';
+import { loadTasks as loadTaskList, updateTask, saveTasks } from '../lib/tasks.mjs';
+import { readPrivate, writePrivate } from '../lib/private-state.mjs';
 import { createRunner } from './runner.mjs';
 import { buildState } from './state.mjs';
 
@@ -47,7 +56,7 @@ const MIME = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
-const DEPT_FIELDS = ['id', 'name', 'en', 'color', 'engine', 'tools', 'model', 'summary', 'active', 'permission', 'order', 'instructions', 'codexModel', 'codexEffort', 'capabilities', 'handoffs'];
+const DEPT_FIELDS = ['id', 'name', 'en', 'color', 'engine', 'tools', 'model', 'summary', 'active', 'permission', 'order', 'instructions', 'codexModel', 'codexEffort', 'codexRole', 'capabilities', 'handoffs', 'handoffPolicy'];
 // 산출물 미리보기·목록 제한
 const PREVIEW_LIMIT = 5 * 1024 * 1024;
 const TEXT_EXTS = new Set(['.md', '.markdown', '.txt', '.csv', '.tsv', '.json', '.jsonl', '.log', '.yaml', '.yml', '.xml', '.js', '.mjs', '.cjs', '.ts', '.py', '.sql', '.sh', '.css', '.toml', '.ini']);
@@ -58,7 +67,7 @@ export const HTML_PREVIEW_CSP = "sandbox; default-src 'none'; img-src data:; sty
 // 생성 HTML의 style 속성(부서색 변수) 때문에 style-src에 'unsafe-inline'을 둔다
 export const DASHBOARD_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src blob:; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const NO_DESCRIPTION_WARNING = '비서실장이 배정 기준으로 쓸 설명이 없습니다. 담당 업무나 호출 설명을 채워 주세요.';
-const AGENT_FIELDS = ['id', 'name', 'department', 'title', 'lead', 'specialty', 'description', 'instructions', 'active', 'model', 'rank', 'thoughts', 'role'];
+const AGENT_FIELDS = ['id', 'name', 'department', 'title', 'lead', 'specialty', 'description', 'instructions', 'active', 'model', 'rank', 'thoughts', 'role', 'codexModel', 'codexEffort'];
 const AUTH_COOKIE = 'office_auth';
 
 class HttpError extends Error {
@@ -286,7 +295,9 @@ export async function startServer({
   demo = false,
   publicDir = join(HERE, 'public'),
   quiet = false,
-  env = process.env, // 시작 때 빠른 점검(claude·codex 설치 여부)에 쓰는 환경. 테스트에서 CLAUDE_BIN/CODEX_BIN을 바꿔 넣는다
+  env = process.env, // 상태 점검과 실제 실행기가 같은 CLI·환경을 사용한다.
+  connectionBase = undefined, browserOptions = {},
+  scheduleNow = Date.now,
   openFolder = defaultOpenFolder, // "폴더 열기" 실행 함수(테스트에서 실제 탐색기를 띄우지 않도록 바꿔 넣는다)
 } = {}) {
   if (!root) ({ path: root, source: workspaceSource } = resolveWorkspace({ env, program }));
@@ -369,6 +380,14 @@ export async function startServer({
     if (demo) return;
     const raw = readJsonSafe(tasksFile, []);
     const list = Array.isArray(raw) ? raw : Object.values(raw ?? {});
+    const finals = finalOutputs(root);
+    let migrated = false;
+    for (const task of list) if (task?.status === 'review' && isTaskId(task.id) && finals[task.id]
+      && existsSync(join(root, 'outputs', task.id, 'report.md'))
+      && finals[task.id].files.every((file) => existsSync(join(finals[task.id].directory, file.rel)))) {
+      task.status = 'done'; task.completedAt = task.updated || new Date().toISOString(); migrated = true;
+    }
+    if (migrated) saveTasks(root, list);
     const plans = new Map();
     const raws = new Map();
     for (const t of list) {
@@ -467,7 +486,12 @@ export async function startServer({
     }
   }
 
-  const runner = demo ? null : createRunner({ root, onChange: () => scheduleBroadcast() });
+  const connections = createConnectionStore({ root, base: connectionBase });
+  const browserSessions = createBrowserSessions({ store: connections, ...browserOptions });
+  const browserWork = createBrowserWork({ root, store: connections, sessions: browserSessions });
+  const runner = demo ? null : createRunner({ root, env, toolStatus: async () => { await toolProbe; return tools; }, onChange: () => scheduleBroadcast(), outbound: browserWork, keepAwake: createKeepAwake() });
+  const schedules = demo ? null : createSchedules({ root, now: scheduleNow, runs: () => runner.list(),
+    start: (request) => runner.start(request), onChange: () => scheduleBroadcast() });
 
   const allRuns = () => (runner ? runner.list() : []);
 
@@ -494,11 +518,26 @@ export async function startServer({
 
   function currentState() {
     const plans = currentPlans();
+    const settings = loadSettings(root);
+    const visibleTasks = tasks.filter((task) => !task.historyArchivedAt);
+    const visibleIds = new Set(visibleTasks.map((task) => task.id));
+    const archived = new Set(tasks.filter((task) => task.historyArchivedAt).map((task) => task.id));
+    const cutoff = readPrivate(join(officePath, 'history.json')).clearedAt;
+    const sessions = readJsonSafe(join(officePath, 'sessions.json'), {});
+    const retainedSessions = new Set(Object.entries(sessions).filter(([, id]) => visibleIds.has(id)).map(([session]) => session));
+    const visibleEvents = events.filter((event) => !archived.has(event.task)
+      && (!cutoff || visibleIds.has(event.task) || retainedSessions.has(event.session) || event.ts >= cutoff));
     return {
-      ...buildState({ org, events, runs: allRuns(), tasks, plans, outputs: currentOutputStatus(plans), now: Date.now(), demo }),
+      ...buildState({ org, events: visibleEvents, runs: allRuns(), tasks: visibleTasks, plans: new Map([...plans].filter(([id]) => !archived.has(id))), outputs: currentOutputStatus(plans), now: Date.now(), demo }),
       presets,
+      schedules: schedules?.list() || [],
       demo,
       tools,
+      settings,
+      models: modelCatalog({ env }),
+      mode: settings.mode === 'auto' ? detectedMode(tools) : settings.mode,
+      connectionStatus: { connected: connections.list().filter((c) => c.status === 'connected').length,
+        needsLogin: connections.list().filter((c) => c.status === 'needs_login').length },
       // 경로 값은 토큰이 필요한 /api/company에서만 준다(상태는 토큰 없이 읽힌다)
       workspace: { compat, legacyPending },
     };
@@ -564,12 +603,13 @@ export async function startServer({
         dept.id = free || slugifyId(candidates[0] || 'dept', taken);
       }
       dept = {
-        engine: 'claude',
+        engine: (loadSettings(root).mode === 'codex' || detectedMode(tools) === 'codex') ? 'codex' : 'claude',
         active: true,
         permission: 'acceptEdits',
         order: o.departments.reduce((m, d) => Math.max(m, Number(d.order) || 0), 0) + 1,
         ...dept,
       };
+      if (dept.engine === 'codex' && !dept.codexRole) dept.codexRole = body.preset === 'verify' || dept.id === 'verify' ? 'review' : 'exec';
       o.departments.push(dept);
       return dept;
     }).then((dept) => withHandoffWarnings(dept, body));
@@ -661,13 +701,17 @@ export async function startServer({
     if (demo) throw new HttpError(409, '데모 모드에서는 회사 설정을 바꿀 수 없습니다.');
     if (typeof body.rules !== 'string') throw new HttpError(400, 'rules(회사 공통 규칙 문자열)가 필요합니다.');
     if (body.rules.length > MAX_COMPANY_RULES) throw new HttpError(400, `회사 공통 규칙은 ${MAX_COMPANY_RULES}자 이하여야 합니다.`);
+    if (body.finalOutputParent !== undefined) {
+      try { finalOutputSettings(root, body.finalOutputParent); } catch (err) { throw new HttpError(400, err.message); }
+    }
     // 조직 변경과 같은 큐에서 실행해 sync가 겹치지 않게 한다
     let sync;
     await mutateOrg(root, () => {
       sync = saveCompanyRules(root, body.rules);
+      if (body.finalOutputParent !== undefined) saveFinalOutputSettings(root, body.finalOutputParent);
     });
     scheduleBroadcast();
-    return { rules: loadCompanyRules(root), sync: { changed: sync.changed, removed: sync.removed, ok: sync.ok } };
+    return { rules: loadCompanyRules(root), finalOutputs: finalOutputSettings(root), sync: { changed: sync.changed, removed: sync.removed, ok: sync.ok } };
   }
 
   // ---- 회사 구성 내보내기·가져오기 ----
@@ -739,7 +783,18 @@ export async function startServer({
     if (agentId !== null && typeof agentId !== 'string') throw new HttpError(400, 'agentId는 문자열이어야 합니다.');
     const model = body.model || null;
     if (model !== null && typeof model !== 'string') throw new HttpError(400, 'model은 문자열이어야 합니다.');
-    const run = await callRunner(() => runner.start({ agentId, prompt, model }), '작업을 시작하지 못했습니다.');
+    if (!agentId && body.schedule !== false) {
+      const requested = await callRunner(() => dailyScheduleRequest(prompt), '예약 시각을 확인해 주세요.');
+      if (requested) {
+        const defaults = loadSettings(root).chief;
+        const schedule = await callRunner(() => schedules.add({ prompt, ...requested,
+          chief: { engine: body.engine || defaults.engine, model: model || defaults.model, effort: body.effort || defaults.effort } }), '예약을 저장하지 못했습니다.');
+        return { scheduled: true, schedule };
+      }
+    }
+    await toolProbe;
+    const run = await callRunner(() => runner.start({ agentId, prompt, model, engine: body.engine || null, effort: body.effort || null,
+      continuous: body.continuous }), '작업을 시작하지 못했습니다.');
     scheduleBroadcast();
     return run;
   }
@@ -762,7 +817,7 @@ export async function startServer({
     if (prompt.length > MAX_PROMPT) throw new HttpError(400, `답장은 ${MAX_PROMPT}자 이하여야 합니다.`);
     const model = body.model || null;
     if (model !== null && typeof model !== 'string') throw new HttpError(400, 'model은 문자열이어야 합니다.');
-    const run = await callRunner(() => runner.reply(id, { prompt, model }), '답장을 보내지 못했습니다.');
+    const run = await callRunner(() => runner.reply(id, { prompt, model, engine: body.engine || null, effort: body.effort || null }), '답장을 보내지 못했습니다.');
     scheduleBroadcast();
     return run;
   }
@@ -825,6 +880,33 @@ export async function startServer({
     loadTasks();
     scheduleBroadcast();
     return { ok: true, task: updated };
+  }
+
+  function seeResult(id) {
+    if (demo) throw new HttpError(409, '데모에서는 완료 알림을 변경할 수 없습니다.');
+    const task = loadTaskList(root).find((task) => task.id === id);
+    if (!task) throw new HttpError(404, '업무를 찾을 수 없습니다.');
+    if (task.status !== 'done') throw new HttpError(409, '완료된 업무의 결과만 확인할 수 있습니다.');
+    updateTask(root, id, (task) => { if (task.resultSeenAt) return false; task.resultSeenAt = new Date().toISOString(); return true; });
+    loadTasks(); scheduleBroadcast();
+    return { ok: true };
+  }
+
+  function clearHistory() {
+    if (!runner || demo) throw new HttpError(409, '데모에서는 실행 내역을 초기화할 수 없습니다.');
+    schedules?.list(); // 종료 실행이 정리되기 전에 예약의 최근 결과를 보존한다.
+    const cleared = runner.clearHistory();
+    const archived = new Set(cleared.taskIds);
+    const list = loadTaskList(root), now = new Date().toISOString();
+    for (const task of list) if (archived.has(task.id)) { task.historyArchivedAt = now; task.resultSeenAt ||= now; }
+    saveTasks(root, list);
+    const sessions = readJsonSafe(join(officePath, 'sessions.json'), {});
+    for (const [session, id] of Object.entries(sessions)) if (archived.has(id)) delete sessions[session];
+    writePrivate(join(officePath, 'sessions.json'), sessions);
+    // 활성 프로세스도 쓰는 이벤트 파일은 덮어쓰지 않고 표시 기준 시각을 저장한다.
+    writePrivate(join(officePath, 'history.json'), { clearedAt: now });
+    loadTasks(); scheduleBroadcast();
+    return { ok: true, removedRuns: cleared.runIds.length, removedTasks: cleared.taskIds.length };
   }
 
   // 그 업무에 연결된 세션(.office/sessions.json: 세션 → 업무)
@@ -896,6 +978,11 @@ export async function startServer({
   // outputs 기준 상대경로 → 실제 경로. 글자 경로와 실제 경로(realpath, 심볼릭 링크 해석) 모두 outputs 안이어야 한다
   function resolveOutput(p, kind) {
     if (typeof p !== 'string' || !p.trim() || p.includes('\0')) throw new HttpError(400, 'path(산출물 경로)가 필요합니다.');
+    if (p.startsWith('@final/')) {
+      const parts = p.split('/');
+      try { return resolveFinalOutput(root, parts.slice(1, 3).join('/'), parts.slice(3).join('/')); }
+      catch { throw new HttpError(404, '등록된 최종 전달 파일을 찾을 수 없습니다.'); }
+    }
     const cleaned = p.replace(/^outputs[\\/]/, '');
     const abs = resolve(outputsBase, cleaned);
     if (!insideRel(outputsBase, abs)) throw outsideOutputs();
@@ -941,6 +1028,15 @@ export async function startServer({
   }
 
   function listOutputs() {
+    // 이전 버전에서 검토·전달을 마친 업무도 원본을 옮기거나 지우지 않고 정리한다.
+    let finals = finalOutputs(root);
+    for (const task of tasks.filter((t) => ['review', 'done'].includes(t.status) && !finals[t.id])) {
+      const dir = join(outputsBase, task.id);
+      if (!existsSync(join(dir, 'report.md'))) continue;
+      try { collectFinalOutputs(root, { task: task.id, title: task.title, plan: readJsonSafe(join(dir, 'plan.json'), {}) }); }
+      catch { /* 옛 업무에 산출물이 없으면 완료된 최종본으로 표시하지 않는다. */ }
+    }
+    finals = finalOutputs(root);
     const byId = new Map(tasks.map((t) => [t.id, t]));
     const out = [];
     let baseReal;
@@ -980,6 +1076,7 @@ export async function startServer({
           verdicts,
           depts,
           fileCount: files.length,
+          finalOutput: Boolean(finals[id]),
           updated: files.reduce((m, f) => (f.mtime > m ? f.mtime : m), t?.updated ?? t?.created ?? ''),
           run: t?.run ?? null,
           agent: t?.agent ?? null,
@@ -998,9 +1095,18 @@ export async function startServer({
     const dir = resolveOutput(id, 'dir');
     const files = walkOutputFiles(dir.real, dir.baseReal);
     const t = tasks.find((x) => x.id === id);
+    let final = null;
+    try {
+      const { record } = resolveFinalOutput(root, id);
+      final = { directory: record.directory, updated: record.updated, files: record.files.map((file) => ({
+        path: `@final/${id}/${file.rel}`, name: file.rel.split('/').at(-1), rel: file.rel,
+        size: file.size, kind: outputKind(file.rel),
+      })) };
+    } catch { /* 최종 검토 전 또는 사용자가 저장 폴더를 제거한 경우 */ }
     return {
       task: { id, title: t?.title ?? id.split('/')[1], status: t?.status ?? null },
       dir: `outputs/${id}/`,
+      final,
       files: files.map((f) => ({
         path: `${id}/${f.rel}`,
         name: f.name,
@@ -1059,15 +1165,17 @@ export async function startServer({
     return { ok: true };
   }
 
-  function openOutputFolder(id) {
+  function openOutputFolder(id, { final = false } = {}) {
     if (!id) throw new HttpError(400, '업무 id 형식이 올바르지 않습니다(예: 2026-10-29/slug).');
-    const dir = resolveOutput(id, 'dir');
+    let dir;
+    try { dir = final ? resolveFinalOutput(root, id) : resolveOutput(id, 'dir'); }
+    catch (error) { if (error instanceof HttpError) throw error; throw new HttpError(404, error.message); }
     try {
       openFolder(dir.real);
     } catch (err) {
       throw new HttpError(500, `폴더를 열지 못했습니다: ${err.message}`);
     }
-    return { ok: true, path: `outputs/${id}/` };
+    return { ok: true, path: final ? dir.record.directory : `outputs/${id}/` };
   }
 
   function runLog(id) {
@@ -1180,7 +1288,15 @@ export async function startServer({
       // 회사 규칙·지침 미리보기·실행 로그는 원문이 들어 있어 토큰을 요구한다(같은 기기의 다른 사용자·프로세스 차단)
       if (parts.length === 2 && parts[1] === 'company') {
         checkToken(req);
-        return sendJson(res, 200, { rules: loadCompanyRules(root), workspace: workspaceInfo() });
+        return sendJson(res, 200, { rules: loadCompanyRules(root), settings: loadSettings(root), workspace: workspaceInfo(), finalOutputs: finalOutputSettings(root) });
+      }
+      if (parts.length === 2 && parts[1] === 'connections') {
+        checkToken(req);
+        return sendJson(res, 200, { connections: demo ? [] : connections.list(), providers: Object.entries(CONNECTION_PROVIDERS).map(([id, p]) => ({ id, name: p.name, services: p.services })) });
+      }
+      if (parts.length === 2 && parts[1] === 'schedules') {
+        checkToken(req);
+        return sendJson(res, 200, { schedules: schedules?.list({ full: true }) || [] });
       }
       if (parts.length === 4 && parts[1] === 'agents' && parts[3] === 'preview') {
         checkToken(req);
@@ -1229,6 +1345,15 @@ export async function startServer({
     const body = await readBody(req, isImport ? IMPORT_BODY_LIMIT : BODY_LIMIT);
     const [, resource, id, action] = parts;
 
+    if (resource === 'history' && method === 'DELETE' && parts.length === 2) return sendJson(res, 200, clearHistory());
+
+    if (resource === 'schedules') {
+      if (!schedules) throw new HttpError(409, '데모에서는 예약을 변경할 수 없습니다.');
+      if (method === 'POST' && parts.length === 2) return sendJson(res, 201, await callRunner(() => schedules.add(body), '예약을 저장하지 못했습니다.'));
+      if (method === 'PUT' && parts.length === 3) return sendJson(res, 200, await callRunner(() => schedules.update(id, body), '예약을 수정하지 못했습니다.'));
+      if (method === 'DELETE' && parts.length === 3) return sendJson(res, 200, await callRunner(() => schedules.remove(id), '예약을 삭제하지 못했습니다.'));
+    }
+
     if (resource === 'departments') {
       if (method === 'POST' && parts.length === 2) return sendJson(res, 201, await createDepartment(body));
       if (method === 'PUT' && parts.length === 3) return sendJson(res, 200, await updateDepartment(id, body));
@@ -1252,14 +1377,43 @@ export async function startServer({
       const taskAction = parts.at(-1);
       const taskId = taskIdFromParts(parts, 2, 1);
       if (taskAction === 'approve') return sendJson(res, 200, approveTask(taskId));
+      if (taskAction === 'seen') return sendJson(res, 200, seeResult(taskId));
       if (taskAction === 'reject') return sendJson(res, 202, await rejectTask(taskId, body));
     }
     if (resource === 'outputs' && method === 'POST' && parts.length >= 4 && parts.at(-1) === 'open') {
-      return sendJson(res, 200, openOutputFolder(taskIdFromParts(parts, 2, 1)));
+      return sendJson(res, 200, openOutputFolder(taskIdFromParts(parts, 2, 1), body));
     }
     if (resource === 'reviews' && method === 'POST' && parts.length === 2) return sendJson(res, 202, await startReview(body));
     if (resource === 'workspace' && id === 'open' && method === 'POST' && parts.length === 3) return sendJson(res, 200, openWorkspaceFolder());
     if (resource === 'company' && method === 'PUT' && parts.length === 2) return sendJson(res, 200, await putCompany(body));
+    if (resource === 'connections') {
+      if (demo) throw new HttpError(409, '데모에서는 계정을 연결하지 않습니다.');
+      let result;
+      try {
+        if (method === 'POST' && parts.length === 2) {
+          if (body.remember) validateLoginValues(body);
+          result = connections.create({ provider: body.provider, label: body.label || '' });
+          if (body.remember) result = connections.saveCredentials(result.id, body);
+        } else if (method === 'POST' && parts.length === 4 && parts[3] === 'open') result = await browserSessions.open(id);
+        else if (method === 'POST' && parts.length === 4 && parts[3] === 'confirm') result = await browserSessions.confirm(id);
+        else if (method === 'PUT' && parts.length === 3) result = connections.saveCredentials(id, body);
+        else if (method === 'DELETE' && parts.length === 3) { await browserSessions.disconnect(id); result = { removed: true }; }
+        else throw new HttpError(404, '계정 연결 작업을 찾을 수 없습니다.');
+      } catch (error) { throw new HttpError(error.status || 400, error.code === 'CONNECTION_REQUIRED' ? error.message : redact(error.message)); }
+      scheduleBroadcast(); return sendJson(res, 200, result);
+    }
+    if (resource === 'settings' && method === 'PUT' && parts.length === 2) {
+      if (demo) throw new HttpError(409, '데모 모드에서는 실행 설정을 바꿀 수 없습니다.');
+      let settings;
+      try {
+        const selected = body.chief;
+        const known = selected && modelCatalog({ env })[selected.engine]?.find((m) => m.id === selected.model);
+        if (known && !known.efforts.includes(selected.effort)) throw new Error('선택한 모델이 지원하는 effort를 골라 주세요.');
+        settings = saveSettings(root, body);
+      } catch (err) { throw new HttpError(400, err.message); }
+      scheduleBroadcast();
+      return sendJson(res, 200, settings);
+    }
     if (resource === 'org' && id === 'import' && method === 'POST' && parts.length === 3) return sendJson(res, 200, await orgImport(body));
     throw new HttpError(404, '없는 API입니다.');
   }
@@ -1317,27 +1471,35 @@ export async function startServer({
   origins = new Set([...hosts].map((h) => `http://${h}`));
 
   // 빠른 점검(설치 여부만)은 서버 시작을 막지 않게 listen 뒤에 돌린다. 빠진 도구는 화면 상단 배너로 알린다
-  const toolCheck = setImmediate(() => {
+  const toolProbeController = new AbortController();
+  const toolProbe = (async () => {
     try {
       tools = quickToolCheck({ env });
       if (!demo) {
-        if (tools.claude.installed === false) warn('claude가 설치되지 않아 작업을 실행할 수 없습니다 — npm run doctor로 확인하세요');
-        if (tools.codex.installed === false) warn('codex가 설치되지 않아 검증실을 실행할 수 없습니다 — npm run doctor로 확인하세요');
+        if (tools.claude.installed === false && tools.codex.installed === false) warn('Claude 또는 Codex를 설치하고 로그인해 주세요 — npm run doctor로 확인하세요');
+      }
+      if (!demo) {
+        tools = await checkToolLogins({ env, signal: toolProbeController.signal });
       }
     } catch (err) {
       warn('claude·codex 설치 여부를 확인하지 못했습니다', err);
     }
-    scheduleBroadcast();
-  });
+    if (server.listening && !toolProbeController.signal.aborted) scheduleBroadcast();
+  })();
 
   const timers = [
+    setInterval(() => { try { schedules?.tick(); } catch (error) { warn('반복 예약을 확인하지 못했습니다', error); } }, 1000),
     setInterval(pollFiles, POLL_MS),
+    setInterval(() => { if (runner) { try { runner.restoreContinuous({ expiredOnly: true }); } catch { warn('종료 시각이 지난 감시 상태를 확인하지 못했습니다.'); } } }, 1000),
     setInterval(scheduleBroadcast, RECOMPUTE_MS),
     setInterval(() => {
       for (const res of sseClients) res.write(`event: ping\ndata: ${JSON.stringify({ ts: new Date().toISOString() })}\n\n`);
     }, PING_MS),
   ];
   for (const t of timers) t.unref();
+  if (!demo) setImmediate(() => {
+    try { runner.restoreContinuous(); } catch (error) { warn('저장된 지속 감시를 재개하지 못했습니다', error); }
+  });
 
   // fs.watch는 즉시 반응용이고, 놓친 변경은 1초 폴링이 잡는다.
   let watcher = null;
@@ -1356,7 +1518,8 @@ export async function startServer({
   const accessUrl = remote ? `${url}?key=${token}` : url;
 
   async function close() {
-    clearImmediate(toolCheck);
+    toolProbeController.abort();
+    await toolProbe.catch(() => {});
     for (const t of timers) clearInterval(t);
     // 서버가 꺼진 뒤 에이전트가 고아 프로세스로 남지 않게 실행 중인 그룹을 끝낸다
     try {
@@ -1364,6 +1527,7 @@ export async function startServer({
     } catch (err) {
       warn('실행 중인 작업을 정리하지 못했습니다', err);
     }
+    await browserWork.close();
     if (broadcastTimer) clearTimeout(broadcastTimer);
     watcher?.close();
     for (const res of sseClients) res.end();
@@ -1380,7 +1544,7 @@ export async function startServer({
     releaseLock?.();
   }
 
-  return { server, url, accessUrl, remote, token, port: actualPort, root, workspaceSource, compat, legacyPending, close };
+  return { server, url, accessUrl, remote, token, port: actualPort, root, workspaceSource, compat, legacyPending, schedules, close };
 }
 
 function parseArgs(argv) {

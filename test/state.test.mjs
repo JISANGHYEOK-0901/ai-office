@@ -174,5 +174,5 @@ test('attention.reply: 대화(rootId)마다 마지막 needsReply 실행 하나, 
     tasks: [{ id: '2026-10-29/done-one', status: 'done' }, { id: '2026-10-29/review-one', status: 'review', title: '검토' }],
     now: Date.parse('2026-10-29T02:00:00.000Z'),
   });
-  assert.deepEqual(state.attention.map((a) => `${a.kind}:${a.runId ?? a.task}`).sort(), ['approve:2026-10-29/review-one', 'reply:a2']);
+  assert.deepEqual(state.attention.map((a) => `${a.kind}:${a.runId ?? a.task}`).sort(), ['approve:2026-10-29/review-one', 'complete:2026-10-29/done-one', 'reply:a2']);
 });

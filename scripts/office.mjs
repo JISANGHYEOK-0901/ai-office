@@ -20,6 +20,7 @@ import { compactPlan, isTaskId, validatePlan } from '../lib/plan.mjs';
 import { MAX_OUTPUT_FILES, planOutputStatus, resolveTaskDir, walkOutputFiles } from '../lib/outputs.mjs';
 import { countReviewRejects } from '../lib/flow.mjs';
 import { MAX_REVIEW_REJECTS } from '../lib/chief-guard.mjs';
+import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 
 const STATUSES = TASK_STATUSES;
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -31,7 +32,7 @@ const USAGE = [
   '  node scripts/office.mjs task files <id> [--json]   outputs/<id>/ 아래 파일 목록·크기와 계획 단계 산출물 확인(읽기 전용)',
   '  node scripts/office.mjs flow <업무> review-request --from <부서> [--note "…"]   검토 요청(부서 → 비서실장)',
   '  node scripts/office.mjs flow <업무> review --verdict pass|reject [--to <부서|직원>] [--stage <단계 id>] [--reason "…"]   검토 결과(반려는 --to 필요, 최대 2회)',
-  '  node scripts/office.mjs flow <업무> deliver [--note "…"]   사용자 확인 대기로 전환(task status review)',
+  '  node scripts/office.mjs flow <업무> deliver [--note "…"]   검토 후 자동 완료(task status done)',
   '  node scripts/office.mjs flow <업무> cooperate --from <부서A> --to <부서B> [--note "…"]   업무 협조 요청(비서실장 전달)',
   '  node scripts/office.mjs meeting <업무> start --attendees a,b [--agenda "…"]   회의 시작(직원 id 또는 부서 id)',
   '  node scripts/office.mjs meeting <업무> end [--summary "…"]   회의 종료',
@@ -174,10 +175,10 @@ function taskStatus(args) {
   if (!task) throw new Error(`업무를 찾을 수 없습니다: ${id} (task list로 확인하세요)`);
   const before = task.status;
   if (!byUser) {
-    if (status === 'done') throw new Error('완료(done)는 대표가 대시보드에서 승인할 때 기록됩니다. 결과 확인은 `flow <업무> deliver`로 요청하세요. (대시보드 없이 대표가 직접 완료하려면 --by-user)');
+    if (status === 'done') throw new Error('완료(done)는 최종 검토 후 `flow <업무> deliver`로 기록됩니다. (대시보드 없이 대표가 직접 완료하려면 --by-user)');
     if (status === 'review') throw new Error('사용자 확인 대기(review)는 `node scripts/office.mjs flow <업무> deliver`로 요청하세요.');
     if (before === 'review' || before === 'done') {
-      throw new Error(`${before === 'review' ? '사용자 확인 대기' : '완료'} 업무는 대표의 승인·반려로만 바뀝니다(현재: ${before}). (대표가 직접 바꾸려면 --by-user)`);
+      throw new Error(`${before === 'review' ? '사용자 확인 대기' : '완료'} 업무는 새 작업으로 이어가며 상태 직접 변경은 대표만 할 수 있습니다(현재: ${before}). (대표가 직접 바꾸려면 --by-user)`);
     }
   }
   task.status = status;
@@ -330,7 +331,7 @@ function flowCmd(args) {
       const { flows, calls } = countReviewRejects(taskEvents(), task.id);
       // 이번 기록이 이미 보낸 [반려] 재지시의 기록이면 그 회차, 아니면 새 회차다
       if (Math.max(flows + 1, calls) > MAX_REVIEW_REJECTS) {
-        console.error(`오류: 반려는 같은 업무에서 최대 ${MAX_REVIEW_REJECTS}회입니다(이미 ${Math.max(flows, calls)}회). 남은 문제를 outputs/${task.id}/report.md의 "확인 필요"에 적고 \`node scripts/office.mjs flow ${task.id} deliver\`로 사용자 확인을 요청하세요.`);
+        console.error(`오류: 반려는 같은 업무에서 최대 ${MAX_REVIEW_REJECTS}회입니다(이미 ${Math.max(flows, calls)}회). 남은 문제를 outputs/${task.id}/report.md의 "확인 필요"에 적고 업무를 blocked로 두세요. 필요한 대표 결정만 질문하세요.`);
         process.exitCode = 1;
         return;
       }
@@ -348,14 +349,21 @@ function flowCmd(args) {
     const t = tasks.find((x) => x.id === task.id);
     const before = t.status;
     // 사용자 확인 요청은 진행 중(active·blocked) 업무에서만 한다. 완료 업무를 되돌리거나 같은 요청을 겹쳐 보내지 않는다
-    if (before === 'review') throw new Error(`이미 사용자 확인 대기 중입니다: ${task.id}. 대표의 승인·반려를 기다리세요.`);
     if (before === 'done') throw new Error(`이미 완료된 업무입니다: ${task.id}. 새 요청이면 task start로 새 업무를 등록하세요.`);
-    t.status = 'review';
-    t.updated = new Date().toISOString();
+    if (!artifacts(task.id).report) throw new Error(`완료 보고서가 없습니다: outputs/${task.id}/report.md`);
+    const latestReview = taskEvents().filter((event) => event.task === task.id && event.kind === 'flow.review').at(-1);
+    if (latestReview?.verdict !== 'pass') throw new Error('비서실장 검토를 통과한 뒤 업무를 완료할 수 있습니다.');
+    if (artifacts(task.id).report) {
+      const planFile = join(outputsDir(root), task.id, 'plan.json');
+      collectFinalOutputs(root, { task: task.id, title: t.title, plan: existsSync(planFile) ? JSON.parse(readFileSync(planFile, 'utf8')) : {} });
+    }
+    t.status = 'done';
+    t.completedAt = t.updated = new Date().toISOString();
+    delete t.resultSeenAt;
     saveTasks(tasks);
     appendTaskEvent('flow.deliver', task.id, opts.note);
-    appendTaskEvent('task.update', task.id, `${t.title}: ${before} → review`, { status: 'review' });
-    console.log(`사용자 확인 대기로 바꿨습니다: ${task.id} (${before} → review)`);
+    appendTaskEvent('task.update', task.id, `${t.title}: ${before} → done`, { status: 'done' });
+    console.log(`검토를 마쳐 업무를 완료했습니다: ${task.id} (${before} → done)`);
     if (!artifacts(task.id).report) console.error(`주의: outputs/${task.id}/report.md가 없습니다.`);
     return;
   }

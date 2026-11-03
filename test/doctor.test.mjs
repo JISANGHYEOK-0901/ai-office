@@ -123,7 +123,7 @@ test('doctor --json: claude·codex 모두 로그인 → 필수 통과, 종료 �
   // 사람이 읽는 출력도 같은 원칙
   const human = spawnSync(process.execPath, [DOCTOR, '--port', String(await freePort())], { env: cleanEnv({ CLAUDE_BIN: f.claude, CODEX_BIN: f.codex }), encoding: 'utf8' });
   assert.equal(human.status, 0);
-  assert.match(human.stdout, /^✔ claude 로그인: 로그인됨 \(방식: claude\.ai\)$/m);
+  assert.match(human.stdout, /^✔ claude 로그인 \(선택\): 로그인됨 \(방식: claude\.ai\)$/m);
   assert.match(human.stdout, /결과: 필수 항목 통과/);
   assertNoSecrets(human.stdout + human.stderr);
 });
@@ -145,10 +145,11 @@ test('doctor --json: claude 미로그인 → ✖·종료 코드 1, 로그인 명
   assertNoSecrets(r.stdout + r.stderr);
 });
 
-test('doctor --json: claude 미설치 → 종료 코드 1, codex만 미설치 → 종료 코드 0', async (t) => {
+test('doctor --json: Codex 또는 Claude 하나만 로그인돼 있어도 종료 코드 0', async (t) => {
   const f = setup(t);
   let r = await doctor(cleanEnv({ CLAUDE_BIN: f.missing, CODEX_BIN: f.codex }));
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 0);
+  assert.match(byId(r.json, 'ai-login').message, /Codex 전용 모드/);
   assert.equal(byId(r.json, 'claude').status, 'fail');
   assert.match(byId(r.json, 'claude').fix.command, /npm install -g @anthropic-ai\/claude-code/);
   assert.equal(byId(r.json, 'claude-auth').status, 'fail');

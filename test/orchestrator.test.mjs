@@ -226,6 +226,47 @@ test('중지·서버 재생성·이어서 재개는 완료된 단계를 건너�
   assert.deepEqual([f.counts.a, f.counts.b, f.counts.plan], [1, 2, 1]);
 });
 
+test('일시정지는 진행 업무를 멈추고 정리 노트를 남기며 "이어서 해줘" 재개는 완료 단계를 건너뛴다', async (t) => {
+  const f = fixture(t, { pauseB: true });
+  const first = f.runner.start({ prompt: '두 단계 업무를 실행해 줘' });
+  await waitFor(() => f.calls.some((c) => c.kind === 'b'));
+  const { paused } = f.runner.pause();
+  assert.deepEqual(paused.map((p) => p.id), [first.id]);
+  const stopped = await f.final(first);
+  assert.equal(stopped.status, 'stopped');
+  assert.equal(stopped.paused, true);
+  assert.ok(!stopped.userStopped);
+  assert.match(stopped.summary, /일시정지했습니다.*pause-note\.md.*이어서 해줘/);
+  const note = readFileSync(join(f.root, 'outputs', ...first.task.split('/'), 'pause-note.md'), 'utf8');
+  assert.match(note, /1\/2 단계 완료/);
+  assert.match(note, /\[남음\] b/);
+  assert.ok(f.runner.list().every((r) => !['running', 'queued'].includes(r.status)));
+  f.restart();
+  const { resumed, skipped } = f.runner.resumeAll();
+  assert.deepEqual(skipped, []);
+  assert.equal(resumed.length, 1);
+  assert.equal((await f.final({ id: resumed[0].id })).status, 'done');
+  assert.deepEqual([f.counts.a, f.counts.b, f.counts.plan], [1, 2, 1]);
+  assert.deepEqual(f.runner.resumeAll(), { resumed: [], skipped: [] });
+});
+
+test('서버 종료로 끊긴 업무도 재개 대상이고, 대표가 직접 중지한 업무는 일괄 재개하지 않는다', async (t) => {
+  const f = fixture(t, { pauseB: true, independent: true });
+  const first = f.runner.start({ prompt: '두 단계 업무를 실행해 줘' });
+  await waitFor(() => f.calls.some((c) => c.kind === 'b'));
+  await f.runner.stopAll({ graceMs: 10 });
+  assert.equal((await f.final(first)).interrupted, true);
+  f.restart();
+  const second = f.runner.start({ prompt: '다른 업무를 실행해 줘' });
+  await waitFor(() => f.calls.filter((c) => c.kind === 'plan').length >= 2);
+  f.runner.stop(second.id);
+  await f.final(second);
+  const { resumed } = f.runner.resumeAll();
+  assert.deepEqual(resumed.map((r) => r.from), [first.id]);
+  await f.final({ id: resumed[0].id });
+  assert.ok(!f.runner.list().find((r) => r.id === first.id).interrupted);
+});
+
 test('완료한 업무는 승인 없이 닫히고 추가 수정은 새 업무로 시작한다', async (t) => {
   const f = fixture(t, { feedback: true });
   const first = f.runner.start({ prompt: '보고서를 작성해 줘' });

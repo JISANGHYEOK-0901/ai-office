@@ -29,6 +29,7 @@ import { MAX_OUTPUT_FILES, insideRel, planOutputStatus, walkOutputFiles } from '
 import { loadTasks as loadTaskList, updateTask, saveTasks } from '../lib/tasks.mjs';
 import { readPrivate, writePrivate } from '../lib/private-state.mjs';
 import { createRunner } from './runner.mjs';
+import { pauseIntent, resumeIntent } from '../lib/pause.mjs';
 import { buildState } from './state.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -783,6 +784,17 @@ export async function startServer({
     if (agentId !== null && typeof agentId !== 'string') throw new HttpError(400, 'agentId는 문자열이어야 합니다.');
     const model = body.model || null;
     if (model !== null && typeof model !== 'string') throw new HttpError(400, 'model은 문자열이어야 합니다.');
+    // 비서실장 지시창의 "하던 작업 멈추고 정리해 둬"/"이어서 해줘"는 새 업무가 아니라 일시정지·일괄 재개다
+    if (!agentId && pauseIntent(prompt)) {
+      const result = runner.pause();
+      scheduleBroadcast();
+      return { pauseRequested: true, ...result };
+    }
+    if (!agentId && resumeIntent(prompt)) {
+      const result = runner.resumeAll();
+      scheduleBroadcast();
+      return { resumeRequested: true, ...result };
+    }
     if (!agentId && body.schedule !== false) {
       const requested = await callRunner(() => dailyScheduleRequest(prompt), '예약 시각을 확인해 주세요.');
       if (requested) {

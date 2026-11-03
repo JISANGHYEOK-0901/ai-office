@@ -98,3 +98,24 @@ test('HTTP: 직원 질문 알림 → 결정 답장 → 산출물 → 검토 후 
   assert.ok(!seen.attention.some((a) => a.task === run.task));
 
 });
+
+test('HTTP: 지시창의 일시정지·재개 문장은 새 업무를 만들지 않고 실행기 일시정지·일괄 재개로 처리한다', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'office-api-pause-'));
+  mkdirSync(join(root, 'org'));
+  writeFileSync(join(root, 'org/departments.json'), JSON.stringify([{ id: 'research', name: '리서치부', engine: 'codex', codexRole: 'exec' }]));
+  writeFileSync(join(root, 'org/roster.json'), JSON.stringify([{ id: 'research-1', name: '김대리', department: 'research' }]));
+  const missing = join(root, 'must-not-run.mjs');
+  let server;
+  t.after(async () => { await server?.close(); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); });
+  server = await startServer({ root, port: 0, quiet: true, env: { ...process.env, CLAUDE_BIN: missing, CODEX_BIN: missing } });
+  const base = `http://127.0.0.1:${server.port}`;
+  const post = async (body) => {
+    const response = await fetch(base + '/api/runs', { method: 'POST', headers: { 'X-Office-Token': server.token, Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    assert.ok(response.ok); return response.json();
+  };
+  assert.deepEqual(await post({ prompt: '지금까지 하던 작업 멈추고 자료 정리한 다음 다음에 이어갈 수 있게해줘' }), { pauseRequested: true, paused: [] });
+  assert.deepEqual(await post({ prompt: '이어서 해줘' }), { resumeRequested: true, resumed: [], skipped: [] });
+  const state = await (await fetch(base + '/api/state')).json();
+  assert.equal(state.runs.length, 0);
+  assert.equal(state.tasks.length, 0);
+});

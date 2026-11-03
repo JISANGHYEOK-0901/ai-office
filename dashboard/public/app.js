@@ -10,7 +10,18 @@ export const COLORS = ['#38bdf8', '#34d399', '#f472b6', '#a78bfa', '#fbbf24', '#
 // idle(상단 IDLE)은 '근무 중이지만 오늘 활동 없음'이다. '근무중'은 휴무와 짝을 이루는 근무 상태라 쓰지 않는다
 export const STATUS_LABEL = { working: '작업중', standby: '대기', idle: '오늘 활동 없음', 'off-duty': '휴무', offline: '오프라인' };
 const RUN_LABEL = { running: '실행 중', queued: '대기열', done: '완료', failed: '실패', stopped: '중지됨' };
+// 일시정지(대표의 "멈추고 정리" 지시)와 서버 종료로 끊긴 실행은 "이어서 해줘"로 재개할 수 있어 중지·실패와 구분한다
+const runLabel = (r) => r.paused && r.status === 'stopped' ? '일시정지' : r.interrupted && ['stopped', 'failed'].includes(r.status) ? '끊김·재개 가능' : RUN_LABEL[r.status] || r.status;
 const TASK_LABEL = { active: '진행', review: '사용자 확인', done: '완료', blocked: '막힘' };
+// 업무의 마지막 실행이 일시정지·끊김이면 '진행'·'막힘' 대신 그 상태를 보여 준다
+export function taskLabel(task, runs = []) {
+  const last = runs.filter((r) => !r.phase && r.task === task.id).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))).at(-1);
+  if (task.status !== 'done' && last && !['running', 'queued'].includes(last.status)) {
+    if (last.paused && last.status === 'stopped') return '일시정지';
+    if (last.interrupted) return '끊김·재개 가능';
+  }
+  return TASK_LABEL[task.status] || task.status || '진행';
+}
 const KIND_LABEL = {
   'session.start': '세션 시작', request: '요청', 'agent.start': '업무 시작', 'agent.stop': '업무 완료',
   'tool.start': '도구', 'tool.end': '도구 완료', 'turn.end': '응답 완료', 'review.start': '리뷰 시작',
@@ -1460,7 +1471,7 @@ function renderTasks() {
     const hasReport = t.report ?? t.hasReport;
     const approve = S.attention.find((a) => ['complete', 'approve'].includes(a.kind) && a.task === t.id);
     return `<li class="task task-${esc(t.status || 'active')}">
-      <div class="task-top"><span class="tag t-${esc(t.status)}">${esc(TASK_LABEL[t.status] || t.status || '진행')}</span><b>${esc(t.title || t.id)}</b>${attnButton(approve, `ta-${t.id}`)}</div>
+      <div class="task-top"><span class="tag t-${esc(t.status)}">${esc(taskLabel(t, S.runs))}</span><b>${esc(t.title || t.id)}</b>${attnButton(approve, `ta-${t.id}`)}</div>
       ${stepperHtml(t, true)}
       ${t.plan ? planHtml(t, t.plan) : ''}
       ${missingOutputsHtml(t)}
@@ -1477,10 +1488,10 @@ function renderTasks() {
     const live = r.status === 'running' || r.status === 'queued';
     const who = runWho(r);
     return `<li class="run run-${esc(r.status)}${r.needsReply ? ' run-needs-reply' : ''}">
-      <div class="task-top"><span class="tag r-${esc(r.status)}">${esc(RUN_LABEL[r.status] || r.status)}</span><b>${esc(who)}</b>${r.engine === 'codex' ? '<span class="engine engine-codex">codex</span>' : ''}${replyBadge(r, `rb-${r.id}`)}<time>${esc(timeAgo(runStart(r)))}</time></div>
+      <div class="task-top"><span class="tag r-${esc(r.status)}">${esc(runLabel(r))}</span><b>${esc(who)}</b>${r.engine === 'codex' ? '<span class="engine engine-codex">codex</span>' : ''}${replyBadge(r, `rb-${r.id}`)}<time>${esc(timeAgo(runStart(r)))}</time></div>
       <p class="run-text">${r.parentId ? '<span class="reply-mark" title="이어서 답한 실행">↳ 답장</span> ' : ''}${esc(runText(r))}</p>
       ${r.model ? `<p class="run-usage">${esc(r.model)}${r.effort ? ` · ${esc(r.effort)}` : ''}</p>` : ''}
-      ${r.continuous ? `<p class="run-monitor">${esc({ checking: '자료 확인 중', waiting: '새 자료 대기', retrying: '확인 재시도 대기', needs_decision: '감시 결정 대기', suspended: '감시 재개 대기', stopped: '감시 중지', finished: '감시 종료' }[r.monitor?.status] || '지속 감시 준비')} · ${r.monitor?.deadlineAt ? `${esc(new Date(r.monitor.deadlineAt).toLocaleString('ko-KR'))}까지` : '중지할 때까지'} · 새 자료 ${r.monitor?.discoveries || 0}건 · 보고 ${r.monitor?.deliveries || 0}건${r.monitor?.nextAt && live ? `<br>다음 확인 ${esc(new Date(r.monitor.nextAt).toLocaleTimeString('ko-KR'))}` : ''}${r.monitor?.error ? `<br>최근 오류: ${esc(r.monitor.error)}` : ''}</p>` : ''}
+      ${r.continuous ? `<p class="run-monitor">${esc({ checking: '자료 확인 중', waiting: '새 자료 대기', retrying: '확인 재시도 대기', needs_decision: '감시 결정 대기', suspended: '감시 재개 대기', paused: '감시 일시정지', stopped: '감시 중지', finished: '감시 종료' }[r.monitor?.status] || '지속 감시 준비')} · ${r.monitor?.deadlineAt ? `${esc(new Date(r.monitor.deadlineAt).toLocaleString('ko-KR'))}까지` : '중지할 때까지'} · 새 자료 ${r.monitor?.discoveries || 0}건 · 보고 ${r.monitor?.deliveries || 0}건${r.monitor?.nextAt && live ? `<br>다음 확인 ${esc(new Date(r.monitor.nextAt).toLocaleTimeString('ko-KR'))}` : ''}${r.monitor?.error ? `<br>최근 오류: ${esc(r.monitor.error)}` : ''}</p>` : ''}
       ${usageLabel(r) ? `<p class="run-usage">${esc(usageLabel(r))}</p>` : ''}
       ${runResult(r) && !live ? `<p class="run-result">${esc(String(runResult(r)).slice(0, 160))}</p>` : ''}
       <div class="run-actions">
@@ -1579,7 +1590,7 @@ function agentProfile(a) {
     ${off ? `<p class="help" id="offHint">${a.active !== false && dept?.active === false ? '부서가 휴무 중이라' : '휴무 중인 직원은 에이전트 파일이 없어'} 작업을 받을 수 없어요.</p>` : ''}
     <h4 class="sub-title">최근 실행</h4>
     ${run ? `<div class="run-card run-${esc(run.status)}">
-        <div class="task-top"><span class="tag r-${esc(run.status)}">${esc(RUN_LABEL[run.status] || run.status)}</span>${replyBadge(run, 'pa-badge')}<time>${esc(timeAgo(runStart(run)))}</time></div>
+        <div class="task-top"><span class="tag r-${esc(run.status)}">${esc(runLabel(run))}</span>${replyBadge(run, 'pa-badge')}<time>${esc(timeAgo(runStart(run)))}</time></div>
         <p class="run-text">${esc(runText(run))}</p>
         ${runResult(run) ? `<pre class="run-output">${esc(runResult(run))}</pre>` : ''}
         <div class="run-actions">
@@ -1649,7 +1660,7 @@ function chiefProfile(a) {
     <p class="help">비서실장에게는 위쪽 입력창으로 업무를 지시합니다.</p>
     <h4 class="sub-title">최근 지시</h4>
     ${runs.length ? `<ul class="task-list">${runs.map((r) => `<li class="run run-${esc(r.status)}${r.needsReply ? ' run-needs-reply' : ''}">
-      <div class="task-top"><span class="tag r-${esc(r.status)}">${esc(RUN_LABEL[r.status] || r.status)}</span>${replyBadge(r, `pcb-${r.id}`)}<time>${esc(timeAgo(runStart(r)))}</time></div>
+      <div class="task-top"><span class="tag r-${esc(r.status)}">${esc(runLabel(r))}</span>${replyBadge(r, `pcb-${r.id}`)}<time>${esc(timeAgo(runStart(r)))}</time></div>
       <p class="run-text">${esc(runText(r))}</p>
       <div class="run-actions">${r.canReply || r.parentId ? `<button type="button" class="btn btn-sm" data-act="open-thread" data-run="${esc(r.id)}" data-key="pct-${esc(r.id)}">대화 보기</button>` : ''}
         <button type="button" class="btn btn-sm btn-ghost" data-act="log-run" data-run="${esc(r.id)}" data-key="pcl-${esc(r.id)}">로그</button></div></li>`).join('')}</ul>` : '<p class="empty">아직 지시한 업무가 없어요.</p>'}
@@ -2112,6 +2123,22 @@ async function submitRun(ev) {
   }
 }
 
+// 지시창 응답 안내: 예약·일시정지·일괄 재개·새 업무
+export function chiefResultMessage(result) {
+  if (result.scheduled) return `매일 ${result.schedule.time}에 업무를 시작하도록 예약했어요. 반복 예약에서 관리할 수 있습니다.`;
+  if (result.pauseRequested) {
+    const n = result.paused?.length || 0;
+    return n ? `진행 중이던 업무 ${n}건을 일시정지하고 업무 폴더마다 정리 노트(pause-note.md)를 남겼어요. 서버를 꺼도 되고, 다음에 "이어서 해줘"라고 쓰면 다시 시작합니다.`
+      : '지금 진행 중인 업무가 없어 일시정지할 것이 없어요.';
+  }
+  if (result.resumeRequested) {
+    const n = result.resumed?.length || 0;
+    const skipped = result.skipped?.length ? ` 이어가지 못한 ${result.skipped.length}건: ${result.skipped.map((s) => s.reason).join(' / ')}` : '';
+    return (n ? `일시정지·중단됐던 업무 ${n}건을 이어서 시작했어요. 완료한 단계는 건너뜁니다.` : '이어서 할 일시정지 업무가 없어요.') + skipped;
+  }
+  return '비서실장에게 업무를 전달했어요. 업무를 나눠 직원들에게 배정합니다.';
+}
+
 async function submitChief(ev) {
   ev.preventDefault();
   const input = $('chiefInput');
@@ -2128,7 +2155,7 @@ async function submitChief(ev) {
     input.value = '';
     // 데스크톱에서는 상세 패널이 실행 목록 자리를 가리므로 닫아서 시작된 실행을 바로 보이게 한다
     if (ui.drawer) closeDrawer({ restoreFocus: false });
-    toast(result.scheduled ? `매일 ${result.schedule.time}에 업무를 시작하도록 예약했어요. 반복 예약에서 관리할 수 있습니다.` : '비서실장에게 업무를 전달했어요. 업무를 나눠 직원들에게 배정합니다.');
+    toast(chiefResultMessage(result));
     await refresh();
   } catch (e) {
     toast(e.message, { type: 'error' });
@@ -2263,7 +2290,7 @@ function renderThread() {
       ask.append(askHead, el('p', 'msg-text', runText(r) || '(요청 요약 없음)'));
       const ans = el('li', `msg msg-agent msg-${r.status}`);
       const head = el('div', 'msg-head');
-      head.append(el('b', '', runWho(r)), el('span', `tag r-${r.status}`, RUN_LABEL[r.status] || r.status));
+      head.append(el('b', '', runWho(r)), el('span', `tag r-${r.status}`, runLabel(r)));
       if (r.needsReply) head.append(el('span', 'badge badge-reply', '답변 필요'));
       ans.append(head);
       const cached = resultCache.get(r.id);

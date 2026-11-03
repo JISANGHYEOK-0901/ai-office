@@ -10,13 +10,14 @@ import { buildOrgMap } from '../lib/orgmap.mjs';
 import { agentInstructions, resolveAgentModel } from '../lib/sync.mjs';
 import { CLAUDE_EFFORTS, codexRole, loadSettings, resolveChief, resolveControlChief } from '../lib/settings.mjs';
 import { cliUsage, addUsage } from '../lib/usage.mjs';
-import { orchestrate } from './orchestrator.mjs';
+import { orchestrate, checkpointFile } from './orchestrator.mjs';
 import { runContinuous, monitorFile } from './continuous.mjs';
 import { continuousRequest } from '../lib/continuous.mjs';
 import { readPrivate, writePrivate } from '../lib/private-state.mjs';
 import { attachBrowser } from '../lib/browser-cli.mjs';
 import { historySelection } from '../lib/history.mjs';
 import { looksLikeQuestion } from '../lib/work-result.mjs';
+import { RESUME_PROMPT, writePauseNote } from '../lib/pause.mjs';
 import { addTask, updateTask, loadTasks } from '../lib/tasks.mjs';
 import { isTaskId } from '../lib/plan.mjs';
 import { appendEvent, normalizeCodexItem, redact } from '../lib/events.mjs';
@@ -93,7 +94,8 @@ export function createRunner({ root, onChange, maxConcurrent = 4, spawnImpl = ch
     const now = new Date().toISOString();
     for (const run of list) {
       if (run.status === 'running') {
-        Object.assign(run, { status: 'failed', endedAt: run.endedAt || now, summary: '서버 재시작으로 실행 추적이 끊겼습니다.' });
+        // interrupted: 노트북 종료 등으로 끊긴 실행. "이어서 해줘"의 일괄 재개 대상이 된다
+        Object.assign(run, { status: 'failed', endedAt: run.endedAt || now, summary: '서버 재시작으로 실행 추적이 끊겼습니다.', ...(run.phase ? {} : { interrupted: true }) });
       } else if (run.status === 'queued') {
         Object.assign(run, { status: 'stopped', endedAt: run.endedAt || now, summary: '서버 재시작으로 대기 중인 실행을 취소했습니다.' });
       }
@@ -395,6 +397,7 @@ export function createRunner({ root, onChange, maxConcurrent = 4, spawnImpl = ch
     }
     if (spec.orchestration) activateTask(task ?? parent.task);
     parent.needsReply = false;
+    delete parent.interrupted;
     return addRun(spec, parent.target, typeof display === 'string' && display ? display : prompt,
       { parentId: parent.id, rootId, sessionId: parent.sessionId, task: task ?? parent.task ?? null,
         monitorId: parent.monitorId, deliveryKey: parent.deliveryKey, schedule: parent.schedule });
@@ -545,7 +548,9 @@ export function createRunner({ root, onChange, maxConcurrent = 4, spawnImpl = ch
     });
     child.on('close', (code, signal) => {
       if (buffer) handleLine(run, spec, buffer);
-      if (entry.stopRequested) {
+      if (entry.stopRequested && run.paused) {
+        finish(run, { status: 'stopped', summary: pausedSummary(run, notePaused(run)) });
+      } else if (entry.stopRequested) {
         finish(run, { status: 'stopped', summary: run.summary || '사용자가 실행을 중지했습니다.' });
       } else if ((code === 0 || (spec.review && code === 2)) && !run.resultError) {
         // 검증의 종료 코드 2 는 BLOCK 판정이지 실행 실패가 아니다
@@ -678,6 +683,9 @@ export function createRunner({ root, onChange, maxConcurrent = 4, spawnImpl = ch
         for (const id of children) stop(id);
         await Promise.allSettled([...pending]);
       }
+      // 일시정지 직전에 업무가 끝났으면(status done) 완료 결과를 그대로 둔다
+      if (status === 'stopped' && controller.signal.reason === 'user-pause') text = pausedSummary(run, notePaused(run));
+      else if (run.paused && status !== 'stopped') delete run.paused;
       saveResult(run, text);
       Object.assign(run, { status, summary: redact(text), needsReply: status === 'done' && spec.needsDecision === true, endedAt: new Date().toISOString() });
       if (run.needsReply) emit({ engine: run.engine, session: `run-${run.id}`, agent: 'chief', kind: 'reply.wait', run: run.id, task: run.task, summary: redact(lastParagraph(text), 160) });
@@ -717,6 +725,7 @@ export function createRunner({ root, onChange, maxConcurrent = 4, spawnImpl = ch
       if (run.status === 'queued') Object.assign(run, { status: 'stopped', endedAt: now, summary: '서버 종료로 대기 중인 실행을 취소했습니다.' });
       spec.onComplete?.(run);
     }
+    for (const run of runs) if (!run.phase && run.status === 'running') run.interrupted = true;
     const orchestrations = [...live.values()].filter((e) => e.controller);
     for (const entry of orchestrations) entry.controller.abort('server-shutdown');
     persist();
@@ -771,6 +780,78 @@ export function createRunner({ root, onChange, maxConcurrent = 4, spawnImpl = ch
       if (run.continuous) for (const child of runs.filter((r) => r.monitorId === run.rootId && BUSY.has(r.status))) stop(child.id);
     } else requestStop(entry);
     return publicRun(run);
+  }
+
+  // 일시정지 정리 노트: 체크포인트·계획·업무 폴더로 outputs/<업무>/pause-note.md를 쓴다(AI 호출 없음)
+  function notePaused(run) {
+    if (!run.task || !isTaskId(run.task)) return null;
+    try {
+      const taskDir = join(root, 'outputs', ...run.task.split('/'));
+      const checkpoint = run.orchestration && !run.continuous ? readPrivate(checkpointFile(root, run.rootId), null) : null;
+      const monitor = run.continuous ? readPrivate(monitorFile(root, run.rootId), null) : null;
+      const title = loadTasks(root).find((t) => t.id === run.task)?.title;
+      mkdirSync(taskDir, { recursive: true });
+      run.pauseNote = writePauseNote({ run, title, checkpoint, monitor, taskDir, root, pausedAt: run.pausedAt });
+      return run.pauseNote;
+    } catch { return null; }
+  }
+
+  function pausedSummary(run, note) {
+    return `일시정지했습니다.${note ? ` 진행 상황 정리: ${note}.` : ''} 지시창에 "이어서 해줘"라고 쓰면 다시 시작합니다.`;
+  }
+
+  // 대표의 "멈추고 정리해 두었다가 다음에 이어서" 지시: 진행·대기 중인 업무를 모두 멈추고 업무별 정리 노트를 남긴다.
+  // 중지와 달리 userStopped를 남기지 않아 resumeAll의 재개 대상이 되고, 지속 감시는 paused로 기록된다.
+  function pause() {
+    const now = new Date().toISOString();
+    const paused = [];
+    for (const run of runs.filter((r) => !r.phase && BUSY.has(r.status))) {
+      Object.assign(run, { paused: true, pausedAt: now });
+      if (run.status === 'queued') {
+        const idx = queue.findIndex((q) => q.run.id === run.id);
+        const item = idx >= 0 ? queue.splice(idx, 1)[0] : null;
+        Object.assign(run, { status: 'stopped', endedAt: now });
+        run.summary = pausedSummary(run, notePaused(run));
+        changed(run);
+        item?.spec.onComplete?.(run);
+      } else {
+        const entry = live.get(run.id);
+        if (entry?.controller) {
+          entry.controller.abort('user-pause');
+          for (const id of entry.children) stop(id, { reason: 'pause' });
+        } else if (entry) requestStop(entry);
+        changed(run);
+      }
+      paused.push({ id: run.id, task: run.task, request: run.request, target: run.target });
+    }
+    return { paused };
+  }
+
+  // "이어서 해줘": 일시정지했거나 서버 종료·재시작으로 끊긴 대화의 마지막 실행을 모두 이어서 재개한다.
+  // 대표가 직접 중지한 실행(userStopped)과 이미 완료된 업무는 건드리지 않는다.
+  function resumeAll() {
+    const latest = new Map();
+    for (const run of runs) if (!run.phase && run.target !== 'review') latest.set(run.rootId || run.id, run);
+    const tasks = loadTasks(root);
+    const resumed = [];
+    const skipped = [];
+    for (const run of latest.values()) {
+      if (!(run.paused || run.interrupted) || run.userStopped || !['stopped', 'failed'].includes(run.status)) continue;
+      if (run.task && tasks.find((t) => t.id === run.task)?.status === 'done') continue;
+      if (!publicRun(run).canReply) {
+        skipped.push({ id: run.id, request: run.request, reason: '대기 중에 멈춰 이어갈 대화가 없습니다. 같은 지시를 다시 내려 주세요.' });
+        continue;
+      }
+      try {
+        const prompt = run.orchestration ? RESUME_PROMPT
+          : `${RESUME_PROMPT}: 일시정지 전까지 작업한 내용과 저장 위치의 파일을 확인하고 남은 작업을 끝내세요.`;
+        const next = reply(run.id, { prompt, display: RESUME_PROMPT });
+        resumed.push({ id: next.id, from: run.id, task: run.task, request: run.request });
+      } catch (err) {
+        skipped.push({ id: run.id, request: run.request, reason: err.message });
+      }
+    }
+    return { resumed, skipped };
   }
 
   function list() {
@@ -838,5 +919,5 @@ export function createRunner({ root, onChange, maxConcurrent = 4, spawnImpl = ch
     return { runIds: selected.removed.map((run) => run.id), taskIds: selected.taskIds };
   }
 
-  return { start, stop, stopAll, list, startReview, reply, result, latestForTask, clearNeedsReply, restoreContinuous, clearHistory };
+  return { start, stop, stopAll, pause, resumeAll, list, startReview, reply, result, latestForTask, clearNeedsReply, restoreContinuous, clearHistory };
 }

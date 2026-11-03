@@ -101,3 +101,21 @@ test('대표 결정 중 지정 시간이 지나면 추가 AI 호출 없이 감�
   assert.equal(loadTasks(f.root).find((task) => task.id === run.task).status, 'done');
   assert.equal(f.runner.restoreContinuous().length, 0);
 });
+
+test('일시정지한 감시는 자동 재개하지 않고 정리 노트를 남기며 "이어서 해줘"로 같은 커서부터 이어간다', async (t) => {
+  const f = fixture(t);
+  const run = f.runner.start({ agentId: 'research-1', prompt: '계속 조사해 줘', continuous: { intervalMs: 10000 } });
+  await wait(() => f.runner.list().find((r) => r.id === run.id)?.monitor?.cycles === 1);
+  f.runner.pause();
+  await wait(() => f.runner.list().find((r) => r.id === run.id).status === 'stopped');
+  const saved = JSON.parse(readFileSync(monitorFile(f.root, run.rootId)));
+  assert.equal(saved.desired, false); assert.equal(saved.status, 'paused');
+  assert.match(readFileSync(join(f.root, 'outputs', ...run.task.split('/'), 'pause-note.md'), 'utf8'), /조회 1회/);
+  saved.nextAt = Date.now() - 1; writePrivate(monitorFile(f.root, run.rootId), saved);
+  f.restart(); assert.equal(f.runner.restoreContinuous().length, 0);
+  const { resumed } = f.runner.resumeAll();
+  assert.equal(resumed.length, 1);
+  await wait(() => f.calls.filter((c) => c.schema.endsWith('watch.json')).length === 2);
+  assert.match(f.calls.at(-1).input, /cursor-kept/);
+  f.runner.stop(resumed[0].id); await wait(() => f.runner.list().find((r) => r.id === resumed[0].id).status === 'stopped');
+});

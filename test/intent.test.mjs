@@ -4,7 +4,7 @@ import { evidenceIn, judgeAnswer, judgeCommand } from '../lib/intent.mjs';
 import { parseJudge } from '../lib/ai-judge.mjs';
 
 const ai = (fields) => async () => ({ kind: 'task', kindEvidence: '', externalActions: [], delegated: false, delegatedEvidence: '', standing: 'none', standingEvidence: '',
-  durationMinutes: 0, deadline: '', intervalMinutes: 0, dailyTime: '', dailyEvidence: '', ...fields });
+  durationMinutes: 0, deadline: '', intervalMinutes: 0, dailyTime: '', dailyEvidence: '', outputDir: '', outputDirEvidence: '', ...fields });
 const NOW = Date.parse('2026-11-03T09:00:00+09:00');
 
 test('근거 문장은 앞말·따옴표를 걷어 내고 대표 원문에 실제로 있을 때만 인정한다', () => {
@@ -62,4 +62,11 @@ test('Claude·Codex 판별 응답에서 구조화 결과를 읽는다', () => {
   assert.deepEqual(parseJudge(JSON.stringify({ type: 'result', structured_output: { kind: 'pause' } })), { kind: 'pause' });
   assert.deepEqual(parseJudge([JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: '{"kind":"resume"}' } }), JSON.stringify({ type: 'turn.completed' })].join('\n')), { kind: 'resume' });
   assert.equal(parseJudge('not json'), null);
+});
+
+test('지시에 적은 저장 폴더는 전체 경로이고 원문에 있을 때만 쓴다', async () => {
+  const text = '리스트 만들어서 ~/Desktop/상담사 리스트 폴더에 저장해 줘';
+  assert.equal((await judgeCommand(text, { judge: ai({ outputDir: '~/Desktop/상담사 리스트', outputDirEvidence: '~/Desktop/상담사 리스트 폴더에 저장해' }) })).outputDir, '~/Desktop/상담사 리스트');
+  assert.equal((await judgeCommand(text, { judge: ai({ outputDir: '~/Documents/다른곳', outputDirEvidence: '~/Desktop/상담사 리스트 폴더에 저장해' }) })).outputDir, null, '원문에 없는 경로는 버린다');
+  assert.equal((await judgeCommand('바탕화면에 저장해 줘', { judge: ai({ outputDir: '바탕화면', outputDirEvidence: '바탕화면에 저장해' }) })).outputDir, null, '전체 경로가 아니면 쓰지 않는다');
 });

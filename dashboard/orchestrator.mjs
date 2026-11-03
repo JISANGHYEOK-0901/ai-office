@@ -486,7 +486,7 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
           + (prepared.skipped.length ? '\n\n확인 필요:\n' + prepared.skipped.map((s) => '- ' + redactContext(s)).join('\n') : '') : '');
         writeFileAtomic(join(taskDir, 'report.md'), report);
         // 최종산출물 폴더 이름은 비서실장이 정리한 업무 목표(지시문 원문보다 알아보기 쉬움)
-        try { collectFinalOutputs(root, { task, title: plan.goal || loadTasks(root).find((t) => t.id === task)?.title, plan }); }
+        try { collectFinalOutputs(root, { task, title: plan.goal || loadTasks(root).find((t) => t.id === task)?.title, plan, directory: state.intent?.outputDir || null }); }
         catch (error) { return ask([{ phase: 'deliver', question: `최종산출물을 저장하지 못했습니다. 회사 설정의 저장 위치·폴더 권한을 확인한 뒤 이어서 재개해 주세요. ${redactContext(error.message)}` }]); }
         emit('flow.review', { verdict: 'pass', summary: redact(review.reason) });
         completeTask(root, task);

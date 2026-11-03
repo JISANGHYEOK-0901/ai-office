@@ -26,7 +26,7 @@ function fixture(t) {
 test('최종산출물/날짜/업무명에는 보고·최종 파일·참조 자산만 모으고 중간 자료는 보존한다', (t) => {
   const f = fixture(t);
   const result = collectFinalOutputs(f.root, { task, title: '제휴 업체 조사', plan: f.plan });
-  assert.equal(result.directory, join(f.root, '최종산출물', '2026-10-30', '제휴 업체 조사--partner-research'));
+  assert.equal(result.directory, join(f.root, '보관함', '최종산출물', '2026-10-30', '제휴 업체 조사--partner-research'), '기본 위치는 작업 공간 보관함');
   assert.deepEqual(result.files.map((f) => f.rel).sort(), ['dev/image.svg', 'dev/page.html', 'dev/style.css', '비서실장-보고.md'].sort());
   assert.equal(existsSync(join(result.directory, 'research/raw.txt')), false);
   assert.equal(readFileSync(join(f.root, `outputs/${task}/research/raw.txt`), 'utf8'), '중간 조사 자료');
@@ -108,4 +108,14 @@ test('전달 단계 제목이 있으면 대표가 받는 파일 이름으로 쓰
   const report = readFileSync(join(result.directory, '비서실장-보고.md'), 'utf8');
   assert.match(report, /\[리스트\]\(%EB%AF%B8%ED%99%9C%EB%8F%99/);
   assert.match(report, /\[화면\]\(dev\/%EC%A0%9C%ED%9C%B4/);
+});
+
+test('대표가 지시에 적은 저장 폴더에는 바로 만들고, 프로그램·작업 중간 자료·설정 위치는 거부한다', (t) => {
+  const f = fixture(t);
+  const target = join(f.external, '상담사 리스트');
+  const result = collectFinalOutputs(f.root, { task, title: '제휴 업체 조사', plan: f.plan, directory: target });
+  assert.equal(result.directory, target);
+  assert.ok(existsSync(join(target, '비서실장-보고.md')) && existsSync(join(target, 'dev', 'page.html')));
+  for (const bad of [join(f.root, 'outputs', 'x'), join(f.root, '.office'), join(f.root, 'org'), 'relative/path', f.root])
+    assert.throws(() => collectFinalOutputs(f.root, { task, plan: f.plan, directory: bad }), /저장 위치|폴더/, bad);
 });

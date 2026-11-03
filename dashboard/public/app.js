@@ -3377,7 +3377,7 @@ function init() {
   $('companyForm').addEventListener('submit', submitCompany);
   $('companyRules').addEventListener('input', updateCompanyCount);
   $('finalOutputParent').addEventListener('input', () => {
-    const parent = $('finalOutputParent').value.trim() || $('workspacePath').textContent;
+    const parent = $('finalOutputParent').value.trim() || `${$('workspacePath').textContent.replace(/[\\/]$/, '')}${$('workspacePath').textContent.includes('\\') ? '\\' : '/'}보관함`;
     $('finalOutputPath').textContent = `${parent.replace(/[\\/]$/, '')}${parent.includes('\\') ? '\\' : '/'}최종산출물`;
   });
   $('orgExportBtn').addEventListener('click', exportOrgFile);

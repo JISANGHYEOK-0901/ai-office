@@ -132,6 +132,7 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
       '연결된 일반 웹사이트(관리자 화면 등)에서 자료를 조회·추출해야 하는 단계는 stage.connection에 그 연결 계정 id, stage.target에 시작 주소(대표가 준 링크 또는 연결의 시작 주소)를 넣으세요. 담당 직원이 읽기 전용 브라우저로 조회해 output 파일에 정리합니다. 대표가 링크를 주면 허용 도메인이 맞는 연결 계정을 고르세요. 그 밖의 단계는 connection·target을 빈 문자열로 둡니다. done에는 대표가 요구한 항목과 그 목적(예: 연락하려면 연락처)에 필요한 항목을 빠짐없이 넣으세요.',
       '앞 단계 id를 inputs와 dependsOn에 넣으세요. report/summary/findings/analysis로 시작하는 .md 이름은 쓰지 마세요.',
       `파일 조회 기준 폴더는 작업 공간 ${root}입니다. .office/… 등 요청의 상대 원본 경로는 작업 공간 기준입니다. inputs에는 앞 단계 id 또는 작업 공간 내부 원본의 절대 경로를 쓰세요. 기존 업무 상대 입력도 지원합니다. 파일 부재를 묻기 전에 Read/Glob으로 작업 공간과 업무 폴더를 확인하세요. 경로 검사 실패는 먼저 계획을 수정하고 실제로 있는 원본의 복구를 대표에게 요구하지 마세요.`,
+      'plan.goal은 업무를 알아보기 쉬운 짧은 한국어 이름으로 쓰세요(최종산출물 폴더 이름이 됩니다). 대표에게 전달할 단계의 title은 대표가 받는 파일 이름이 됩니다. 내용을 바로 알 수 있는 한국어 이름으로 지으세요(예: 업무 내용·대상·조건이 드러나게). 작업 파일 output 이름은 지금 규칙대로 둡니다.',
       'plan.deliverables에는 대표에게 최종 전달할 단계 id를 고르세요. 최종 HTML·문서·첨부 등 요청 결과만 포함하고 계획·중간 조사·검토용 문안은 제외하세요. 별도 첨부가 없으면 []. 실행기가 검토 후 최종산출물/날짜/업무명 폴더로 모읍니다.',
       '담당이 없고 관련 부서가 둘 이상이면 needsMeeting:true와 meetingAgents(2~4명). 회의 제안이 주어졌으면 반영하고 needsMeeting:false.',
       '피드백이면 rerunStages에 수정할 단계 id만 넣으세요. 후속 단계는 프로그램이 다시 실행합니다.',
@@ -455,7 +456,8 @@ export async function orchestrate({ root, run, prompt, execute, signal, maxParal
           + (videoPolicy ? `\n\n영상 게시 ${posted}건 / 목표 ${videoPolicy.minPosts}~${videoPolicy.maxPosts}건.${posted < videoPolicy.minPosts ? ' 조건에 맞는 중복 없는 새 영상이 부족해 목표 수를 채우지 않았습니다.' : ''}` : '')
           + (prepared.skipped.length ? '\n\n확인 필요:\n' + prepared.skipped.map((s) => '- ' + redactContext(s)).join('\n') : '') : '');
         writeFileAtomic(join(taskDir, 'report.md'), report);
-        try { collectFinalOutputs(root, { task, title: loadTasks(root).find((t) => t.id === task)?.title || plan.goal, plan }); }
+        // 최종산출물 폴더 이름은 비서실장이 정리한 업무 목표(지시문 원문보다 알아보기 쉬움)
+        try { collectFinalOutputs(root, { task, title: plan.goal || loadTasks(root).find((t) => t.id === task)?.title, plan }); }
         catch (error) { return ask([{ phase: 'deliver', question: `최종산출물을 저장하지 못했습니다. 회사 설정의 저장 위치·폴더 권한을 확인한 뒤 이어서 재개해 주세요. ${redactContext(error.message)}` }]); }
         emit('flow.review', { verdict: 'pass', summary: redact(review.reason) });
         completeTask(root, task);

@@ -101,3 +101,14 @@
 
 - 부서·직원 추가·수정·삭제와 근무 상태 전환은 대시보드(`npm run office`, 기본 http://127.0.0.1:4777)에서 한다. 저장하면 에이전트 파일이 자동으로 다시 생성된다.
 - 정본과 생성물이 어긋났는지는 프로그램 폴더에서 `npm run sync -- --check`로 확인하고, `npm run sync`로 반영한다.
+
+## 프로그램 레포에서 연 세션 (서버 켜기·끄기)
+
+이 절은 대표가 **프로그램 레포**(이 파일 옆에 `dashboard/`·`package.json`이 있는 폴더)에서 직접 연 Claude·Codex 세션에만 적용한다. 작업 공간 세션과 대시보드 실행에는 적용하지 않는다. 이런 세션은 비서실장 업무 절차 대신 이 절과 `docs/SPEC.md`를 따른다.
+
+대표는 명령어를 직접 입력하지 않고 "서버 켜줘", "대시보드 열어줘", "서버 꺼줘"처럼 말로 요청한다. 이 요청은 업무 등록 없이 바로 처리한다.
+
+- **켜기:** `node -v`로 Node 20 이상을 확인한다(없거나 낮으면 nodejs.org LTS 설치를 안내하고 멈춘다). `node_modules`가 없거나 `package-lock.json`이 바뀌었으면 `npm ci`를 실행한다. 포트 4777이 이미 쓰이면 열려 있는 주소를 안내한다. 아니면 `npm run office`를 세션이 끝나도 유지되게 백그라운드로 실행하고(Claude는 백그라운드 실행 기능, Codex는 macOS·Linux `nohup npm run office > .office/server.out 2>&1 &`, Windows `Start-Process npm.cmd -ArgumentList 'run','office' -WindowStyle Hidden`; 샌드박스가 네트워크·프로세스를 막으면 대표에게 실행 승인을 요청한다), 출력의 대시보드 주소(기본 http://127.0.0.1:4777)를 받으면 브라우저로 열고 주소를 알려 준다. 이 터미널(Claude·Codex) 창을 닫으면 서버도 꺼질 수 있다고 한 줄로 안내한다.
+- **처음 실행:** `npm run doctor`로 Claude·Codex 로그인을 확인해 결과를 쉬운 말로 전한다. 둘 중 하나만 로그인돼 있어도 된다. Claude만 쓰면 화면 상단 최종 검토 제공자를 Claude로, Codex만 쓰면 Codex가 계획·실무·검토를 맡고 부서 엔진을 Codex로 고르면 된다고 안내한다. 브라우저 업무에 Chrome이 없으면 `npx playwright install chromium`을 대신 실행한다.
+- **끄기:** 포트 4777에서 실행 중인 AI Office 서버 프로세스를 종료하고, 포트 4777이 비었는지 확인한다.
+- **고쳐 달라는 요청:** 부서·직원·회사 규칙처럼 화면에서 바꿀 수 있는 것은 대시보드 위치를 안내한다. 화면·기능 자체를 바꾸는 요청은 `docs/SPEC.md` 기준으로 개발하고, 고친 뒤 `npm run check`를 통과시키고 서버를 다시 켜서 보여 준다.

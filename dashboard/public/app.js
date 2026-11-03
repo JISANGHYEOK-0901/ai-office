@@ -2340,11 +2340,11 @@ async function refreshConnections() {
   const data = await response.json(); if (!response.ok) throw new Error(data.error || '연결 계정을 불러오지 못했습니다.');
   connectionCache = data.connections;
   $('connectionList').innerHTML = data.connections.length ? data.connections.map((c) => `<article class="connection-card">
-    <div><strong>${esc(c.label)}</strong><p class="help">${esc(data.providers.find((p) => p.id === c.provider)?.name || c.provider)}${c.hosts?.length ? ` (${esc(c.hosts.join(', '))})` : ''} · ${esc(CONNECTION_LABEL[c.status] || c.status)}${c.hasCredentials ? ' · 자동 로그인 저장됨' : ''}</p></div>
+    <div><strong>${esc(c.label)}</strong><p class="help">${esc(data.providers.find((p) => p.id === c.provider)?.name || c.provider)}${c.hosts?.length ? ` (${esc(c.hosts.join(', '))})` : ''} · ${esc(CONNECTION_LABEL[c.status] || c.status)}${c.source === 'file' ? ' · 보관함/계정.env' : c.hasCredentials ? ' · 자동 로그인 저장됨' : ''}</p></div>
     <div class="connection-actions"><button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="open">${c.status === 'needs_login' ? '재연결' : '로그인 창 열기'}</button>
-    <button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="credentials">${c.hasCredentials ? '로그인 정보 변경' : '자동 로그인 설정'}</button>
+    ${c.source === 'file' ? '' : `<button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="credentials">${c.hasCredentials ? '로그인 정보 변경' : '자동 로그인 설정'}</button>`}
     ${c.status === 'connecting' ? `<button type="button" class="btn btn-sm btn-primary" data-connection="${esc(c.id)}" data-connection-action="confirm">연결 완료</button>` : ''}
-    <button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="remove">연결 해제</button></div></article>`).join('') : '<p class="help">연결한 계정이 없습니다. 업무에 사용할 계정을 한 번 연결해 주세요.</p>';
+    ${c.source === 'file' ? '' : `<button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="remove">연결 해제</button>`}</div></article>`).join('') : '<p class="help">연결한 계정이 없습니다. 업무에 사용할 계정을 한 번 연결해 주세요.</p>';
 }
 async function connectionAction(action) {
   if (connectionBusy) return;

@@ -31,6 +31,7 @@ import { readPrivate, writePrivate } from '../lib/private-state.mjs';
 import { createRunner } from './runner.mjs';
 import { judgeCommand } from '../lib/intent.mjs';
 import { createJudge } from '../lib/ai-judge.mjs';
+import { ensureVault } from '../lib/vault.mjs';
 import { buildState } from './state.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -488,6 +489,8 @@ export async function startServer({
     }
   }
 
+  // 보관함(계정.env·최종산출물)을 준비한다. 계정 파일은 서버만 읽기 전용으로 읽는다
+  if (!demo) { try { ensureVault(root); } catch (err) { warn('보관함 폴더를 만들지 못했습니다', err); } }
   const connections = createConnectionStore({ root, base: connectionBase });
   const browserSessions = createBrowserSessions({ store: connections, ...browserOptions });
   const browserWork = createBrowserWork({ root, store: connections, sessions: browserSessions });

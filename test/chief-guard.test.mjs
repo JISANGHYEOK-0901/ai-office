@@ -370,3 +370,13 @@ test('프로세스: 연결된 업무가 done이면 허용, [반려] 3회째는 �
   const pretask = runGuard(root, pre(root, 'WebSearch', { query: 'x' }, { session_id: 'fresh' }), { OFFICE_CHIEF_RUN: '1' });
   assert.equal(JSON.parse(pretask.stdout).hookSpecificOutput.permissionDecisionReason, PRE_TASK_DENY_MESSAGE);
 });
+
+test('프로세스: 직원 세션도 보관함/계정.env를 읽으면 거부한다', (t) => {
+  const root = makeRoot(t);
+  const res = runGuard(root, pre(root, 'Read', { file_path: join(root, '보관함', '계정.env') }, { agent_type: 'dev-2' }));
+  assert.equal(res.status, 0);
+  const out = JSON.parse(res.stdout);
+  assert.equal(out.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(out.hookSpecificOutput.permissionDecisionReason, /서버만 읽습니다/);
+  assert.equal(runGuard(root, pre(root, 'Read', { file_path: join(root, 'outputs', 'a.md') }, { agent_type: 'dev-2' })).stdout, '');
+});

@@ -466,6 +466,12 @@ test('사이트 조회 단계는 연결 계정 브라우저(쓰기 가능)로 �
   assert.deepEqual(browses.map((b) => [b.connection, b.target]), [['erp-1', 'https://erp.example.com/erp'], ['erp-1', 'https://erp.example.com/erp']]);
   const stageCall = f.calls.filter((c) => c.kind === 'a').at(-1);
   assert.match(stageCall.input, /사이트 조회: 연결 계정 브라우저/);
+  // 계정 브라우저 단계는 사이트 밖을 못 보므로, 공개 웹 자료는 별도 단계로 나누도록 계획 지침과 직원 안내에 알린다
+  assert.match(stageCall.input, /연결 사이트 밖\(웹 검색·다른 사이트\)은 볼 수 없습니다/);
+  assert.match(f.calls.find((c) => c.kind === 'plan').input, /다른 공개 웹 자료가 필요하면 connection 없는 별도 단계로 나누고/);
+  // 대표가 정한 참고 범위 밖(공지·다른 게시판)을 조사에 넣거나 열지 않는다
+  assert.match(f.calls.find((c) => c.kind === 'plan').input, /그 범위 밖의 조회\(공지·규칙·다른 게시판 둘러보기 등\)는 done에 넣지 마세요/);
+  assert.match(stageCall.input, /대표가 범위를 정했으면 그 범위의 자료만 엽니다/);
   assert.match(stageCall.args.join(' '), /office_browser/);
   assert.equal(stageCall.args[stageCall.args.indexOf('-s') + 1], 'workspace-write', '조회 결과 파일을 쓸 수 있다');
   assert.ok(f.calls.filter((c) => c.kind === 'b').every((c) => !c.args.join(' ').includes('office_browser')), '일반 단계에는 브라우저를 붙이지 않는다');

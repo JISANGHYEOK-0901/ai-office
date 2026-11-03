@@ -278,13 +278,13 @@ test('훅: 작업 공간에서 node scripts/office.mjs task start 출력은 그 
   assert.deepEqual(JSON.parse(readFileSync(join(ws, '.office', 'sessions.json'), 'utf8')), { 's-link': id });
 });
 
-test('화면 배너: 호환 모드·예전 데이터 남음이면 이전 안내(닫기 없음), 데모·정상은 없음', () => {
+test('화면 배너: 작업 공간에서 예전 데이터 남음이면 이전 안내(닫기 없음), 호환 모드·데모·정상은 없음', () => {
   assert.deepEqual(workspaceBanners({ compat: false, legacyPending: false }), []);
   assert.deepEqual(workspaceBanners({ compat: true, legacyPending: true }, { demo: true }), []);
-  const [compat] = workspaceBanners({ compat: true, legacyPending: true });
-  assert.equal(compat.sticky, true);
-  assert.match(compat.text, /호환 모드.*npm run migrate/);
-  assert.match(workspaceBanners({ compat: false, legacyPending: true })[0].text, /예전 회사 데이터.*npm run migrate/);
+  assert.deepEqual(workspaceBanners({ compat: true, legacyPending: true }), [], '호환 모드는 경고하지 않는다');
+  const [legacy] = workspaceBanners({ compat: false, legacyPending: true });
+  assert.equal(legacy.sticky, true);
+  assert.match(legacy.text, /예전 회사 데이터.*npm run migrate/);
   assert.deepEqual(workspaceBanners(undefined), []);
 });
 

@@ -860,7 +860,7 @@ orchestration·security·ux 검토 지적을 재현해 고치며 바꾸거나 �
 - **마이그레이션:**
   - 새 버전 첫 실행에서 프로그램 레포 안에 기존 데이터가 있으면 화면 배너와 `npm run migrate`로 이전을 제안한다. 대상: `org/departments.json`·`roster.json`·`company.md`, `outputs/`, `.office/`, `.claude/agents/`, `.codex/agents/`.
   - 이전 방식: 복사 → 검증(파일 수·크기) → 원본은 `.office-migrated-<날짜>/`로 옮긴다. 자동 삭제하지 않는다.
-  - 사용자가 확인하기 전에는 이전하지 않는다. 이전하지 않으면 기존 위치를 계속 쓰는 호환 모드로 동작하고, 배너를 계속 띄운다.
+  - 사용자가 확인하기 전에는 이전하지 않는다. 이전하지 않으면 기존 위치를 계속 쓰는 호환 모드로 동작한다. 호환 모드는 경고 배너·doctor 경고·서버 시작 경고를 띄우지 않는다(프로그램 레포 보호 가드는 적용되지 않는다).
 - **테스트:**
   - 임시 workspace로 전 경로를 확인한다(서버, runner cwd, sync 생성 위치, 훅 절대경로 args, guard 거부, migrate 복사·검증·보존).
   - Windows 경로는 platform 주입으로 확인한다.

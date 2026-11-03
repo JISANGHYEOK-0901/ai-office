@@ -169,13 +169,11 @@ export function normalizeState(raw = {}) {
   };
 }
 
-// 작업 공간 분리 안내 배너. 호환 모드(예전 데이터를 프로그램 폴더 안에서 계속 씀)이거나 예전 데이터가 남아 있으면 이전을 권한다.
+// 작업 공간 분리 안내 배너. 작업 공간을 쓰는데 프로그램 폴더에 예전 데이터가 남아 있으면 이전을 권한다.
+// 호환 모드(예전 데이터를 프로그램 폴더 안에서 계속 씀)는 사용자가 고른 사용 방식이므로 경고하지 않는다.
 // 이전하기 전까지 계속 보여야 하므로 닫기 버튼을 달지 않는다
 export function workspaceBanners(workspace, { demo = false } = {}) {
-  if (demo || !workspace) return [];
-  if (workspace.compat) {
-    return [{ key: 'workspace', text: '호환 모드: 회사 데이터가 아직 대시보드 프로그램 폴더 안에 있습니다. AI 직원이 프로그램 코드를 고칠 수 없도록 서버를 끄고 npm run migrate로 작업 공간에 옮기세요.', sticky: true }];
-  }
+  if (demo || !workspace || workspace.compat) return [];
   if (workspace.legacyPending) {
     return [{ key: 'workspace', text: '프로그램 폴더에 예전 회사 데이터가 남아 있습니다. 서버를 끄고 npm run migrate로 이 작업 공간에 옮기세요(지금 화면은 작업 공간의 데이터만 보여 줍니다).', sticky: true }];
   }

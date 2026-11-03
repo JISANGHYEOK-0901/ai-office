@@ -154,10 +154,20 @@
                 "enum": [
                   "mail",
                   "post",
-                  "comment"
+                  "comment",
+                  "web"
                 ]
               },
               "recipients": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "instructions": {
+                "type": "string"
+              },
+              "files": {
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -173,7 +183,9 @@
               "subject",
               "content",
               "action",
-              "recipients"
+              "recipients",
+              "instructions",
+              "files"
             ],
             "additionalProperties": false
           }

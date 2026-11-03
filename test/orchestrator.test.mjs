@@ -81,6 +81,7 @@ function fixture(t, options = {}) {
           review: { by: options.reviewBy || 'chief', criteria: '근거와 산출물을 확인한다' }, gaps: [] };
         if (options.workspaceInput) plan.stages[0].inputs = ['.office/simulation-inputs/market.json'];
         if (options.publication) plan.publications = [{ id: 'publish', action: 'post', service: 'naver_blog', connection: '', agent: 'dev-1', target: 'https://blog.naver.com/fixture', recipients: [], subject: '자료', content: 'b' }];
+        if (options.webPublication) plan.publications = [{ id: 'upload', action: 'web', service: 'web', connection: 'erp-1', agent: 'dev-1', target: 'https://erp.example.com/erp/proposal-pages', recipients: [], subject: '', content: '', instructions: '업체 ai-office-test를 추가하고 HTML을 업로드한다', files: ['b'] }];
         if (options.independent) plan.stages.push(stage('c', 'dev', 'dev-1', []));
         if (options.relativePaths) for (const stage of plan.stages) stage.output = `${stage.dept}/${stage.agent}-${stage.id}.txt`;
         if (counts.plan <= (options.invalidPlans || 0)) plan.stages[0].agent = 'missing';
@@ -442,6 +443,44 @@ test('한 단계가 결정을 기다려도 독립 업무는 완료하고 의존 
   assert.equal(loadTasks(f.root)[0].status, 'done');
 });
 
+
+test('일반 웹사이트 업무: 위임이 없으면 실행 전에 묶어서 확인하고, "진행"이면 첨부와 함께 실행한다', async (t) => {
+  const calls = [];
+  const f = fixture(t, { webPublication: true, outbound: { connections: () => [{ id: 'erp-1', label: '홍카페 ERP', provider: 'web' }], async deliver(args) {
+    calls.push(args); return { status: 'confirmed', resultUrl: 'https://erp.example.com/erp/proposal-pages/1', summary: '공개 주소 확인', evidence: 'upload-1.png' };
+  } } });
+  const first = f.runner.start({ prompt: '자료를 정리해 HTML로 만들고 ERP 제휴 제안 페이지에 업로드해 줘' });
+  const asked = await f.final(first);
+  assert.equal(asked.needsReply, true);
+  assert.equal(calls.length, 0, '확인 전에는 실행하지 않는다');
+  assert.match(f.runner.result(first.id).text, /웹사이트 작업을 실행할까요[\s\S]*홍카페 ERP[\s\S]*첨부: dev-1-b\.txt/);
+  const second = f.runner.reply(first.id, { prompt: '진행해' });
+  await f.final(second);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].publication.action, 'web');
+  assert.deepEqual(calls[0].files.map((file) => file.name), ['dev-1-b.txt']);
+  assert.ok(calls[0].files[0].path.endsWith(join('dev', 'dev-1-b.txt')));
+  assert.ok(calls[0].evidenceDir.endsWith('evidence'));
+  assert.deepEqual([f.counts.plan, f.counts.review], [1, 1], '확인 답장 뒤 계획·검토를 반복하지 않는다');
+  assert.equal(loadTasks(f.root)[0].status, 'done');
+  assert.match(f.runner.result(second.id).text, /웹사이트 작업[\s\S]*직원 확인 완료[\s\S]*evidence\/upload-1\.png[\s\S]*확인 내용: 공개 주소 확인/);
+});
+
+test('일반 웹사이트 업무: "하지 마"면 실행하지 않고, 위임 표현이 있으면 확인 없이 실행한다', async (t) => {
+  const calls = [];
+  const outbound = { connections: () => [{ id: 'erp-1', label: 'ERP', provider: 'web' }], async deliver(args) { calls.push(args); return { status: 'confirmed', summary: '완료' }; } };
+  const f = fixture(t, { webPublication: true, outbound });
+  const first = f.runner.start({ prompt: '자료를 정리해 HTML로 만들고 ERP 제휴 제안 페이지에 업로드해 줘' });
+  await f.final(first);
+  const second = f.runner.reply(first.id, { prompt: '이번엔 하지 마' });
+  await f.final(second);
+  assert.equal(calls.length, 0);
+  assert.match(f.runner.result(second.id).text, /대표 결정으로 실행하지 않음/);
+  const third = f.runner.start({ prompt: '자료를 정리해 HTML로 만들고 ERP 제휴 제안 페이지에 업로드해 줘. 끝까지 자동으로 해' });
+  const done = await f.final(third);
+  assert.equal(done.needsReply, false);
+  assert.equal(calls.length, 1);
+});
 
 test('계정 재연결은 검토된 원문을 그대로 이어 발행하고 비서실장 검토를 반복하지 않는다', async (t) => {
   let deliveries = 0;

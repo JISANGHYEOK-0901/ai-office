@@ -113,3 +113,12 @@ test('일반 웹사이트 연결은 사용자가 정한 시작 주소·허용 �
   assert.equal(connectionAllowsUrl({ provider: 'naver' }, 'https://blog.naver.com/x'), true);
   assert.equal(connectionAllowsUrl({ provider: 'naver' }, 'https://erp.example.com/'), false);
 });
+
+test('웹사이트 업로드·등록 지시와 위임 표현을 판별한다', () => {
+  const ask = externalActionPolicy(['만든 HTML을 ERP 제휴 제안 페이지에 업로드해 줘']);
+  assert.deepEqual([ask.actions, ask.delegated], [['web'], false]);
+  assert.equal(externalActionPolicy(['만든 HTML을 관리자 페이지에 올려 줘. 끝까지 자동으로 해']).delegated, true);
+  assert.equal(externalActionPolicy(['업로드해 줘', '확인 없이 진행']).delegated, true);
+  assert.deepEqual(externalActionPolicy(['보고서 HTML 초안만 만들어 줘']).actions, []);
+  assert.deepEqual(externalActionPolicy(['HTML 만들되 업로드하지 마']).actions, []);
+});

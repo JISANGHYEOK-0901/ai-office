@@ -35,7 +35,7 @@ let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{
    writeFileSync(path,id==='a'?'서울 업체 자료와 근거':'<!doctype html><html lang="ko"><head><title>업체 조사 보고서</title><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><h1>조사 결과 '+n+'</h1><p>서울 지역 업체의 공개 자료를 기준으로 내용을 정리했습니다. 확인한 사실과 해석을 구분하고 추가 확인이 필요한 항목을 보고합니다.</p></body></html>');
    result={status:'done',summary:'작성 완료'};
   }
- }else if(kind.revisedPlan){count('progress');result={action:'continue',reason:'계획대로 진행',question:'',revisedPlan:null}
+ }else if(kind.revisedPlan&&!kind.verdict){count('progress');result={action:'continue',reason:'계획대로 진행',question:'',revisedPlan:null}
  }else{count('review');result={verdict:'pass',stage:'',reason:'내용 확인',report:'# 완료\n\n산출물과 근거를 확인했습니다.\n\n확인 필요: 없음',question:''}}
  writeFileSync(file,JSON.stringify(counts));
  console.log(JSON.stringify(claude?{type:'result',structured_output:result}:{type:'item.completed',item:{type:'agent_message',text:JSON.stringify(result)}}));

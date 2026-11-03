@@ -320,18 +320,28 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       safeOutput(stage.output, true);
       const inputs = (stage.inputs || []).map((input) => plan.stages.find((s) => s.id === input)?.output || input);
       try {
+        // 직원 지시: 목표 → 입력·출력·완료 기준 → 이 단계 안내 → 응답 형식 → 안전선 순서로 묶는다
+        const html = /\.html?$/i.test(stage.output);
+        const mailDraft = (plan.publications || []).some((p) => p.action === 'mail' && (p.content === stage.id || p.content === stage.output) && !p.recipients.length);
+        const guide = [
+          site ? `사이트 조회: 연결 계정 브라우저(office_browser 도구)로 ${stage.target}에서 시작해 필요한 자료를 조회하세요. 읽기 전용이라 저장·등록·수정·삭제는 하지 않습니다. 대표 요청의 의도에 맞는 메뉴·탭·필터를 사이트를 둘러보며 스스로 찾아 쓰고(대표가 범위를 정했으면 그 범위의 자료만 엽니다. 예: 특정 회원의 글이면 작성자 검색·필터를 먼저 쓰고 공지·다른 게시판은 열지 않음), 목록은 browser_text의 offset으로 끝까지 읽으세요. 결과는 출력 파일에 직접 작성하고, 대표가 요구한 항목(연락처 등)은 빠뜨리지 마세요. 조건에 맞는 항목이 없으면 그 사실과 확인한 화면·조건을 출력 파일에 적으세요. 이 단계에서는 연결 사이트 밖(웹 검색·다른 사이트)은 볼 수 없습니다. 그런 자료는 다른 단계가 맡으니 사이트 안 자료만 정리하고, 사이트 밖 자료가 없다는 이유로 대표에게 묻지 마세요.` : '',
+          mailDraft ? '이번 산출물은 메일 문안 JSON입니다. 입력 조사 자료의 회사별 연락처·출처를 확인하고 대표 양식을 채운 messages:[{recipients:[주소],subject,body}]와 skipped:[미확인 업체·이유]를 작성하세요. 실제 메일은 지금 보내지 않습니다.' : '',
+          html ? `${HTML_BRIEF}\nHTML 보고서 기본 양식: ${join(programRoot(), 'org/templates/report.html')}. 읽어서 정보 구조·스타일을 참고하고 업무에 맞게 작성하세요. {{REPORT_*}} 빈 항목은 모두 채우거나 불필요한 섹션과 함께 제거하세요. 근거가 없으면 꾸미기 위해 숫자·차트를 만들지 마세요.` : '',
+          state.delegated[stage.id] ? '부서 직원의 분담 결과를 입력에서 읽고 취합하세요. 이미 분담했으므로 다시 delegate하지 마세요.' : '',
+          issue ? `앞 실행의 산출물 검사 실패: ${issue}. 수정하여 지정된 파일을 작성하세요.` : '',
+        ].filter(Boolean);
         text = await runStage({ phase: 'stage', agentId: stage.agent,
-        prompt: `${desc}\n업무: ${task}\n${context()}\n입력: ${JSON.stringify(inputs)}\n출력: ${stage.output}\n완료 기준: ${stage.done}\n${reason}\n${HTML_BRIEF}\n` +
-          (site ? `사이트 조회: 연결 계정 브라우저(office_browser 도구)로 ${stage.target}에서 시작해 필요한 자료를 조회하세요. 읽기 전용이라 저장·등록·수정·삭제는 하지 않습니다. 대표 요청의 의도에 맞는 메뉴·탭·필터를 사이트를 둘러보며 스스로 찾아 쓰고(대표가 범위를 정했으면 그 범위의 자료만 엽니다. 예: 특정 회원의 글이면 작성자 검색·필터를 먼저 쓰고 공지·다른 게시판은 열지 않음), 목록은 browser_text의 offset으로 끝까지 읽으세요. 결과는 출력 파일에 직접 작성하고, 대표가 요구한 항목(연락처 등)은 빠뜨리지 마세요. 조건에 맞는 항목이 없으면 그 사실과 확인한 화면·조건을 출력 파일에 적으세요. 이 단계에서는 연결 사이트 밖(웹 검색·다른 사이트)은 볼 수 없습니다. 그런 자료는 다른 단계가 맡으니 사이트 안 자료만 정리하고, 사이트 밖 자료가 없다는 이유로 대표에게 묻지 마세요.\n` : '') +
-          `부서 근무중 실행 직원: ${JSON.stringify(org.roster.filter((a) => available(a.id, stage.dept)).map((a) => ({ id: a.id, name: a.name, lead: a.lead, role: a.role, specialty: a.specialty || a.description })))}\n` +
-          ((plan.publications || []).some((p) => p.action === 'mail' && (p.content === stage.id || p.content === stage.output) && !p.recipients.length)
-            ? '이번 산출물은 메일 문안 JSON입니다. 입력 조사 자료의 회사별 연락처·출처를 확인하고 대표 양식을 채운 messages:[{recipients:[주소],subject,body}]와 skipped:[미확인 업체·이유]를 작성하세요. 실제 메일은 지금 보내지 않습니다.\n' : '') +
-          (/\.html?$/i.test(stage.output) ? `HTML 보고서 기본 양식: ${join(programRoot(), 'org/templates/report.html')}. 읽어서 정보 구조·스타일을 참고하고 업무에 맞게 작성하세요. {{REPORT_*}} 빈 항목은 모두 채우거나 불필요한 섹션과 함께 제거하세요. 근거가 없으면 꾸미기 위해 숫자·차트를 만들지 마세요.\n` : '') +
-          `마지막 응답은 JSON입니다. status=done(작성 완료), needs_decision(대표 결정), reroute(부서 오전달), delegate(팀장 분담). summary/question/department/agent/reason/assignments 필드를 쓰세요.\n` +
-          `질문이 필요하면 산출물을 억지로 쓰지 말고 question에 원문을 적으세요. 오전달이면 적합한 department/agent와 reason을 제안하세요.\n` +
-          `팀장만 같은 부서의 근무중 직원에게 assignments:[{agent,title,output,done}]로 분담할 수 있습니다. 실행기는 분담 결과를 모아 팀장에게 다시 전달합니다. 직접 다른 직원을 호출하지 마세요.\n` +
-          (state.delegated[stage.id] ? '부서 직원의 분담 결과를 입력에서 읽고 취합하세요. 이미 분담했으므로 다시 delegate하지 마세요.\n' : '') +
-          (issue ? `앞 실행의 산출물 검사 실패: ${issue}. 수정하여 지정된 파일을 작성하세요.` : '') });
+        prompt: [
+          // 첫 줄은 단계 제목(재작업이면 [반려]로 시작: 직원 지침의 재작업 규칙과 맞춘다)
+          `${desc}\n\n## 목표·대표 요청\n업무: ${task}\n${context()}`,
+          `## 입력·출력·완료 기준\n입력: ${JSON.stringify(inputs)}\n출력: ${stage.output}\n완료 기준: ${stage.done}${reason ? `\n반려 사유(모두 반영): ${reason}` : ''}`,
+          guide.length ? `## 이 단계 안내\n${guide.join('\n')}` : '',
+          `## 응답 형식\n마지막 응답은 JSON입니다. status=done(작성 완료), needs_decision(대표 결정), reroute(부서 오전달), delegate(팀장 분담). summary/question/department/agent/reason/assignments 필드를 쓰세요.\n`
+            + '질문이 필요하면 산출물을 억지로 쓰지 말고 question에 원문을 적으세요. 오전달이면 적합한 department/agent와 reason을 제안하세요.\n'
+            + `팀장만 같은 부서의 근무중 직원에게 assignments:[{agent,title,output,done}]로 분담할 수 있습니다. 실행기는 분담 결과를 모아 팀장에게 다시 전달합니다. 직접 다른 직원을 호출하지 마세요.\n`
+            + `부서 근무중 실행 직원: ${JSON.stringify(org.roster.filter((a) => available(a.id, stage.dept)).map((a) => ({ id: a.id, name: a.name, lead: a.lead, role: a.role, specialty: a.specialty || a.description })))}`,
+          '## 안전선\n출력 파일에만 쓰고 업무 폴더 밖은 고치지 않습니다. 메일 발송·글/댓글 게시·사이트 업로드는 이 단계에서 하지 않습니다(검토 뒤 실행기가 처리). 비밀번호·쿠키·계정 파일은 읽거나 옮겨 적지 않습니다.',
+        ].filter(Boolean).join('\n\n') });
       } catch (err) {
         emit('agent.pause', { engine, agent: stage.agent, instance: `${run.id}-${stage.id}`, summary: redact(err.message) });
         // 계정 연결·사이트 접근 문제는 대표가 해결할 수 있게 질문으로 넘긴다
@@ -456,7 +466,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           if (waiting.size) return ask([...waiting.values()]);
           throw new Error('진행할 수 있는 계획 단계가 없습니다.');
         }
-        const results = await Promise.all(ready.slice(0, Math.max(1, maxParallel)).map((s) => executeStage(s, state.rejectionReason || '')));
+        const results = await Promise.all(ready.slice(0, Math.max(1, maxParallel)).map((s) => executeStage(s, state.rejectionReasons?.[s.id] || state.rejectionReason || '')));
         for (const { stage, result } of results) {
           if (result.status === 'done') continue;
           // 질문/이관/분담은 완료 이벤트를 만들지 않는다.
@@ -508,7 +518,8 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       const evidence = cached ? [...cached.evidence] : [];
       for (const reviewer of reviewers) {
         const text = await execute({ phase: 'reviewer', agentId: reviewer.id, readOnly: true,
-          prompt: `outputs/${task}/ 산출물과 plan.json을 읽기 전용으로 검토하세요. 첫 줄은 VERDICT: PASS|FIX|BLOCK입니다.` });
+          // 검증실은 계획의 검토 기준(기술·사실)을 보고, 대표 요청 충족은 비서실장이 본다(같은 항목 중복 검토 방지)
+          prompt: `outputs/${task}/ 산출물과 plan.json을 읽기 전용으로 검토하세요. 첫 줄은 VERDICT: PASS|FIX|BLOCK입니다.\n검토 기준: ${plan.review?.criteria || '각 단계 산출물이 계획의 완료 기준을 충족하는지'}\n대표 요청 충족·전달 가능성은 비서실장이 따로 확인하니, 이 기준의 기술·사실 확인에 집중하고 FIX면 고칠 단계와 항목을 구체적으로 적으세요.` });
         checkStop();
         const verdict = parseVerdict(text);
         mkdirSync(join(taskDir, 'reviews'), { recursive: true });
@@ -517,14 +528,16 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       }
       let review = cached?.review || parseObject(await execute({ phase: 'review', prompt: [
         '비서실장으로서 산출물을 읽기 전용으로 검토하세요. JSON만 응답하세요.',
-        '{verdict:"pass"|"reject"|"block"|"question",stage:"수정할 단계 id 또는 빈 문자열",reason:"근거",report:"보고서 Markdown",question:"질문 또는 빈 문자열"}',
+        '{verdict:"pass"|"reject"|"revise"|"block"|"question",stage:"빈 문자열(예전 형식)",stages:[{id:"고칠 단계 id",reason:"그 단계에서 고칠 점"}],reason:"근거",report:"보고서 Markdown",question:"질문 또는 빈 문자열",revisedPlan:null}',
+        `reject: 산출물을 고치면 되는 단계를 stages에 모두 적고 단계마다 구체적인 수정 사항을 쓰세요(한 번에 묶어 반려). revise: 기존 단계로는 채울 수 없는 부족한 부분이 있으면 단계를 추가·변경한 전체 계획을 revisedPlan에 주세요. 완료된 단계는 그대로 두며, 남은 계획 수정 가능 횟수는 ${MAX_PLAN_REVISIONS - state.revisionCount}회입니다. 반려·보완을 할지, 확인 필요로 남기고 통과시킬지는 남은 예산을 보고 정하세요.`,
         `계획: ${JSON.stringify(plan)}`, `검증실 결과: ${JSON.stringify(evidence)}`,
-        context(), HTML_BRIEF,
+        evidence.length ? '검증실이 이미 확인한 항목은 다시 검토하지 말고 그 결론을 반영하세요. 당신은 대표 요청 충족·전달 가능성, 그리고 검증실이 다루지 않은 부분을 확인합니다.' : '',
+        context(), plan.stages.some((s) => /\.html?$/i.test(s.output)) ? HTML_BRIEF : '',
         `외부 작업 형식 검사: ${JSON.stringify(prepared.errors)}. 메일 문안은 수신자·출처·본문이 대표 지시와 맞는지 확인하세요. 아직 실제 전송 전이므로 보고서에서 발송·게시 완료로 쓰지 마세요. 실행기가 실제 결과를 별도로 붙입니다.`,
         `outputs/${task}/review-notes.md가 있으면 추가 검증 근거를 읽고 산출물·이미지와 대조하세요.`,
         budgetLeft(),
         '당신이 최종 검토자입니다. 별도 검증실 부재는 공백이 아니므로 대체 검토 알림을 만들지 마세요. 요청한 전문 검토에 FIX/BLOCK/ERROR가 있거나 산출물이 없으면 pass를 내리지 마세요. 보고서에는 결과·산출물 경로·근거·확인 필요·실제 역량 공백을 포함하세요.',
-      ].join('\n\n') }));
+      ].filter(Boolean).join('\n\n') }));
       checkStop();
       if (review.verdict === 'pass' && prepared.errors.length) review = { verdict: 'reject', stage: prepared.errors[0].stage, reason: prepared.errors.map((e) => e.reason).join(' ') };
       if (review.verdict === 'question' && review.question?.trim()) return ask([{ phase: 'review', question: review.question }]);
@@ -613,15 +626,34 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         emit('flow.deliver', { summary: '최종 검토를 마쳐 업무를 완료하고 결과를 전달했습니다.' });
         return report;
       }
-      // 반려 횟수는 고정하지 않고 업무 예산 안에서 비서실장이 정한다(예산 점검이 매 회차 앞에서 멈춤)
-      if (review.verdict !== 'reject') return blocked(`검토를 완료하지 못했습니다. ${review.reason || '판정 또는 산출물을 확인해 주세요.'}`);
-      const stage = plan.stages.find((s) => s.id === review.stage);
-      if (!stage) return blocked('반려할 단계가 명확하지 않습니다. ' + (review.reason || ''));
+      // 반려·보완 횟수는 고정하지 않고 업무 예산 안에서 비서실장이 정한다(예산 점검이 매 회차 앞에서 멈춤)
+      const hasTargets = Array.isArray(review.stages) && review.stages.length || review.stage;
+      if (review.verdict === 'revise') {
+        // 검토에서 부족한 부분을 채울 단계를 추가한다(진행 점검과 같은 안전선: 완료 단계 유지·수정 횟수)
+        try {
+          applyRevision(review.revisedPlan, review.reason);
+          state.rejects++;
+          state.rejectionReasons = {};
+          state.rejectionReason = String(review.reason || '검토에서 계획을 보완했습니다.');
+          persist();
+          emit('flow.review', { verdict: 'reject', summary: redact(`계획 보완: ${state.rejectionReason}`) });
+          continue;
+        } catch (err) {
+          note({ rejected: redactContext(err.message).slice(0, 300), reason: redactContext(String(review.reason || '')).slice(0, 300) });
+          if (!hasTargets) return blocked(`검토에서 계획을 보완하지 못했습니다. ${err.message}`);
+        }
+      } else if (review.verdict !== 'reject') return blocked(`검토를 완료하지 못했습니다. ${review.reason || '판정 또는 산출물을 확인해 주세요.'}`);
+      // 여러 단계를 한 번에, 단계마다 고칠 점과 함께 반려한다(예전 형식 stage·reason도 받는다)
+      const targets = (Array.isArray(review.stages) && review.stages.length ? review.stages : [{ id: review.stage, reason: review.reason }])
+        .map((t) => ({ stage: plan.stages.find((s) => s.id === t?.id), reason: String(t?.reason || review.reason || '검토 지적을 수정하세요.') }))
+        .filter((t, i, list) => t.stage && list.findIndex((o) => o.stage === t.stage) === i);
+      if (!targets.length) return blocked('반려할 단계가 명확하지 않습니다. ' + (review.reason || ''));
       state.rejects++;
-      state.rejectionReason = String(review.reason || '검토 지적을 수정하세요.');
-      clearDependents(new Set([stage.id]));
+      state.rejectionReasons = Object.fromEntries(targets.map((t) => [t.stage.id, t.reason]));
+      state.rejectionReason = targets.length > 1 ? targets.map((t) => `[${t.stage.title}] ${t.reason}`).join('\n') : targets[0].reason;
+      clearDependents(new Set(targets.map((t) => t.stage.id)));
       persist();
-      emit('flow.review', { verdict: 'reject', to: stage.dept, target: stage.agent, stage: stage.id, summary: redact(state.rejectionReason) });
+      for (const t of targets) emit('flow.review', { verdict: 'reject', to: t.stage.dept, target: t.stage.agent, stage: t.stage.id, summary: redact(t.reason) });
     }
   } catch (err) {
     checkStop();

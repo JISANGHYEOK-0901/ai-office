@@ -9,7 +9,7 @@ import { isCompatRoot } from '../lib/workspace.mjs';
 import { buildOrgMap } from '../lib/orgmap.mjs';
 import { agentInstructions, resolveAgentModel } from '../lib/sync.mjs';
 import { CLAUDE_EFFORTS, codexRole, loadSettings, resolveChief, resolveControlChief } from '../lib/settings.mjs';
-import { cliUsage, addUsage } from '../lib/usage.mjs';
+import { cliUsage, addUsage, addDailyUsage } from '../lib/usage.mjs';
 import { orchestrate, checkpointFile } from './orchestrator.mjs';
 import { runContinuous, monitorFile } from './continuous.mjs';
 import { continuousRequest } from '../lib/continuous.mjs';
@@ -635,6 +635,8 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
         clearTimeout(deadlineTimer);
         children.delete(r.id);
         run.usage = addUsage(run.usage, r.usage);
+        // 날짜별 사용량(상시 업무의 하루 사용량·이상 알림에 쓴다)
+        run.dailyUsage = addDailyUsage(run.dailyUsage, r.usage);
         changed(run);
         if (r.status === 'done') settle.resolveChild(text || r.summary || '');
         else settle.rejectChild(new Error(r.summary || '직원 실행을 완료하지 못했습니다.'));

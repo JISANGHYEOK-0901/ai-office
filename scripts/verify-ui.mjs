@@ -239,10 +239,12 @@ try {
   await saved((state) => state.runs.some((r) => r.id === monitor.id && r.monitor?.status === 'waiting'));
   await page.locator('.run-monitor').filter({ hasText: '새 자료 대기' }).waitFor();
   await page.locator('.run-monitor').filter({ hasText: '새 자료 대기' }).scrollIntoViewIfNeeded();
+  // 상시 업무 카드에 오늘 사용량(AI 호출 수·토큰)을 보여 준다
+  await page.locator('.run-daily').filter({ hasText: /오늘 사용: AI 호출 [1-9]\d*회/ }).first().waitFor();
   await shot('continuous-monitor.png');
   await page.locator(`[data-act="stop-run"][data-run="${monitor.id}"]`).click();
   await saved((state) => state.runs.some((r) => r.id === monitor.id && r.status === 'stopped'));
-  report.checks.push({ name: '실제 업무·감시 카드 렌더, 새 자료 대기 표시·사용자 중지', interaction: 'click', passed: true });
+  report.checks.push({ name: '실제 업무·감시 카드 렌더, 새 자료 대기·오늘 사용량 표시·사용자 중지', interaction: 'click', passed: true });
   await page.locator('#connectionsBtn').click();
   await choose('connectionProvider', 'naverworks');
   await page.locator('#connectionForm input[name="label"]').fill('검증용 웍스 계정');

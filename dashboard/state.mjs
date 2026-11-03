@@ -1,5 +1,6 @@
 // 이벤트 → 화면 상태 리듀서. 입력만으로 결과가 정해지는 순수 함수다(파일·시계·전역 상태를 읽지 않는다).
 import { deriveTaskFlows, scheduleMeetings } from '../lib/flow.mjs';
+import { monitorUsage } from '../lib/usage.mjs';
 
 // 이 시간 안에 tool 이벤트가 있으면 작업 중으로 본다(경계 포함: 정확히 90초 전도 작업 중).
 export const WORKING_WINDOW_MS = 90_000;
@@ -382,6 +383,17 @@ export function buildState({ org, events, runs = [], tasks = [], plans = null, o
       attention.push({ kind: 'gap', agent: CHIEF_ID, task: t.id, since: t.created ?? t.lastActivity ?? null, text: `역량 공백: ${text}` });
     }
   }
+  // 상시 업무: 오늘 사용량을 카드에 보여 주고, 평소보다 크게 많으면 알린다(업무는 멈추지 않음)
+  const monitorRoots = new Map();
+  for (const r of runList) if (r?.continuous && r.rootId) monitorRoots.set(r.rootId, r);
+  const usageByRoot = new Map([...monitorRoots.keys()].map((rootId) => [rootId, monitorUsage(runList, rootId, nowMs)]));
+  for (const [rootId, latest] of monitorRoots) {
+    const usage = usageByRoot.get(rootId);
+    const active = !['stopped', 'finished'].includes(latest.monitor?.status) && !latest.userStopped;
+    if (!usage.anomaly || !active) continue;
+    attention.push({ kind: 'usage', agent: CHIEF_ID, runId: latest.id, since: `${usage.day}T00:00:00+09:00`,
+      text: `상시 업무 '${String(latest.request || '').slice(0, 40)}' 오늘 AI 호출 ${usage.today.calls}회 — 평소 하루 평균 ${Math.round(usage.baseline)}회의 ${usage.ratio.toFixed(1)}배입니다. 업무는 계속 진행됩니다.` });
+  }
   attention.sort((a, b) => (toMs(a.since) || 0) - (toMs(b.since) || 0));
   metrics.attention = attention.length;
 
@@ -391,7 +403,7 @@ export function buildState({ org, events, runs = [], tasks = [], plans = null, o
     agents,
     unregistered,
     tasks: taskViews,
-    runs: runList.map((r) => ({ ...r })),
+    runs: runList.map((r) => (r?.continuous && usageByRoot.has(r.rootId) ? { ...r, monitorUsage: usageByRoot.get(r.rootId) } : { ...r })),
     feed: eventList.slice(-FEED_LIMIT),
     flow: flow.items.slice(-FLOW_LIMIT),
     attention,

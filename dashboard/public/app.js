@@ -772,7 +772,7 @@ function fillEfforts(select, engine, model, selected = '', placeholder = null) {
 function renderChiefSettings() {
   $('schedulesBtn').disabled = S.demo;
   $('companySchedulesBtn').disabled = S.demo;
-  $('schedulesBtn').textContent = `반복 예약${S.schedules.length ? ` ${S.schedules.filter((item) => item.enabled).length}` : ''}`;
+  $('schedulesBtn').textContent = `예약${S.schedules.length ? ` ${S.schedules.filter((item) => item.enabled).length}` : ''}`;
   $('clearHistoryBtn').disabled = S.demo || !S.runs.some((run) => !['running', 'queued'].includes(run.status)) && !S.tasks.some((task) => task.status === 'done');
   $('connectionsBtn').disabled = S.demo;
   $('connectionsBtn').textContent = S.connectionStatus.needsLogin ? `계정 재연결 ${S.connectionStatus.needsLogin}` : '계정 연결';
@@ -2107,7 +2107,7 @@ async function submitBulk(ev) {
 
 // 지시창 응답 안내: 예약·일시정지·일괄 재개·새 업무
 export function chiefResultMessage(result) {
-  if (result.scheduled) return `매일 ${result.schedule.time}에 업무를 시작하도록 예약했어요. 반복 예약에서 관리할 수 있습니다.`;
+  if (result.scheduled) return `업무를 예약했어요: ${scheduleLabel(result.schedule)}. 상단 ‘예약’에서 관리할 수 있습니다.`;
   if (result.pauseRequested) {
     const n = result.paused?.length || 0;
     return n ? `진행 중이던 업무 ${n}건을 일시정지하고 업무 폴더마다 정리 노트(pause-note.md)를 남겼어요. 서버를 꺼도 되고, 다음에 "이어서 해줘"라고 쓰면 다시 시작합니다.`
@@ -3042,12 +3042,21 @@ async function openFolder(taskId) {
   } catch (e) { toast(e.message, { type: 'error' }); }
 }
 
-// ───── 매일 반복 예약 ─────
+// ───── 업무 예약(1회·N회·매일) ─────
+const monthDay = (date) => date ? `${Number(date.slice(5, 7))}월 ${Number(date.slice(8, 10))}일` : '';
+const kstDate = (value) => new Date(Date.parse(value) + 9 * 3600e3).toISOString().slice(0, 10);
+// 예약 요약: "11월 4일 10:00 한 번" / "매일 10:00 · 3회(11월 6일까지)" / "매일 10:00(11월 4일부터)" / "매일 10:00"
+export function scheduleLabel(item) {
+  if (!item?.time) return '';
+  if (item.times === 1) return `${monthDay(item.startDate || (item.nextAt && kstDate(item.nextAt)))} ${item.time} 한 번`.trim();
+  if (item.times > 1) return `매일 ${item.time} · ${item.times}회${item.untilDate ? `(${monthDay(item.untilDate)}까지)` : ''}`;
+  return `매일 ${item.time}${item.startDate ? `(${monthDay(item.startDate)}부터)` : ''}`;
+}
 let scheduleItems = [];
 let scheduleBusy = false;
 function setScheduleBusy(value) {
   scheduleBusy = value;
-  for (const id of ['scheduleSave', 'scheduleTime', 'schedulePrompt', 'scheduleCancelEdit']) $(id).disabled = value;
+  for (const id of ['scheduleSave', 'scheduleTime', 'scheduleDate', 'scheduleTimes', 'schedulePrompt', 'scheduleCancelEdit']) $(id).disabled = value;
   for (const button of $('scheduleList').querySelectorAll('button')) button.disabled = value;
 }
 const scheduleStatus = { queued: '대기', running: '진행 중', done: '종료', failed: '실패', stopped: '중지', needs_reply: '답변 필요', starting: '시작 중' };
@@ -3057,16 +3066,17 @@ function scheduleStamp(value) {
 function renderSchedules() {
   const items = S.schedules;
   setHTML($('scheduleList'), items.length ? items.map((item) => `<li class="schedule-item" data-schedule="${esc(item.id)}">
-    <b>매일 ${esc(item.time)} · ${item.enabled ? '예약 중' : '일시중지'}</b><p>${esc(item.prompt)}</p>
-    <p class="help">다음 시작: ${item.enabled ? esc(scheduleStamp(item.nextAt)) : '일시중지'}${item.lastRun ? ` · 최근: ${esc(scheduleStatus[item.lastRun.status] || item.lastRun.status)}` : ''}</p>
+    <b>${esc(scheduleLabel(item))} · ${item.completed ? '끝남' : item.enabled ? '예약 중' : '일시중지'}</b><p>${esc(item.prompt)}</p>
+    <p class="help">다음 시작: ${item.completed ? '없음(예약한 회차를 모두 마침)' : item.enabled ? esc(scheduleStamp(item.nextAt)) : '일시중지'}${item.lastRun ? ` · 최근: ${esc(scheduleStatus[item.lastRun.status] || item.lastRun.status)}` : ''}</p>
     ${item.lastRun?.summary ? `<p class="help">${esc(item.lastRun.summary)}</p>` : ''}
     ${item.lastSkipped ? `<p class="help">${esc(scheduleStamp(item.lastSkipped.at))} · ${esc(item.lastSkipped.reason)}</p>` : ''}
-    <div class="run-actions"><button type="button" class="btn btn-sm" data-schedule-action="toggle">${item.enabled ? '일시중지' : '다시 켜기'}</button><button type="button" class="btn btn-sm" data-schedule-action="edit">수정</button>${item.lastRun?.id ? '<button type="button" class="btn btn-sm" data-schedule-action="result">최근 결과</button>' : ''}<button type="button" class="btn btn-sm btn-danger" data-schedule-action="delete">삭제</button></div></li>`).join('') : '<li class="empty">등록된 예약이 없습니다. 상단 지시창에 “매일 오전 11시에 …”라고 입력해도 예약됩니다.</li>');
+    <div class="run-actions">${item.completed ? '' : `<button type="button" class="btn btn-sm" data-schedule-action="toggle">${item.enabled ? '일시중지' : '다시 켜기'}</button>`}<button type="button" class="btn btn-sm" data-schedule-action="edit">수정</button>${item.lastRun?.id ? '<button type="button" class="btn btn-sm" data-schedule-action="result">최근 결과</button>' : ''}<button type="button" class="btn btn-sm btn-danger" data-schedule-action="delete">삭제</button></div></li>`).join('') : '<li class="empty">등록된 예약이 없습니다. 상단 지시창에 “내일 오전 10시에 …”, “매일 오전 11시에 …”, “내일부터 3일간 매일 9시에 …”라고 입력해도 예약됩니다.</li>');
   setScheduleBusy(scheduleBusy);
 }
 function resetScheduleForm() {
   $('scheduleForm').reset(); $('scheduleId').value = '';
-  $('scheduleFormTitle').textContent = '예약 추가'; $('scheduleSave').textContent = '매일 예약하기';
+  $('scheduleFormTitle').textContent = '예약 추가'; $('scheduleSave').textContent = '예약하기';
+  $('scheduleDate').min = kstDate(new Date().toISOString());
   $('scheduleCancelEdit').hidden = true; $('scheduleError').hidden = true;
 }
 async function loadSchedules() {
@@ -3083,12 +3093,14 @@ async function saveSchedule(event) {
   event.preventDefault();
   if (scheduleBusy) return;
   const id = $('scheduleId').value, previous = scheduleItems.find((item) => item.id === id);
+  const times = $('scheduleTimes').value.trim();
   const body = { prompt: $('schedulePrompt').value.trim(), time: $('scheduleTime').value,
+    startDate: $('scheduleDate').value || null, times: times ? Number(times) : null,
     chief: previous?.chief || { engine: $('chiefEngine').value, model: $('chiefModel').value, effort: $('chiefEffort').value } };
   setScheduleBusy(true); $('scheduleError').hidden = true;
   try {
-    await api(id ? 'PUT' : 'POST', `/api/schedules${id ? `/${encodeURIComponent(id)}` : ''}`, body);
-    resetScheduleForm(); await loadSchedules(); toast(id ? '예약을 수정했어요.' : `매일 ${body.time}에 시작하도록 예약했어요.`);
+    const saved = await api(id ? 'PUT' : 'POST', `/api/schedules${id ? `/${encodeURIComponent(id)}` : ''}`, body);
+    resetScheduleForm(); await loadSchedules(); toast(id ? '예약을 수정했어요.' : `예약했어요: ${scheduleLabel(saved)}`);
   } catch (error) { $('scheduleError').textContent = error.message; $('scheduleError').hidden = false; }
   finally { setScheduleBusy(false); }
 }
@@ -3105,6 +3117,8 @@ async function scheduleAction(event) {
       await loadSchedules(); const full = scheduleItems.find((item) => item.id === id);
       if (!full) return;
       $('scheduleId').value = id; $('scheduleTime').value = full.time; $('schedulePrompt').value = full.prompt;
+      $('scheduleDate').value = full.startDate || ''; $('scheduleTimes').value = full.times || '';
+      $('scheduleDate').min = ''; // 이미 시작한 예약도 날짜를 그대로 두고 수정할 수 있게
       $('scheduleFormTitle').textContent = '예약 수정'; $('scheduleSave').textContent = '수정 저장'; $('scheduleCancelEdit').hidden = false;
       $('schedulePrompt').focus(); return;
     } catch (error) { toast(error.message, { type: 'error' }); return; }
@@ -3119,7 +3133,7 @@ async function scheduleAction(event) {
   setScheduleBusy(true);
   try {
     if (action === 'delete') {
-      if (!await confirmBox('이 반복 예약을 삭제할까요? 진행 중인 업무와 기존 산출물·영상 게시 기록은 유지됩니다.', '예약 삭제')) return;
+      if (!await confirmBox('이 예약을 삭제할까요? 진행 중인 업무와 기존 산출물·영상 게시 기록은 유지됩니다.', '예약 삭제')) return;
       await api('DELETE', `/api/schedules/${encodeURIComponent(id)}`);
       if ($('scheduleId').value === id) resetScheduleForm();
     } else if (action === 'toggle') await api('PUT', `/api/schedules/${encodeURIComponent(id)}`, { enabled: !item.enabled });

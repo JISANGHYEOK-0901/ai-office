@@ -5,7 +5,7 @@ import { evidenceIn } from '../lib/guardrails.mjs';
 import { parseJudge } from '../lib/ai-judge.mjs';
 
 const ai = (fields) => async () => ({ kind: 'task', kindEvidence: '', externalActions: [], delegated: false, delegatedEvidence: '', standing: 'none', standingEvidence: '',
-  durationMinutes: 0, deadline: '', intervalMinutes: 0, dailyTime: '', dailyEvidence: '', outputDir: '', outputDirEvidence: '', ...fields });
+  durationMinutes: 0, deadline: '', intervalMinutes: 0, scheduleTime: '', scheduleDate: '', scheduleTimes: 0, scheduleEvidence: '', outputDir: '', outputDirEvidence: '', ...fields });
 const NOW = Date.parse('2026-11-03T09:00:00+09:00');
 
 test('근거 문장은 앞말·따옴표를 걷어 내고 대표 원문에 실제로 있을 때만 인정한다', () => {
@@ -28,7 +28,7 @@ test('AI가 판별한 일시정지·재개·외부 작업·위임은 근거가 �
   assert.deepEqual(saved.actions, []);
 });
 
-test('상시 실행(멈출 때까지·기간·종료 시각)과 매일 예약을 근거와 함께 판별한다', async () => {
+test('상시 실행(멈출 때까지·기간·종료 시각)과 예약(매일·1회·N회)을 근거와 함께 판별한다', async () => {
   const forever = await judgeCommand('새 자료 나오면 알려 주고 내가 그만하라고 할 때까지 계속 봐', { now: NOW, judge: ai({ standing: 'until_stop', standingEvidence: '그만하라고 할 때까지 계속', intervalMinutes: 10 }) });
   assert.deepEqual(forever.continuous, { intervalMs: 600000, durationMs: null });
   const day = await judgeCommand('하루 종일 시장 동향 지켜봐', { now: NOW, judge: ai({ standing: 'duration', standingEvidence: '하루 종일', durationMinutes: 1440 }) });
@@ -37,8 +37,16 @@ test('상시 실행(멈출 때까지·기간·종료 시각)과 매일 예약을
   assert.equal(until.continuous.deadlineAt, Date.parse('2026-11-03T18:00:00+09:00'));
   const past = await judgeCommand('어제 6시까지 확인해', { now: NOW, judge: ai({ standing: 'deadline', standingEvidence: '6시까지', deadline: '2026-11-02 18:00' }) });
   assert.equal(past.continuous, null, '지난 시각은 상시 실행으로 받지 않는다');
-  const daily = await judgeCommand('평일 아침 9시마다 매일 뉴스 정리해 줘', { judge: ai({ dailyTime: '09:00', dailyEvidence: '아침 9시마다' }) });
-  assert.deepEqual(daily.daily, { time: '09:00' });
+  const daily = await judgeCommand('평일 아침 9시마다 매일 뉴스 정리해 줘', { now: NOW, judge: ai({ scheduleTime: '09:00', scheduleEvidence: '아침 9시마다' }) });
+  assert.deepEqual(daily.schedule, { time: '09:00' });
+  const once = await judgeCommand('내일 오전 10시에 카페에 게시글 2개 올려줘', { now: NOW, judge: ai({ scheduleTime: '10:00', scheduleDate: '2026-11-04', scheduleTimes: 1, scheduleEvidence: '내일 오전 10시에' }) });
+  assert.deepEqual(once.schedule, { time: '10:00', startDate: '2026-11-04', times: 1 });
+  const three = await judgeCommand('내일부터 3일간 매일 9시에 뉴스 정리해 줘', { now: NOW, judge: ai({ scheduleTime: '09:00', scheduleDate: '2026-11-04', scheduleTimes: 3, scheduleEvidence: '내일부터 3일간 매일 9시에' }) });
+  assert.deepEqual(three.schedule, { time: '09:00', startDate: '2026-11-04', times: 3 });
+  // 근거가 원문에 없거나, 지난 날짜·범위를 넘는 횟수는 예약으로 받지 않는다(횟수만 틀리면 무제한 대신 버린다)
+  assert.equal((await judgeCommand('뉴스 정리해 줘', { now: NOW, judge: ai({ scheduleTime: '09:00', scheduleEvidence: '매일 9시' }) })).schedule, null);
+  assert.equal((await judgeCommand('어제 9시에 정리해 줘', { now: NOW, judge: ai({ scheduleTime: '09:00', scheduleDate: '2026-11-02', scheduleTimes: 1, scheduleEvidence: '어제 9시에' }) })).schedule, null);
+  assert.deepEqual((await judgeCommand('매일 9시에 정리해 줘', { now: NOW, judge: ai({ scheduleTime: '09:00', scheduleTimes: 999, scheduleEvidence: '매일 9시에' }) })).schedule, { time: '09:00' });
 });
 
 test('AI 판별이 실패하거나 형식이 틀리면 기존 규칙 판별로 대신한다', async () => {

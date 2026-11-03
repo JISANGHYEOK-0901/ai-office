@@ -996,7 +996,9 @@ button.badge-reply:hover { background: color-mix(in srgb, var(--warn) 24%, trans
 .schedule-item .run-actions { flex-wrap: wrap; }
 .schedule-form { padding-top: 12px; border-top: 1px solid var(--line); }
 .schedule-form textarea { width: 100%; min-height: 110px; resize: vertical; }
-.schedule-form input[type="time"] { width: 160px; max-width: 100%; padding: 8px 10px; border: var(--border); border-radius: var(--radius-sm); background: var(--panel-2); color: var(--text); font: inherit; }
+.schedule-when { display: flex; flex-wrap: wrap; gap: 10px 16px; }
+.schedule-when > div { display: grid; gap: 6px; min-width: 0; }
+.schedule-form input[type="time"], .schedule-form input[type="date"], .schedule-form input[type="number"] { width: 160px; max-width: 100%; padding: 8px 10px; border: var(--border); border-radius: var(--radius-sm); background: var(--panel-2); color: var(--text); font: inherit; }
 .schedule-form-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .attn-complete { --ag: #34f5c5; }
 :root[data-theme="pastel"] .attn-complete { --ag: #ff8fc0; }

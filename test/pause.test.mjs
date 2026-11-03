@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildPauseNote, pauseIntent, resumeIntent } from '../lib/pause.mjs';
-import { chiefResultMessage, taskLabel } from '../dashboard/public/app.js';
+import { chiefResultMessage, scheduleLabel, taskLabel } from '../dashboard/public/app.js';
 
 test('일시정지 지시는 "멈추고 정리해 두었다가 이어서" 문장을 알아보고 새 업무 지시는 건드리지 않는다', () => {
   for (const text of ['지금까지 하던 작업 멈추고 자료 정리한 다음 다음에 이어갈 수 있게해줘', '일시정지', '작업 일시정지해줘',
@@ -48,6 +48,15 @@ test('지시창 안내는 일시정지·재개 결과 건수를 알려 준다', 
   assert.match(chiefResultMessage({ pauseRequested: true, paused: [] }), /일시정지할 것이 없어요/);
   assert.match(chiefResultMessage({ resumeRequested: true, resumed: [{}], skipped: [{ reason: '다시 지시' }] }), /1건을 이어서.*이어가지 못한 1건: 다시 지시/);
   assert.match(chiefResultMessage({ id: 'r' }), /비서실장에게 업무를 전달/);
+});
+
+test('예약 안내는 1회·N회·매일을 구분해 보여 준다', () => {
+  assert.equal(scheduleLabel({ time: '10:00', startDate: '2026-11-04', times: 1 }), '11월 4일 10:00 한 번');
+  assert.equal(scheduleLabel({ time: '10:00', times: 1, nextAt: '2026-11-04T01:00:00.000Z' }), '11월 4일 10:00 한 번');
+  assert.equal(scheduleLabel({ time: '09:00', times: 3, untilDate: '2026-11-06' }), '매일 09:00 · 3회(11월 6일까지)');
+  assert.equal(scheduleLabel({ time: '11:00', startDate: '2026-12-01' }), '매일 11:00(12월 1일부터)');
+  assert.equal(scheduleLabel({ time: '11:00' }), '매일 11:00');
+  assert.match(chiefResultMessage({ scheduled: true, schedule: { time: '10:00', startDate: '2026-11-04', times: 1 } }), /업무를 예약했어요: 11월 4일 10:00 한 번/);
 });
 
 test('업무 카드는 마지막 실행이 일시정지·끊김이면 그 상태를, 다시 실행 중이면 원래 상태를 보여 준다', () => {

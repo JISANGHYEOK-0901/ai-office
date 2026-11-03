@@ -45,4 +45,17 @@ test('예약 HTTP: 인증·자연어 등록·정시 실행·재시작·내역 �
   assert.equal((await api('GET', '/api/schedules')).data.schedules[0].lastRun.status, 'done');
   assert.equal((await api('DELETE', '/api/schedules/' + created.data.schedule.id)).status, 200);
   assert.equal((await api('GET', '/api/schedules')).data.schedules.length, 0);
+
+  // 1회 예약: "내일 오전 10시에 …"는 바로 실행하지 않고 그 시각에 한 번만 실행한다(지금: 10월 30일 11:00 한국)
+  const once = await api('POST', '/api/runs', { prompt: '내일 오전 10시에 가상 카페에 게시글 2개를 올려줘' });
+  assert.equal(once.status, 202); assert.equal(once.data.scheduled, true);
+  assert.deepEqual([once.data.schedule.startDate, once.data.schedule.times, once.data.schedule.nextAt], ['2026-10-31', 1, '2026-10-31T01:00:00.000Z']);
+  assert.equal((await api('POST', '/api/schedules', { prompt: '지난 날짜 업무', time: '10:00', startDate: '2026-10-29' })).status, 400);
+  const runsBefore = (await api('GET', '/api/state')).data.runs.filter((run) => !run.phase && run.schedule).length;
+  fixture.set('2026-10-31T01:00:00Z'); server.schedules.tick(); server.schedules.tick();
+  fixture.set('2026-11-01T01:00:00Z'); server.schedules.tick();
+  const scheduledRuns = (await api('GET', '/api/state')).data.runs.filter((run) => !run.phase && run.schedule?.id === once.data.schedule.id);
+  assert.equal(runsBefore, 0); assert.equal(scheduledRuns.length, 1); assert.equal(scheduledRuns[0].schedule.slot, '2026-10-31');
+  const finished = (await api('GET', '/api/schedules')).data.schedules.find((item) => item.id === once.data.schedule.id);
+  assert.deepEqual([finished.enabled, finished.completed], [false, true]);
 });

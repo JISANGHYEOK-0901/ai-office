@@ -229,6 +229,18 @@
       "items": {
         "type": "string"
       }
+    },
+    "requestedActions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "mail",
+          "post",
+          "comment",
+          "web"
+        ]
+      }
     }
   },
   "required": [
@@ -237,7 +249,8 @@
     "meetingAgents",
     "meetingSummary",
     "plan",
-    "rerunStages"
+    "rerunStages",
+    "requestedActions"
   ],
   "additionalProperties": false
 }

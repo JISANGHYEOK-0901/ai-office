@@ -23,6 +23,8 @@ test('AI가 판별한 일시정지·재개·외부 작업·위임은 근거가 �
   assert.deepEqual([upload.actions, upload.delegated, upload.source], [['web'], true, 'ai'], '근거 없는 mail은 버린다');
   const invented = await judgeCommand('보고서만 써 줘', { judge: ai({ externalActions: [{ action: 'post', evidence: '블로그에 올려' }], delegated: true, delegatedEvidence: '끝까지' }) });
   assert.deepEqual([invented.actions, invented.delegated], [[], false], 'AI가 지어낸 허가는 인정하지 않는다');
+  const paraphrased = await judgeCommand('꼬리별 관측소 내 글 업로드 부탁해', { judge: ai({ externalActions: [{ action: 'post', evidence: '카페에 글을 게시' }] }) });
+  assert.deepEqual(paraphrased.actions, ['post'], '의역 근거라도 규칙이 같은 결론이면 글 게시로 인정한다');
   // 실행기가 붙인 저장 위치 안내는 판별 대상이 아니다
   const saved = await judgeCommand('ERP에서 상담사 리스트 정리해 줘\n\n[저장 위치] 이 작업의 산출물은 이 폴더에 저장하세요: x', { judge: ai({ externalActions: [{ action: 'web', evidence: '저장하세요' }] }) });
   assert.deepEqual(saved.actions, []);

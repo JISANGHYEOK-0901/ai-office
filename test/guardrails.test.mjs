@@ -35,6 +35,8 @@ test('외부 작업 허용·위임은 대표 원문에서만 나오고, 금지 �
   assert.deepEqual(externalActionPolicy(['메일 초안만 써줘']).actions, []);
   assert.deepEqual(externalActionPolicy(['메일로 보내줘', '발송은 하지 마']).actions, []);
   assert.equal(externalActionPolicy(['메일로 보내줘']).delegated, false);
+  assert.ok(externalActionPolicy(['꼬리별 관측소 내 글 업로드 부탁해']).actions.includes('post'), '글 업로드는 글 게시다');
+  assert.ok(!externalActionPolicy(['카페 글 작성만 하고 업로드 하지 마']).actions.includes('post'));
 });
 
 test('AI 판별 근거는 대표 원문에 실제로 있어야 한다(앞말·따옴표는 걷어 낸다)', () => {

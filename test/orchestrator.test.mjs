@@ -516,6 +516,36 @@ test('일반 웹사이트 업무: 위임이 없으면 실행 전에 묶어서 �
   assert.match(f.runner.result(second.id).text, /웹사이트 작업[\s\S]*직원 확인 완료[\s\S]*evidence\/upload-1\.png[\s\S]*확인 내용: 공개 주소 확인/);
 });
 
+test('외부 작업 판별이 빠져도 계획이 실행 지시로 보면 작업 전에 묻고, 답장으로만 허용한다', async (t) => {
+  const calls = [];
+  const outbound = { connections: () => [], async deliver(args) { calls.push(args); return { status: 'confirmed', summary: '완료' }; } };
+  // 계정이 없으면 허용 뒤 조사·작성 전에 계정을 묻는다(문안만 만든 뒤 역량 공백으로 끝나지 않음)
+  const f = fixture(t, { publication: true, outbound });
+  const prompt = '꼬리별 관측소 내 글 업로드 부탁해';
+  const first = f.runner.start({ prompt, intent: { actions: [], delegated: false, source: 'ai' } });
+  assert.equal((await f.final(first)).needsReply, true);
+  assert.match(f.runner.result(first.id).text, /글 게시 실행까지 맡기신/);
+  assert.equal(f.counts.a || 0, 0);
+  const second = f.runner.reply(first.id, { prompt: '진행' });
+  assert.equal((await f.final(second)).needsReply, true);
+  assert.match(f.runner.result(second.id).text, /네이버 블로그 계정|계정이 필요/);
+  assert.equal(f.counts.plan, 2, '허용 범위가 바뀌어 계획을 다시 세운다');
+  assert.equal(f.counts.a || 0, 0, '계정 확인 전에는 단계를 실행하지 않는다');
+  assert.equal(calls.length, 0);
+  // 초안만 지시는 묻지 않고 기존 계획 검사로 막는다
+  const draft = fixture(t, { publication: true, outbound });
+  const draftRun = draft.runner.start({ prompt: '카페 글 초안만 써 줘', intent: { actions: [], delegated: false, source: 'ai' } });
+  await draft.final(draftRun);
+  assert.match(draft.runner.result(draftRun.id).text, /지시하지 않은 외부/);
+  // 다른 답장은 허용으로 보지 않고 다시 묻는다
+  const again = fixture(t, { publication: true, outbound });
+  const asked = again.runner.start({ prompt, intent: { actions: [], delegated: false, source: 'ai' } });
+  await again.final(asked);
+  const unclear = again.runner.reply(asked.id, { prompt: '무슨 뜻이지' });
+  assert.equal((await again.final(unclear)).needsReply, true);
+  assert.match(again.runner.result(unclear.id).text, /글 게시 실행까지 맡기신/);
+});
+
 test('지시창 판별(근거 확인된 외부 작업·위임)이 업무 내내 쓰이고, 답장 뜻은 AI 판별로 알아본다', async (t) => {
   const calls = [];
   const outbound = { connections: () => [{ id: 'erp-1', label: 'ERP', provider: 'web', status: 'connected' }], async deliver(args) { calls.push(args); return { status: 'confirmed', summary: '완료' }; } };
@@ -524,11 +554,15 @@ test('지시창 판별(근거 확인된 외부 작업·위임)이 업무 내내 
   const first = delegated.runner.start({ prompt: '자료를 HTML로 만들어 ERP 제휴 화면에 걸어 두고 마무리까지 맡길게', intent: { actions: ['web'], delegated: true, source: 'ai' } });
   assert.equal((await delegated.final(first)).needsReply, false);
   assert.equal(calls.length, 1);
-  // 판별에 외부 작업이 없으면 계획의 웹 작업을 받아들이지 않는다(계획 재요청 뒤 막힘)
+  // 판별에 외부 작업이 없으면 계획의 웹 작업을 바로 실행하지 않고 작업 전에 묻는다. 거절하면 계획 재요청 뒤 막힌다
   const none = fixture(t, { webPublication: true, outbound });
   const blockedRun = none.runner.start({ prompt: '자료를 HTML로 만들어 줘', intent: { actions: [], delegated: false, source: 'ai' } });
-  await none.final(blockedRun);
-  assert.match(none.runner.result(blockedRun.id).text, /지시하지 않은 외부/);
+  assert.equal((await none.final(blockedRun)).needsReply, true);
+  assert.match(none.runner.result(blockedRun.id).text, /웹사이트 작업 실행까지 맡기신[\s\S]*"하지 마"면 초안까지만/);
+  assert.equal(none.counts.a || 0, 0, '확인 전에는 단계를 실행하지 않는다');
+  const declinedRun = none.runner.reply(blockedRun.id, { prompt: '하지 마' });
+  await none.final(declinedRun);
+  assert.match(none.runner.result(declinedRun.id).text, /지시하지 않은 외부/);
   assert.equal(calls.length, 1);
   // 규칙이 못 알아보는 거절 표현도 AI 판별로 거절 처리한다
   const judge = async (schema) => schema === 'intent-answer' ? { decision: 'decline', decisionEvidence: '이번엔 패스', addActions: [], removeActions: [], delegated: false, delegatedEvidence: '' } : null;

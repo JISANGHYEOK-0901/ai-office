@@ -13,12 +13,14 @@ import { codexRole, loadSettings } from '../lib/settings.mjs';
 import { parseVerdict } from '../scripts/codex-review.mjs';
 import { stageResult, outputIssues, HTML_BRIEF } from '../lib/work-result.mjs';
 import { programRoot } from '../lib/paths.mjs';
-import { BUDGET_WARN_RATIO, MAX_MAILS_PER_RUN, MAX_PLAN_REVISIONS, MAX_PROGRESS_CHECKS, externalActionPolicy } from '../lib/guardrails.mjs';
+import { BUDGET_WARN_RATIO, MAX_MAILS_PER_RUN, MAX_PLAN_REVISIONS, MAX_PROGRESS_CHECKS, externalActionPolicy, isDraftOnly } from '../lib/guardrails.mjs';
 import { mailKey, preparePublications, splitMailBatch } from '../lib/publications.mjs';
 import { attachmentQuestion, attachmentRef, pickChoices, resolveAttachments } from '../lib/attachments.mjs';
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';
 import { CONNECTION_PROVIDERS, serviceProvider } from '../lib/connections.mjs';
+
+const ACTION_LABEL = { mail: '메일 발송', post: '글 게시', comment: '댓글 등록', web: '웹사이트 작업' };
 
 export function parseObject(text) {
   const value = String(text || '').trim().replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
@@ -91,6 +93,20 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     if (saved.pending?.some((q) => q.phase === 'budget')) {
       if (answer.decision === 'decline') state.budgetStop = true;
       else { state.budget.limitCalls += state.budget.stepCalls; state.budget.limitMs += state.budget.stepMs; }
+    }
+    // 외부 작업 확인 답장: "진행"은 물어본 작업만 허용하고, "하지 마"면 초안까지만 만든다. 다른 답이면 계획 때 다시 묻는다
+    const askedActions = (saved.pending || []).filter((q) => q.phase === 'action-confirm').flatMap((q) => q.actions || []);
+    if (askedActions.length) {
+      if (answer.decision === 'decline') state.declinedActions = [...new Set([...(state.declinedActions || []), ...askedActions])];
+      else if (answer.decision === 'approve' || answer.delegated) {
+        // 규칙 판별로 돌던 업무도 답장 허용이 이어지도록 지금 허용을 판별 값으로 옮긴다
+        if (!state.intent) {
+          const { actions, delegated } = externalActionPolicy([state.originalRequest, ...state.decisions.map((d) => d.answer)]);
+          state.intent = { actions, delegated };
+        }
+        answer.add = [...new Set([...answer.add, ...askedActions])];
+        state.declinedActions = (state.declinedActions || []).filter((action) => !askedActions.includes(action));
+      }
     }
     state.decisions.push({ questions: saved.pending || [], answer: redactContext(prompt), intent: answer });
     state.pending = [];
@@ -202,12 +218,25 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       `제휴업체 조사 후 주소를 알아내는 메일 업무는 조사 단계 다음에 개인별 발송 문안 JSON 단계를 두세요. {messages:[{recipients:["회사 메일"],subject:"제목",body:"양식을 채운 본문"}],skipped:["연락처 미확인 업체·이유"]}를 작성하고 publication.content에 그 단계 id, recipients에는 []를 씁니다. 검토 후 실행기가 문안별로 발송합니다. 대량 발송을 막기 위해 메일은 한 번에 ${MAX_MAILS_PER_RUN}통까지만 보내고 남은 메일은 대표에게 다시 확인받아 이어 보내므로, messages에는 확인한 대상을 모두 적으세요. 주소·출처를 확인하지 못한 업체에는 보내지 않습니다.`,
       '여러 게시글은 검토할 본문 JSON 단계에 {posts:[{subject,body,target}],skipped:[사유]}를 작성하고 publication.content에 그 단계 id를 지정하세요. 실행기가 글마다 별도로 게시합니다. 올릴 게시판이 앞 단계(사이트 조회 등)에서 정해지면 그 게시판 주소(대표가 준 주소와 같은 사이트)를 target에 넣게 하세요. 비우면 publication.target에 올립니다. 유튜브 링크의 영상 ID는 작업 공간 공통 이력과 대조해 재게시를 차단합니다.',
       `대표가 허용한 외부 작업: ${JSON.stringify(allowedActions())}. 초안만 요청한 업무를 외부에 게시하지 마세요.`,
+      '대표가 이 목록에 없는 외부 작업의 실제 실행(글 올리기·업로드, 메일 발송, 댓글, 사이트 등록)을 시킨 것으로 보이면 초안으로 끝내거나 gaps에 적지 말고 plan은 null, requestedActions에 해당 action(mail/post/comment/web)을 넣어 응답하세요. 실행기가 대표에게 확인합니다. 조회·조사·작성만 시킨 업무면 requestedActions는 []입니다.',
+      state.declinedActions?.length ? `대표가 확인 질문에서 거절한 외부 작업: ${JSON.stringify(state.declinedActions)}. publications와 requestedActions에 넣지 말고 초안까지만 만드세요.` : '',
+      'plan.gaps는 필요한 역량의 근무중 직원·부서가 없을 때만 씁니다. 외부 작업 허용·계정 연결·로그인 부족은 실행기가 따로 확인하므로 gaps에 적지 마세요.',
       `연결된 계정: ${JSON.stringify(outbound?.connections() || [])}`,
       HTML_BRIEF,
       buildOrgMap(org), `대표 요청:\n${context()}`, saved.plan ? `이전 계획과 완료 상태:\n${JSON.stringify({ plan: saved.plan, completed: saved.completed })}` : '', extra,
     ].filter(Boolean).join('\n\n') });
     checkStop();
     return parseObject(text);
+  };
+  // 계획이 허용되지 않은 외부 작업을 요구하면 초안으로 조용히 끝내지 않고, 작업을 시작하기 전에 대표에게 묻는다.
+  // 권한은 대표 답장으로만 생긴다. "초안만"이거나 이미 거절한 작업은 묻지 않고 기존 계획 검사로 막는다
+  const confirmActions = (candidate) => {
+    if (isDraftOnly(state.originalRequest)) return null;
+    const wanted = [...new Set([...(Array.isArray(candidate.requestedActions) ? candidate.requestedActions : []),
+      ...(candidate.plan?.publications || []).map((p) => p?.action)])]
+      .filter((action) => ACTION_LABEL[action] && !allowedActions().includes(action) && !state.declinedActions?.includes(action));
+    if (!wanted.length) return null;
+    return ask([{ phase: 'action-confirm', actions: wanted, question: `이 지시는 ${wanted.map((action) => ACTION_LABEL[action]).join('·')} 실행까지 맡기신 것으로 보이지만 확정하지 못했습니다. 실제로 실행할까요? "진행"이면 필요한 계정부터 확인하고, "하지 마"면 초안까지만 만듭니다.` }]);
   };
   checkStop();
   let response;
@@ -218,7 +247,9 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
   // 명시 재개라면 승인된 계획을 재검사하며 완료 파일·검토를 재사용한다.
   // 계정이 비어 있던 계획은 계정을 등록한 뒤 다시 세워 새 계정을 쓰게 한다
   const accountReplan = answering && saved.pending?.some((q) => q.phase === 'account' && q.replan);
-  if ((resume || answering) && saved.plan && !publicationCorrection && !accountReplan
+  // 외부 작업 확인 뒤에는 바뀐 허용 범위로 계획을 다시 세운다
+  const actionReplan = answering && saved.pending?.some((q) => q.phase === 'action-confirm');
+  if ((resume || answering) && saved.plan && !publicationCorrection && !accountReplan && !actionReplan
       && (resume && saved.approvedReview || !saved.pending?.some((q) => q.phase === 'plan'))) {
     response = { plan: saved.plan, rerunStages: [] };
     plan = saved.plan;
@@ -227,6 +258,8 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         response = await planning(error);
+        const confirmAsked = confirmActions(response);
+        if (confirmAsked) return confirmAsked;
         if (typeof response.question === 'string' && response.question.trim()) return ask([{ phase: 'plan', question: response.question }]);
         if (response.needsMeeting) {
           const attendees = [...new Set(response.meetingAgents || [])];
@@ -243,6 +276,8 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           writeFileAtomic(join(taskDir, 'meeting.md'), suggestions.map((s) => `## ${s.agentId}\n${s.text}`).join('\n\n'));
           emit('meeting.end', { summary: '담당 직원의 제안을 받아 계획에 반영했습니다.' });
           response = await planning('회의 제안:\n' + JSON.stringify(suggestions));
+          const confirmAfterMeeting = confirmActions(response);
+          if (confirmAfterMeeting) return confirmAfterMeeting;
           if (response.question?.trim()) return ask([{ phase: 'plan', question: response.question }]);
         }
         plan = response.plan;

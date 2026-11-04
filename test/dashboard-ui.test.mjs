@@ -697,6 +697,14 @@ test('지시 접수 중에는 상태를 표시하고 같은 지시를 다시 보
   assert.match(src, /chiefSubmit'\)\.disabled = chiefSending \|\|/);
 });
 
+test('대화 창에 답을 기다리는 업무를 끝내는 버튼이 있다', async () => {
+  const src = await readFile(path.join(PUBLIC, 'app.js'), 'utf8');
+  const html = await readFile(path.join(PUBLIC, 'index.html'), 'utf8');
+  assert.match(html, /id="threadClose" hidden/);
+  assert.match(src, /\$\('threadClose'\)\.hidden = S\.demo \|\| !latest\?\.needsReply \|\| busy/);
+  assert.match(src, /\/close`/);
+});
+
 test('직원은 대표실이 아니라 비서실장에게 보고하러 간다', async () => {
   const src = await readFile(path.join(PUBLIC, 'office.js'), 'utf8');
   const report = src.match(/function startReport\(ch\) \{[\s\S]*?\n  \}/)[0];

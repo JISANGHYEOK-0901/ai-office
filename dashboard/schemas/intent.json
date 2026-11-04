@@ -6,7 +6,8 @@
       "enum": [
         "task",
         "pause",
-        "resume"
+        "resume",
+        "clear_history"
       ]
     },
     "kindEvidence": {

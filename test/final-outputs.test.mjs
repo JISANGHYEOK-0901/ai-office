@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { collectFinalOutputs, finalOutputSettings, resolveFinalOutput, saveFinalOutputSettings, selectedDeliverables } from '../lib/final-outputs.mjs';
 import { startServer } from '../dashboard/server.mjs';
 import { saveTasks } from '../lib/tasks.mjs';
+import { outputIssues } from '../lib/work-result.mjs';
 
 const task = '2026-10-30/partner-research';
 function fixture(t) {
@@ -108,7 +109,7 @@ test('전달 단계 제목이 있으면 대표가 받는 파일 이름으로 쓰
   ], deliverables: ['list', 'csv', 'again', 'html'] };
   const result = collectFinalOutputs(f.root, { task, title: '미활동 상담사', plan });
   const rels = result.files.map((file) => file.rel).sort();
-  assert.deepEqual(rels, ['dev/image.svg', 'dev/style.css', 'dev/제휴 제안- 상세-요약-.html', '미활동 30일 초과 상담사 리스트 (2).md', '미활동 30일 초과 상담사 리스트.csv', '미활동 30일 초과 상담사 리스트.md', '비서실장-보고.md'].sort());
+  assert.deepEqual(rels, ['dev/image.svg', 'dev/style.css', 'dev/제휴 제안- 상세-요약-.html', '미활동 30일 초과 상담사 리스트 (2).html', '미활동 30일 초과 상담사 리스트 (2).md', '미활동 30일 초과 상담사 리스트.csv', '미활동 30일 초과 상담사 리스트.html', '미활동 30일 초과 상담사 리스트.md', '비서실장-보고.md'].sort());
   assert.equal(readFileSync(join(result.directory, '미활동 30일 초과 상담사 리스트.md'), 'utf8'), '# 리스트');
   const report = readFileSync(join(result.directory, '비서실장-보고.md'), 'utf8');
   assert.match(report, /\[리스트\]\(%EB%AF%B8%ED%99%9C%EB%8F%99/);
@@ -123,4 +124,31 @@ test('대표가 지시에 적은 저장 폴더에는 바로 만들고, 프로그
   assert.ok(existsSync(join(target, '비서실장-보고.md')) && existsSync(join(target, 'dev', 'page.html')));
   for (const bad of [join(f.root, 'outputs', 'x'), join(f.root, '.office'), join(f.root, 'org'), 'relative/path', f.root])
     assert.throws(() => collectFinalOutputs(f.root, { task, plan: f.plan, directory: bad }), /저장 위치|폴더/, bad);
+});
+
+test('md 결과는 HTML도 함께 전달하고, 이름은 같으며, 입력의 HTML은 글자로 표시한다', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'office-md-html-'));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const id = '2026-11-04/run-md';
+  const dir = join(root, 'outputs', ...id.split('/'));
+  mkdirSync(join(dir, 'research'), { recursive: true });
+  writeFileSync(join(dir, 'report.md'), '# 보고\n\n끝');
+  writeFileSync(join(dir, 'research', 'r-quick.md'), '# 뉴스 10건\n\n| # | 제목 | 링크 |\n|---|---|---|\n| 1 | 첫 소식 | https://a.example/x |\n\n<script>alert(1)</script>\n');
+  writeFileSync(join(dir, 'research', 'r-page.html'), '<!doctype html><title>x</title>');
+  const plan = { deliverables: ['a', 'b'], stages: [
+    { id: 'a', title: '뉴스 10건', output: `outputs/${id}/research/r-quick.md` },
+    { id: 'b', title: '이미 있는 페이지', output: `outputs/${id}/research/r-page.html` }] };
+  const result = collectFinalOutputs(root, { task: id, title: '뉴스', plan });
+  const names = result.files.map((f) => f.rel);
+  assert.ok(names.includes('뉴스 10건.md'));
+  assert.ok(names.includes('뉴스 10건.html'));
+  assert.equal(names.filter((n) => n.endsWith('.html')).length, 2, 'HTML 전달물은 변환하지 않는다');
+  const html = readFileSync(join(result.directory, '뉴스 10건.html'), 'utf8');
+  assert.match(html, /<title>뉴스 10건<\/title>/);
+  assert.match(html, /<table>/);
+  assert.match(html, /<a href="https:\/\/a\.example\/x" target="_blank" rel="noopener noreferrer">/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /&lt;script&gt;alert\(1\)/);
+  assert.ok(readFileSync(join(result.directory, '비서실장-보고.md'), 'utf8').includes(encodeURIComponent('뉴스 10건.html')), '보고서에서 HTML로 연결한다');
+  assert.deepEqual(outputIssues('x.html', Buffer.from(html)), [], '보고서 형식 검사를 통과한다');
 });

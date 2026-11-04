@@ -718,6 +718,7 @@ test('계획과 직원 지시는 요청 범위만 처리하도록 안내한다',
   assert.match(plan, /대표가 요청한 범위와 결과물만 계획/);
   assert.match(plan, /한 부서가 끝낼 수 있는 일은 회의 없이/);
   assert.match(plan, /sonnet 이상인 실무 직원/);
+  assert.match(plan, /본문 글을 먼저 쓰고 빈 줄 하나를 띄운 뒤 맨 아래에 유튜브 링크/);
   assert.match(plan, /같은 사건은 1건으로.*제목은 원문 그대로.*직접 연 페이지.*실제 건수와 부족 사유/);
   assert.match(f.calls.find((c) => c.kind === 'review').input, /표기·형식·추가 근거 보완은 보고서의 확인 필요/);
   assert.match(f.calls.find((c) => c.kind === 'a').input, /완료 기준을 채우면 바로 끝내세요/);

@@ -154,8 +154,8 @@ test('requestLogin: 없는 연결을 만들어 창을 열고 로그인 완료·�
 test('글 본문 나누기: 유튜브 링크만 따로 떼고 순서를 지키며 다른 링크는 글에 둔다', async () => {
   const { bodySegments } = await import('../lib/browser-work.mjs');
   const y = 'https://www.youtube.com/shorts/AbCdEfGhI_1';
-  assert.deepEqual(bodySegments(`소개글\n${y}\n마무리`), [{ text: '소개글', video: false }, { text: y, video: true }, { text: '마무리', video: false }]);
-  assert.deepEqual(bodySegments(`영상: ${y}.`).map((s) => s.text), ['영상:', y, '.']);
+  assert.deepEqual(bodySegments(`소개글\n${y}\n마무리`), [{ text: '소개글\n\n', video: false }, { text: y, video: true }, { text: '마무리', video: false }]);
+  assert.deepEqual(bodySegments(`영상: ${y}.`).map((s) => s.text), ['영상:\n\n', y, '.']);
   assert.deepEqual(bodySegments(y), [{ text: y, video: true }]);
   assert.deepEqual(bodySegments('https://youtu.be/AbCdEfGhI_1 그리고 https://m.youtube.com/watch?v=ZyXwVuTsR_2').map((s) => s.video), [true, false, true]);
   assert.deepEqual(bodySegments('자료는 https://example.com/a 를 보세요'), [{ text: '자료는 https://example.com/a 를 보세요', video: false }]);

@@ -2467,7 +2467,7 @@ async function openCompany() {
     $('finalOutputPath').textContent = data.finalOutputs?.directory || '';
     $('budgetCalls').value = data.settings?.budget?.calls ?? 40;
     $('budgetMinutes').value = data.settings?.budget?.minutes ?? 60;
-    $('postGapSeconds').value = data.settings?.postGapSeconds ?? 120;
+    $('postGapSeconds').value = data.settings?.postGapSeconds ?? 30;
     for (const id of ['budgetCalls', 'budgetMinutes', 'postGapSeconds']) $(id).disabled = S.demo;
     $('companyRules').disabled = false;
     $('finalOutputParent').disabled = S.demo;

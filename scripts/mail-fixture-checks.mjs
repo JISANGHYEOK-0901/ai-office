@@ -118,7 +118,7 @@ export async function verifyCafeEditor() {
     }, close: async () => {} };
     broker = createBrowserWork({ root, store, sessions, providersForTests: (_provider, url) => new URL(url).origin === origin });
     const link = 'https://www.youtube.com/shorts/AbCdEfGhI_1';
-    const body = `귀여운 강아지 영상이에요\n${link}\n다들 한번 보세요`;
+    const body = `귀여운 강아지 영상이에요\n다들 한번 보세요\n\n${link}`;
     const result = await broker.deliver({ scope: 'cafe-editor', allowedActions: ['post'], instructionKey: 'k', signal: new AbortController().signal, body,
       publication: { id: 'c1', action: 'post', service: 'naver_cafe', connection: account.id, target: `${origin}/write`, recipients: [], subject: '강아지 반응이 너무 웃기네요ㅎㅎ' },
       execute: async ({ url, token }) => {
@@ -143,7 +143,7 @@ export async function verifyCafeEditor() {
     assert.equal(posts.length, 1);
     assert.equal(posts[0].board, '수다방 선택됨');
     assert.equal(posts[0].title, '강아지 반응이 너무 웃기네요ㅎㅎ');
-    assert.equal(posts[0].text, '귀여운 강아지 영상이에요\n다들 한번 보세요', '글은 순서대로 한 번만 들어가고 링크는 글자로 남지 않는다');
+    assert.equal(posts[0].text, '귀여운 강아지 영상이에요\n다들 한번 보세요\n\n', '글 뒤에 빈 줄을 두고 한 번만 들어가며 링크는 글자로 남지 않는다');
     assert.equal(posts[0].card, true, '글과 링크를 나눠 붙여넣어 링크가 영상 카드가 된다');
     return [{ name: '카페 편집기: textarea 제목, 게시판 선택 클릭, 글과 링크를 나눠 영상 카드, 등록 확인', interaction: 'click', passed: true }];
   } finally {

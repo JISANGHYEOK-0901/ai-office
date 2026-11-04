@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import {
-  BUDGET_WARN_RATIO, CONTINUOUS_LIMITS, DEFAULT_TASK_BUDGET, MAX_PLAN_REVISIONS, MAX_PROGRESS_CHECKS, MAX_REVIEW_REJECTS, SECRET_MENTION, evidenceIn, externalActionPolicy,
+  BUDGET_WARN_RATIO, CONTINUOUS_LIMITS, DEFAULT_TASK_BUDGET, MAX_MAILS_PER_RUN, MAX_PLAN_REVISIONS, MAX_PROGRESS_CHECKS, MAX_REVIEW_REJECTS, SECRET_MENTION, evidenceIn, externalActionPolicy,
   isFinalAction, isFinalConfirm, isForbiddenAction, isReadOnlyBlocked, secretLocations, validateTaskBudget,
 } from '../lib/guardrails.mjs';
 
@@ -47,6 +47,7 @@ test('한도와 비밀값 위치', () => {
   assert.deepEqual({ ...CONTINUOUS_LIMITS }, { minIntervalMs: 10000, maxIntervalMs: 86400000, maxSpanMs: 365 * 86400000 });
   assert.equal(MAX_REVIEW_REJECTS, 2);
   assert.deepEqual([MAX_PLAN_REVISIONS, MAX_PROGRESS_CHECKS], [3, 12], '진행 점검: 계획 수정 3회·점검 12회');
+  assert.equal(MAX_MAILS_PER_RUN, 20, '메일은 확인 1회에 20통까지(위임이 있어도 같음)');
   assert.deepEqual(secretLocations('/w', '/home/u'), [join('/w', '보관함', '계정.env'), join('/home/u', '.config', 'ai-office', 'private')]);
   assert.equal(SECRET_MENTION.test('cat 보관함/계정.env'), true);
   assert.equal(SECRET_MENTION.test('ls ~/.config/ai-office/private'), true);

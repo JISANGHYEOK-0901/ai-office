@@ -751,6 +751,7 @@ let token = '';
 let lastRaw = null;
 let chiefSaveQueue = Promise.resolve();
 let chiefSaving = 0;
+let chiefSending = false;
 
 function fillModels(select, engine, selected = '', placeholder = null) {
   const choices = [...(S.models[engine] || [])];
@@ -783,7 +784,7 @@ function renderChiefSettings() {
   fillModels($('chiefModel'), chief.engine, chief.model);
   fillEfforts($('chiefEffort'), chief.engine, chief.model, chief.effort);
   const available = S.tools[chief.engine];
-  $('chiefSubmit').disabled = S.demo || available?.installed === false || available?.loggedIn === false;
+  $('chiefSubmit').disabled = chiefSending || S.demo || available?.installed === false || available?.loggedIn === false;
 }
 
 function saveChiefSelection(event) {
@@ -2121,8 +2122,22 @@ export function chiefResultMessage(result) {
   return '비서실장에게 업무를 전달했어요. 업무를 나눠 직원들에게 배정합니다.';
 }
 
+// 지시 내용 판별로 응답까지 최대 15초쯤 걸린다. 접수 중임을 바로 보여 주고 같은 지시를 다시 보내지 못하게 막는다
+function setChiefSending(sending) {
+  chiefSending = sending;
+  const button = $('chiefSubmit');
+  const movedFocus = sending ? false : button === document.activeElement || document.activeElement === document.body;
+  button.textContent = sending ? '전달 중…' : '지시하기';
+  button.setAttribute('aria-busy', String(sending));
+  $('chiefInput').readOnly = sending;
+  $('chiefSendStatus').textContent = sending ? '비서실장에게 지시를 전달하고 있습니다. 내용을 확인하는 데 최대 15초쯤 걸립니다.' : '';
+  if (sending) button.disabled = true;
+  else { renderChiefSettings(); if (movedFocus) $('chiefInput').focus(); }
+}
+
 async function submitChief(ev) {
   ev.preventDefault();
+  if (chiefSending) return;
   const input = $('chiefInput');
   const prompt = input.value.trim();
   if (!prompt) { input.focus(); return; }
@@ -2130,6 +2145,7 @@ async function submitChief(ev) {
   const act = chiefInputAction(prompt, S.tasks);
   if (act.action === 'show-result') { input.value = ''; openCompletion(act.taskId); return; }
   if (act.action === 'no-approval') { input.value = ''; toast('비서실장 검토가 끝나면 승인 없이 자동으로 완료됩니다.'); return; }
+  setChiefSending(true);
   try {
     await chiefSaveQueue;
     const model = $('chiefModel').value;
@@ -2141,6 +2157,8 @@ async function submitChief(ev) {
     await refresh();
   } catch (e) {
     toast(e.message, { type: 'error' });
+  } finally {
+    setChiefSending(false);
   }
 }
 

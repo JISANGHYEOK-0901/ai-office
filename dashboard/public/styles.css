@@ -260,6 +260,8 @@ code { font-family: var(--mono); font-size: .86em; padding: 1px 5px; border-radi
 }
 #chiefSettingsStatus:empty { display: none; }
 #chiefSettingsStatus { flex-basis: 100%; margin: 0; }
+#chiefSendStatus:empty { display: none; }
+.chief-send-status { display: block; margin: 5px 4px 0; color: var(--accent); font-size: 13px; font-weight: 700; line-height: 1.5; }
 .run-usage { color: var(--muted); font-size: 12px; }
 .run-daily-warn { color: var(--danger, #c0392b); font-weight: 600; }
 .chief-form:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }

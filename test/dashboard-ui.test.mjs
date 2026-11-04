@@ -689,6 +689,14 @@ test('chiefInputAction: 승인은 완료 결과 보기로 처리하고 새 실�
   assert.deepEqual(chiefInputAction('보고서를 다시 정리해 줘', []), { action: 'run' });
 });
 
+test('지시 접수 중에는 상태를 표시하고 같은 지시를 다시 보내지 않는다', async () => {
+  const src = await readFile(path.join(PUBLIC, 'app.js'), 'utf8');
+  const html = await readFile(path.join(PUBLIC, 'index.html'), 'utf8');
+  assert.match(html, /id="chiefSendStatus"[^>]*role="status"/);
+  assert.match(src, /if \(chiefSending\) return;/);
+  assert.match(src, /chiefSubmit'\)\.disabled = chiefSending \|\|/);
+});
+
 test('입력창 승인 의사는 결과 모달로 연결하며 승인·반려 API를 호출하지 않는다', async () => {
   const src = await readFile(path.join(PUBLIC, 'app.js'), 'utf8');
   const html = await readFile(path.join(PUBLIC, 'index.html'), 'utf8');

@@ -54,7 +54,7 @@ description: 비서실장(메인 세션)이 사무 업무 요청을 받아 업�
    "gaps":[{"need":"HTML 작성","suggestion":"개발부 추가 권장"}]}
   ```
   - `agent`는 근무중 직원 id, `dept`는 그 직원의 부서. `output`은 `outputs/<id>/<부서id>/<직원id>-<내용>.<확장자>`. 직원은 report·summary·findings·analysis로 시작하는 `.md` 파일을 쓸 수 없다(Claude Code 제한, plan validate가 거부). `inputs`는 앞 단계 id·output 경로나 이미 있는 파일.
-  - 필요한 역량의 근무중 부서가 없으면 그 일은 단계로 만들지 않고 `gaps`에 적는다.
+  - 필요한 역량의 근무중 부서가 없으면 그 일은 단계로 만들지 않고 `gaps`에 적는다. 외부 작업 허용·계정 연결·로그인 부족은 `gaps`에 적지 않고 대표에게 묻는다.
 - [ ] `node scripts/office.mjs plan validate <id>` 통과. 실패하면 사유대로 고쳐서 다시 실행했다.
 - [ ] `outputs/<id>/brief.md`에 요청 요지·완료 기준·배정표(단계별 담당·입력·출력·완료 기준)를 채웠다. 비밀값은 적지 않았다.
 

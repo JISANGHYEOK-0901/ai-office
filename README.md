@@ -15,6 +15,8 @@
 
 AI Office는 **각자 자기 컴퓨터에서, 자기 claude·codex 로그인으로** 실행합니다. 대시보드를 다른 사람과 공유하거나 원격으로 접속하는 방식이 아닙니다.
 
+**가장 쉬운 방법:** 아래 3번처럼 Claude 또는 Codex만 설치·로그인한 뒤, 터미널의 AI에게 "https://github.com/JISANGHYEOK-0901/ai-office 를 내 홈 폴더에 받아서, README와 AGENTS.md 안내대로 AI Office 쓸 수 있게 환경설정하고 서버 켜줘"라고 말합니다. AI가 아래 1·2·4·5를 대신 합니다(비밀번호·관리자 허용 창은 직접 입력). 다음부터는 `cd ~/ai-office` 후 `claude`(또는 `codex`)로 시작합니다. 비개발자용 단계는 `GUIDE.html` "3. 처음 한 번만: 설치하기"에 있습니다.
+
 1. **받기**
 
    ```bash
@@ -26,14 +28,23 @@ AI Office는 **각자 자기 컴퓨터에서, 자기 claude·codex 로그인으�
    - macOS: `brew install node` 또는 [nodejs.org](https://nodejs.org)의 LTS 설치 파일
    - Windows(PowerShell): `winget install OpenJS.NodeJS.LTS` 또는 nodejs.org의 LTS 설치 파일. 설치 후 **새 PowerShell 창**을 엽니다.
 
-3. **claude·codex 설치와 로그인** (두 OS 같은 명령. Windows는 PowerShell 또는 CMD에서 실행)
+3. **claude·codex 설치와 로그인** (둘 중 하나만 있어도 됩니다. 공식 설치 프로그램은 Node가 필요 없습니다)
 
    ```bash
-   npm install -g @anthropic-ai/claude-code   # Claude Code (Claude 직원·비서실장 사용 시)
-   claude auth login                          # 브라우저에서 본인 Claude 구독 계정으로 로그인(claude 실행 중이면 /login)
-   npm install -g @openai/codex               # Codex CLI (기본 비서실장·Codex 직원 사용 시)
-   codex login                                # 본인 ChatGPT 계정으로 로그인
+   # macOS·Linux
+   curl -fsSL https://claude.ai/install.sh | bash               # Claude Code
+   curl -fsSL https://chatgpt.com/codex/install.sh | sh          # Codex CLI
    ```
+
+   ```powershell
+   # Windows PowerShell
+   irm https://claude.ai/install.ps1 | iex                                               # Claude Code
+   powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"  # Codex CLI
+   ```
+
+   - 설치 뒤 새 터미널을 열고 `claude`(구독 계정으로 로그인, 실행 중이면 `/login`) 또는 `codex`(ChatGPT로 로그인)를 실행해 로그인합니다.
+   - npm으로도 설치할 수 있습니다: `npm install -g @anthropic-ai/claude-code`, `npm install -g @openai/codex`(Node 필요).
+   - 출처: [Claude Code 설치](https://code.claude.com/docs/en/setup), [Codex CLI README](https://github.com/openai/codex).
 
    - Windows의 Git for Windows는 **선택 사항**입니다. 없어도 대시보드와 훅이 동작합니다.
 

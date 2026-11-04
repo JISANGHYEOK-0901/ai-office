@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AI Office 사용 가이드</title>
-<meta name="description" content="IntelliJ 설치부터 AI Office 서버 켜기, 업무 지시, 내 마음대로 고쳐 쓰기까지 처음 쓰는 사람을 위한 안내서">
+<meta name="description" content="AI 설치 한 줄부터 AI Office 서버 켜기, 업무 지시, 내 마음대로 고쳐 쓰기까지 처음 쓰는 사람을 위한 안내서">
 <style>
   :root {
     --bg: #f6f7fb;
@@ -262,74 +262,30 @@
 
 <section class="part" id="install">
   <h2>3. 처음 한 번만: 설치하기</h2>
-  <p class="sub">위에서 내 컴퓨터 종류(맥/윈도우)를 먼저 고르면 그에 맞는 설명만 보입니다.</p>
+  <p class="sub">직접 붙여 넣는 명령은 <b>AI 설치 한 줄</b>뿐입니다. AI Office를 받고 설정하는 일은 AI에게 말로 맡깁니다. 위에서 내 컴퓨터 종류(맥/윈도우)와 쓸 AI를 먼저 고르면 맞는 설명만 보입니다.</p>
 
   <div class="card step">
     <div class="num">1</div>
     <div>
-      <h3>Node.js 설치하기</h3>
-      <p>AI Office를 돌리는 데 필요한 기본 프로그램입니다.</p>
-      <ol>
-        <li><a href="https://nodejs.org/ko" target="_blank" rel="noopener">nodejs.org</a>에 들어갑니다.</li>
-        <li>초록색 <span class="btnlike">LTS</span>라고 적힌 다운로드 버튼을 누릅니다.</li>
-        <li>받은 설치 파일을 열고 <span class="btnlike">계속</span> / <span class="btnlike">Next</span>만 눌러 끝까지 설치합니다.</li>
-      </ol>
-    </div>
-  </div>
-
-  <div class="card step">
-    <div class="num">2</div>
-    <div>
-      <h3>IntelliJ IDEA 설치하기</h3>
-      <p>프로그램 파일을 받고, AI와 대화할 터미널(검은 글씨 창)을 여는 데 씁니다.</p>
-      <ol>
-        <li><a href="https://www.jetbrains.com/ko-kr/idea/download/" target="_blank" rel="noopener">IntelliJ IDEA 다운로드 페이지</a>에 들어갑니다.</li>
-        <li class="only-mac">맥은 내 컴퓨터 칩에 맞는 파일을 고릅니다. 잘 모르면 화면 왼쪽 위 사과 메뉴 → <b>이 Mac에 관하여</b>에서 <b>Apple M1·M2·M3…</b>이면 <b>Apple Silicon</b>, <b>Intel</b>이면 <b>Intel</b>을 고릅니다.</li>
-        <li><b>무료로 쓸 수 있는 버전</b>을 받아 설치합니다. 결제하지 않아도 됩니다.</li>
-        <li class="only-mac">받은 파일을 열고, IntelliJ 아이콘을 <b>응용 프로그램(Applications)</b> 폴더로 끌어다 놓습니다.</li>
-        <li class="only-win">받은 설치 파일을 열고 <span class="btnlike">Next</span>를 눌러 끝까지 설치합니다.</li>
-        <li>IntelliJ를 처음 켜면 약관 동의·설정 화면이 나옵니다. 기본값 그대로 넘어가면 됩니다.</li>
-      </ol>
-    </div>
-  </div>
-
-  <div class="card step">
-    <div class="num">3</div>
-    <div>
-      <h3>AI Office 받기 (깃 클론)</h3>
-      <p>인터넷에 있는 AI Office 프로그램을 내 컴퓨터로 복사해 오는 단계입니다.</p>
-      <ol>
-        <li>IntelliJ 첫 화면에서 <span class="btnlike">Clone Repository</span>를 누릅니다. (버전에 따라 <span class="btnlike">Get from VCS</span> 또는 <span class="btnlike">저장소 복제</span>로 보일 수 있습니다.)</li>
-        <li><b>URL</b> 칸에 아래 주소를 붙여 넣습니다.
-          <div class="cmd"><code>https://github.com/JISANGHYEOK-0901/ai-office.git</code><button type="button" class="copy">복사</button></div>
-        </li>
-        <li><b>Directory</b>(저장할 위치)는 그대로 둬도 됩니다.</li>
-        <li><span class="btnlike">Clone</span>을 누릅니다.</li>
-        <li>“Git이 없습니다”라는 안내가 나오면 <span class="btnlike">Download and Install</span>(다운로드 및 설치)을 누르고 기다립니다.<span class="only-mac"> 맥에서 “개발자 도구를 설치하겠습니까?” 창이 뜨면 <span class="btnlike">설치</span>를 누릅니다.</span></li>
-        <li>“이 프로젝트를 신뢰하시겠습니까?” 창이 나오면 <span class="btnlike">Trust Project</span>(신뢰)를 누릅니다.</li>
-      </ol>
-      <div class="ok"><b>완료</b>왼쪽에 <b>ai-office</b> 폴더와 파일 목록이 보이면 성공입니다.</div>
-    </div>
-  </div>
-
-  <div class="card step">
-    <div class="num">4</div>
-    <div>
       <h3>터미널 열기</h3>
-      <ol>
-        <li>IntelliJ 화면 <b>왼쪽 아래</b>의 <b>터미널 아이콘</b>(<code>&gt;_</code> 모양)을 누릅니다.<br>
-          또는 단축키 <span class="only-mac"><kbd>⌥ Option</kbd> + <kbd>F12</kbd></span><span class="only-win"><kbd>Alt</kbd> + <kbd>F12</kbd></span>를 누릅니다.</li>
-        <li>아래쪽에 글자를 입력할 수 있는 창이 열립니다. 이 창을 <b>터미널</b>이라고 부릅니다.</li>
+      <p>AI와 글자로 대화하는 창입니다.</p>
+      <ol class="only-mac">
+        <li><kbd>⌘ Command</kbd> + <kbd>Space</kbd>를 누르고 <b>터미널</b>(Terminal)이라고 입력한 뒤 <kbd>Enter</kbd>를 누릅니다.</li>
+        <li>흰색 또는 검은색 글자 창이 열리면 됩니다.</li>
       </ol>
-      <div class="tip"><b>팁</b>메뉴에서 찾으려면 <b>View(보기) → Tool Windows(도구 창) → Terminal(터미널)</b>입니다.</div>
+      <ol class="only-win">
+        <li>화면 아래 <b>시작</b> 버튼을 누르고 <b>PowerShell</b>이라고 입력합니다.</li>
+        <li><b>Windows PowerShell</b>을 누릅니다. (관리자 권한으로 열 필요는 없습니다.)</li>
+      </ol>
+      <div class="tip"><b>팁</b>IntelliJ·VS Code를 쓰고 있다면 그 안의 터미널을 써도 됩니다(IntelliJ: <span class="only-mac"><kbd>⌥ Option</kbd> + <kbd>F12</kbd></span><span class="only-win"><kbd>Alt</kbd> + <kbd>F12</kbd></span>).</div>
     </div>
   </div>
 
   <div class="card step only-claude">
-    <div class="num">5</div>
+    <div class="num">2</div>
     <div>
       <h3>Claude 설치하기 (복사·붙여넣기 한 번)</h3>
-      <p>아래 한 줄을 <span class="btnlike">복사</span>해서 터미널에 붙여 넣고 <kbd>Enter</kbd>를 누릅니다. 설치가 끝날 때까지 1~2분 기다립니다.</p>
+      <p>아래 한 줄을 <span class="btnlike">복사</span>해서 터미널에 붙여 넣고 <kbd>Enter</kbd>를 누릅니다. 1~2분 기다립니다. Node 같은 다른 프로그램은 필요 없습니다.</p>
       <div class="only-mac">
         <div class="cmd"><code>curl -fsSL https://claude.ai/install.sh | bash</code><button type="button" class="copy">복사</button></div>
         <p>붙여 넣기: <kbd>⌘ Command</kbd> + <kbd>V</kbd></p>
@@ -337,33 +293,44 @@
       <div class="only-win">
         <div class="cmd"><code>irm https://claude.ai/install.ps1 | iex</code><button type="button" class="copy">복사</button></div>
         <p>붙여 넣기: <kbd>Ctrl</kbd> + <kbd>V</kbd> (안 되면 마우스 오른쪽 클릭)</p>
+        <p>“스크립트를 실행할 수 없습니다”라는 빨간 글자가 나오면 아래 줄을 대신 붙여 넣습니다.</p>
+        <div class="cmd"><code>powershell -ExecutionPolicy ByPass -c "irm https://claude.ai/install.ps1 | iex"</code><button type="button" class="copy">복사</button></div>
       </div>
       <ol>
-        <li>설치가 끝나면 터미널 창 위쪽의 <b>＋</b> 버튼을 눌러 <b>새 터미널</b>을 엽니다. (또는 IntelliJ를 껐다 켭니다.)</li>
+        <li>설치가 끝나면 터미널 창을 닫고 <b>새로 엽니다</b>(1단계).</li>
+        <li>설치됐는지 보려면 <code>claude --version</code>을 입력합니다. 버전 숫자가 나오면 성공입니다.</li>
       </ol>
       <div class="tip"><b>팁</b>설치 마지막에 “PATH에 추가하세요”처럼 영어 안내가 나오면, 그 안내 줄을 그대로 복사해 붙여 넣고 <kbd>Enter</kbd>를 누른 뒤 새 터미널을 엽니다.</div>
     </div>
   </div>
 
   <div class="card step only-codex">
-    <div class="num">5</div>
+    <div class="num">2</div>
     <div>
       <h3>Codex 설치하기 (복사·붙여넣기 한 번)</h3>
-      <p>아래 한 줄을 <span class="btnlike">복사</span>해서 터미널에 붙여 넣고 <kbd>Enter</kbd>를 누릅니다. 설치가 끝날 때까지 1~2분 기다립니다.</p>
-      <div class="cmd"><code>npm install -g @openai/codex</code><button type="button" class="copy">복사</button></div>
-      <p class="only-mac">붙여 넣기: <kbd>⌘ Command</kbd> + <kbd>V</kbd></p>
-      <p class="only-win">붙여 넣기: <kbd>Ctrl</kbd> + <kbd>V</kbd> (안 되면 마우스 오른쪽 클릭)</p>
-      <ol>
-        <li>설치가 끝나면 터미널 창 위쪽의 <b>＋</b> 버튼을 눌러 <b>새 터미널</b>을 엽니다. (또는 IntelliJ를 껐다 켭니다.)</li>
-      </ol>
-      <div class="tip only-mac"><b>팁</b>“permission denied” 또는 “EACCES”라는 글자가 나오면 아래 줄을 대신 붙여 넣고, 맥 로그인 비밀번호를 입력한 뒤 <kbd>Enter</kbd>를 누릅니다. 비밀번호는 입력해도 화면에 보이지 않는 것이 정상입니다.
-        <div class="cmd"><code>sudo npm install -g @openai/codex</code><button type="button" class="copy">복사</button></div>
+      <p>아래 한 줄을 <span class="btnlike">복사</span>해서 터미널에 붙여 넣고 <kbd>Enter</kbd>를 누릅니다. 1~2분 기다립니다. Node 같은 다른 프로그램은 필요 없습니다.</p>
+      <div class="only-mac">
+        <div class="cmd"><code>curl -fsSL https://chatgpt.com/codex/install.sh | sh</code><button type="button" class="copy">복사</button></div>
+        <p>붙여 넣기: <kbd>⌘ Command</kbd> + <kbd>V</kbd></p>
       </div>
+      <div class="only-win">
+        <div class="cmd"><code>powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"</code><button type="button" class="copy">복사</button></div>
+        <p>붙여 넣기: <kbd>Ctrl</kbd> + <kbd>V</kbd> (안 되면 마우스 오른쪽 클릭)</p>
+      </div>
+      <ol>
+        <li>설치가 끝나면 터미널 창을 닫고 <b>새로 엽니다</b>(1단계).</li>
+        <li>설치됐는지 보려면 <code>codex --version</code>을 입력합니다. 버전 숫자가 나오면 성공입니다.</li>
+      </ol>
+      <details>
+        <summary>Node가 이미 있어서 npm으로 설치하고 싶다면</summary>
+        <div class="cmd"><code>npm install -g @openai/codex</code><button type="button" class="copy">복사</button></div>
+        <p class="only-mac">“permission denied”·“EACCES”가 나오면 <code>sudo npm install -g @openai/codex</code>로 다시 하고 맥 로그인 비밀번호를 입력합니다(입력해도 화면에 안 보이는 게 정상).</p>
+      </details>
     </div>
   </div>
 
   <div class="card step only-claude">
-    <div class="num">6</div>
+    <div class="num">3</div>
     <div>
       <h3>Claude 실행하고 로그인하기</h3>
       <ol>
@@ -372,7 +339,7 @@
         </li>
         <li>화면 색 고르기가 나오면 방향키로 고르고 <kbd>Enter</kbd>.</li>
         <li>로그인 방법은 <b>Claude 구독 계정(Claude account with subscription)</b>을 고릅니다.</li>
-        <li>브라우저가 열리면 내 Claude 계정으로 로그인하고 <span class="btnlike">승인(Authorize)</span>을 누릅니다. 다시 IntelliJ로 돌아옵니다.</li>
+        <li>브라우저가 열리면 내 Claude 계정으로 로그인하고 <span class="btnlike">승인(Authorize)</span>을 누릅니다. 다시 터미널로 돌아옵니다.</li>
         <li>“이 폴더의 파일을 신뢰하나요?”라고 물으면 <span class="btnlike">Yes, proceed</span>를 고릅니다.</li>
       </ol>
       <div class="ok"><b>완료</b>입력창(<code>&gt;</code>)이 보이면 이제 Claude와 대화할 수 있습니다. 여기서부터는 <b>명령어 대신 한국어로 말하면</b> 됩니다.</div>
@@ -380,7 +347,7 @@
   </div>
 
   <div class="card step only-codex">
-    <div class="num">6</div>
+    <div class="num">3</div>
     <div>
       <h3>Codex 실행하고 로그인하기</h3>
       <ol>
@@ -388,14 +355,53 @@
           <div class="cmd"><code>codex</code><button type="button" class="copy">복사</button></div>
         </li>
         <li>로그인 방법은 <b>ChatGPT로 로그인(Sign in with ChatGPT)</b>을 고릅니다.</li>
-        <li>브라우저가 열리면 내 ChatGPT 계정으로 로그인하고 허용합니다. 다시 IntelliJ로 돌아옵니다.</li>
+        <li>브라우저가 열리면 내 ChatGPT 계정으로 로그인하고 허용합니다. 다시 터미널로 돌아옵니다.</li>
         <li>“이 폴더를 신뢰하나요?”처럼 물으면 <b>Yes</b>(신뢰)를 고릅니다.</li>
       </ol>
       <div class="ok"><b>완료</b>입력창이 보이면 이제 Codex와 대화할 수 있습니다. 여기서부터는 <b>명령어 대신 한국어로 말하면</b> 됩니다.</div>
     </div>
   </div>
 
-  <div class="tip"><b>둘 다 쓰고 싶다면</b>위쪽 <b>쓸 AI</b>를 바꿔 5~6단계를 한 번 더 하면 됩니다. 또는 먼저 설치한 AI에게 <b>“Codex도 설치해줘”</b>(또는 “Claude도 설치해줘”)라고 부탁합니다. 로그인은 브라우저 창이 뜨면 직접 해 주세요.</div>
+  <div class="card step">
+    <div class="num">4</div>
+    <div>
+      <h3>AI에게 설치를 맡기기</h3>
+      <p>AI 입력창에 아래 문장을 그대로 보냅니다.</p>
+      <div class="say">https://github.com/JISANGHYEOK-0901/ai-office 를 내 홈 폴더에 받아서, README와 AGENTS.md 안내대로 AI Office 쓸 수 있게 환경설정하고 서버 켜줘</div>
+      <ul>
+        <li>AI가 프로그램 받기(깃 클론), Node 확인·설치, 필요한 부품 설치, 브라우저 업무용 Chrome 준비, 설치 점검, 서버 켜기까지 이어서 합니다. 몇 분 걸릴 수 있습니다.</li>
+        <li>중간에 <b>“이 작업을 실행해도 될까요?”</b>(Claude: Do you want to proceed? / Codex: Allow command?)라고 물으면, 설명을 읽고 <b>Yes</b>를 고릅니다.</li>
+        <li><b>이것만은 직접 합니다:</b> <span class="only-mac">“개발자 도구를 설치하겠습니까?” 창이 뜨면 <span class="btnlike">설치</span>를 누르고, 맥 비밀번호를 물으면 직접 입력합니다(입력해도 화면에 안 보이는 게 정상).</span><span class="only-win">“이 앱이 디바이스를 변경하도록 허용하시겠어요?” 창이 뜨면 <span class="btnlike">예</span>를 누릅니다.</span> AI는 비밀번호를 대신 넣을 수 없습니다.</li>
+      </ul>
+      <div class="ok"><b>완료</b>브라우저에 AI Office 대시보드(http://127.0.0.1:4777)가 열리면 설치가 끝났습니다.</div>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">5</div>
+    <div>
+      <h3>다음부터는 AI Office 폴더에서 시작하기</h3>
+      <p>AI가 AI Office 사용 규칙을 읽도록, 다음부터는 터미널에서 AI Office 폴더로 들어간 뒤 AI를 실행합니다.</p>
+      <div class="cmd"><code>cd ~/ai-office</code><button type="button" class="copy">복사</button></div>
+      <div class="cmd only-claude"><code>claude</code><button type="button" class="copy">복사</button></div>
+      <div class="cmd only-codex"><code>codex</code><button type="button" class="copy">복사</button></div>
+      <p>지금 대화 중인 AI에게 <b>“AI Office 폴더에서 다시 시작하는 방법 알려줘”</b>라고 물어도 됩니다. 다른 곳에 받았다면 그 폴더로 <code>cd</code> 합니다(예: IntelliJ로 받았으면 <code>~/IdeaProjects/ai-office</code>).</p>
+    </div>
+  </div>
+
+  <div class="tip"><b>둘 다 쓰고 싶다면</b>위쪽 <b>쓸 AI</b>를 바꿔 2~3단계를 한 번 더 하면 됩니다. 또는 먼저 설치한 AI에게 <b>“Codex도 설치해줘”</b>(또는 “Claude도 설치해줘”)라고 부탁합니다. 로그인은 브라우저 창이 뜨면 직접 해 주세요.</div>
+
+  <details class="card">
+    <summary><b>AI 없이 직접 설치하고 싶을 때 (IntelliJ로 받기)</b></summary>
+    <ol>
+      <li><a href="https://nodejs.org/ko" target="_blank" rel="noopener">nodejs.org</a>에서 초록색 <span class="btnlike">LTS</span> 버튼으로 Node.js를 받아 설치합니다.</li>
+      <li><a href="https://www.jetbrains.com/ko-kr/idea/download/" target="_blank" rel="noopener">IntelliJ IDEA</a> 무료 버전을 받아 설치합니다.<span class="only-mac"> 맥은 칩(Apple Silicon/Intel)에 맞는 파일을 고릅니다(사과 메뉴 → 이 Mac에 관하여).</span></li>
+      <li>IntelliJ 첫 화면에서 <span class="btnlike">Clone Repository</span>(또는 Get from VCS)를 누르고 URL에 아래 주소를 넣은 뒤 <span class="btnlike">Clone</span>. “Git이 없습니다”가 나오면 <span class="btnlike">Download and Install</span>, “프로젝트를 신뢰하시겠습니까?”에는 <span class="btnlike">Trust Project</span>.
+        <div class="cmd"><code>https://github.com/JISANGHYEOK-0901/ai-office.git</code><button type="button" class="copy">복사</button></div>
+      </li>
+      <li>IntelliJ 왼쪽 아래 터미널 아이콘(<code>&gt;_</code>)으로 터미널을 열고 2~3단계(AI 설치·로그인)를 한 뒤 <a href="#start">4. 서버 켜기</a>로 넘어갑니다.</li>
+    </ol>
+  </details>
 </section>
 
 <section class="part" id="start">
@@ -409,7 +415,7 @@
       <li>중간에 <b>“이 작업을 실행해도 될까요?”</b>(Claude: Do you want to proceed? / Codex: Allow command?)라고 물으면, 설명을 읽고 <b>Yes</b>를 고릅니다.</li>
       <li>끝나면 브라우저에 대시보드가 열립니다. 직접 열려면 주소창에 <b>http://127.0.0.1:4777</b> 을 입력합니다.</li>
     </ul>
-    <div class="tip"><b>알아 두기</b>서버는 한 번 켜면 <b>IntelliJ나 터미널 창을 닫아도 계속 켜져 있습니다.</b> 다 쓰면 AI에게 <b>“서버 꺼줘”</b>라고 말해 끕니다. 컴퓨터를 껐다 켜면 서버도 꺼지니 다시 “서버 켜줘”라고 하면 됩니다.</div>
+    <div class="tip"><b>알아 두기</b>서버는 한 번 켜면 <b>터미널 창을 닫아도 계속 켜져 있습니다.</b> 다 쓰면 AI에게 <b>“서버 꺼줘”</b>라고 말해 끕니다. 컴퓨터를 껐다 켜면 서버도 꺼지니 다시 “서버 켜줘”라고 하면 됩니다.</div>
   </div>
   <div class="grid2">
     <div class="card">
@@ -430,7 +436,7 @@
   <div class="grid2">
     <div class="card">
       <h3 style="margin-top:0">터미널의 AI <span class="only-claude">(Claude)</span><span class="only-codex">(Codex)</span></h3>
-      <p style="margin:4px 0">IntelliJ·VS Code에서 AI Office 폴더를 열고 터미널에서 실행한 AI입니다. <b>여기에 다 말하면 됩니다.</b></p>
+      <p style="margin:4px 0">AI Office 폴더에서 터미널로 실행한 AI입니다(<a href="#install">3-5단계</a>). <b>여기에 다 말하면 됩니다.</b></p>
       <ul>
         <li>바로 하는 일: 서버 켜기·끄기, 설치 점검, 부서·직원 세팅, 화면·기능 고치기, 사용법 질문</li>
         <li>넘기는 일: 실제 업무를 비서실장에게 넣고, 비서실장 질문을 나에게 보여 주고, 내 답과 결과를 전해 줍니다</li>
@@ -549,7 +555,7 @@
 
 <section class="part" id="setup">
   <h2>6. 사용 전 세팅: AI에게 맡기기</h2>
-  <p class="sub">부서와 직원을 하나하나 만들지 않아도 됩니다. IntelliJ 터미널의 Claude 또는 Codex에게 내 업무를 설명하면 알맞게 만들어 줍니다.</p>
+  <p class="sub">부서와 직원을 하나하나 만들지 않아도 됩니다. 터미널의 Claude 또는 Codex에게 내 업무를 설명하면 알맞게 만들어 줍니다.</p>
   <div class="card">
     <h3 style="margin-top:0">이렇게 말해 보세요</h3>
     <div class="say">블로그 콘텐츠 마케팅 업무를 맡길 건데 알맞게 부서와 팀원들을 세팅해줘</div>
@@ -796,7 +802,7 @@
     </div>
   </div>
   <div class="card">
-    <p>IntelliJ 터미널의 Claude 또는 Codex에게 이렇게 말해 보세요.</p>
+    <p>터미널의 Claude 또는 Codex에게 이렇게 말해 보세요.</p>
     <div class="say">대시보드 실시간 피드 글씨를 더 크게 바꿔줘</div>
     <div class="say">완료된 업무를 엑셀 파일로 내려받는 버튼을 만들어줘</div>
     <div class="say">방금 고친 거 잘 되는지 확인하고 서버 다시 켜줘</div>
@@ -813,8 +819,8 @@
   <h2>10. 매일 쓰는 순서</h2>
   <div class="card">
     <div class="flow">
-      <span class="box">IntelliJ 열기</span><span class="arrow">→</span>
       <span class="box">터미널 열기</span><span class="arrow">→</span>
+      <span class="box"><code>cd ~/ai-office</code></span><span class="arrow">→</span>
       <span class="box"><code class="only-claude">claude</code><code class="only-codex">codex</code> 입력</span><span class="arrow">→</span>
       <span class="box">“서버 켜줘”</span><span class="arrow">→</span>
       <span class="box">터미널 AI에게 업무 말하기</span><span class="arrow">→</span>
@@ -847,7 +853,7 @@
   <div class="card">
     <details>
       <summary><code>claude</code>나 <code>codex</code>를 입력했더니 “찾을 수 없다(command not found)”고 나와요</summary>
-      <p>터미널 창 위의 <b>＋</b>로 새 터미널을 열거나 IntelliJ를 껐다 켠 뒤 다시 입력합니다. 그래도 안 되면 <a href="#install">3-5단계</a>의 설치 줄을 한 번 더 붙여 넣습니다.</p>
+      <p>터미널 창을 닫고 새로 연 뒤 다시 입력합니다. 그래도 안 되면 <a href="#install">3-2단계</a>의 설치 줄을 한 번 더 붙여 넣습니다.</p>
     </details>
     <details>
       <summary>AI가 자꾸 “실행해도 될까요?”라고 물어봐요</summary>

@@ -301,7 +301,7 @@ test/                     node:test
 ### 체크포인트와 대표 결정
 
 - 체크포인트 v2(`.office/orchestrations/<rootId>.json`)는 최초 요청과 질문·답변 이력을 가림 처리해 비공개로 보존한다. 공개 상태·이벤트에는 요약만 싣는다.
-- 대표 결정 질문의 phase: plan, account, stage, progress, review, budget, web-confirm, mail-more, publish, deliver.
+- 대표 결정 질문의 phase: plan, account, stage, progress, review, budget, web-confirm, mail-more, attachment, publish, deliver.
 - 질문하면 업무는 blocked, 실행은 needsReply가 된다. 답장은 같은 계획의 대기 단계부터 이어 간다. 계획 전 질문도 최초 요청을 먼저 저장한다.
 - 서버를 다시 시작하면 진행 중이던 업무는 끊김으로 표시하고 "이어서 재개"로 체크포인트를 재사용한다. 승인된 업무의 산출물은 재개로 덮어쓰지 않는다.
 
@@ -337,11 +337,17 @@ test/                     node:test
 
 ### 외부 작업 계획(publications)
 
-- `plan.publications[] = {id, action, service, connection, agent, target, recipients, subject, content, instructions, files}`. 모든 필드가 필수다.
+- `plan.publications[] = {id, action, service, connection, agent, target, recipients, subject, content, instructions, files, attachments}`. 모든 필드가 필수다(예전 계획의 `attachments` 누락은 `[]`로 본다).
 - action: `mail` | `post` | `comment` | `web`. 대표가 지시한 동작만 넣는다. "초안만"이면 넣지 않는다.
 - mail/post/comment: service는 `naverworks_mail`/`naver_blog`/`naver_cafe`/`daum_cafe`/`tistory`/`brunch`. content는 검토할 본문 단계 id. `instructions:''`, `files:[]`.
   - 메일 대상 주소가 비면 서비스 기본 주소로 채운다.
   - 조사 후 정해지는 메일: 본문 단계가 `{messages:[{recipients, subject, body}], skipped:[사유]}`를 쓴다. 수신자별로 개별 발송한다. 주소를 확인하지 못한 업체는 skipped다.
+  - 메일 첨부(`attachments`): 대표가 지시문에 적은 파일 이름·경로를 글자 그대로 적는다(10개 이하, 메일만). 비서실장·직원은 파일을 찾거나 열지 않고, 실행기(`lib/attachments.mjs`)가 찾아 모든 수신자 메일에 같은 파일로 붙인다.
+    - 대표 원문 근거: 이름이 최초 지시·답장에 실제로 있어야 한다(`evidenceIn`). 없으면 묻는다.
+    - 찾는 곳: 대표가 경로를 적었으면 그 파일(공백 든 경로 포함). 이름만 적었으면 작업 공간(보관함 포함)·`~/Downloads`·`~/Documents`·`~/Desktop`에서 깊이 6·항목 2만 개까지. 숨김 항목·심볼릭 링크·비밀 위치는 들어가지 않는다. 확장자 없이 적으면 확장자를 뺀 이름으로, 한글 이름은 NFC로 맞춘다. macOS 개인정보 보호로 막힌 폴더는 건너뛴다.
+    - 차단: `secretLocations`(보관함/계정.env, ~/.config/ai-office/private), 숨김 폴더·파일, `.env`·인증서·키·SSH 키 파일, 50MB 초과(`MAX_ATTACHMENT_BYTES`, 일반 웹사이트 첨부와 같은 공통 상한. 네이버웍스 한도는 회사 관리자 설정이라 고정값을 두지 않음). 대표가 지정해도 첨부하지 않는다.
+    - 못 찾거나 같은 이름이 여러 개거나 차단되면 `phase: attachment`로 묻는다. 후보는 경로·크기·수정일과 번호로 보여 주고, 답장의 "N번"(여럿이면 "이름은 N번")이나 전체 경로로 확정한다. 확정한 파일은 체크포인트(`attachmentChoices`)에 남긴다.
+    - 계획 직후(조사·작성 전)와 검토 통과 후 발송 전에 확인한다. 실행 전 확인 목록에 `(첨부: 파일명)`을 보여 준다.
   - 여러 게시글: `{posts:[{subject, body, target}], skipped:[사유]}`. 글마다 따로 게시한다. `posts[].target`은 같은 사이트(https, 같은 origin)의 게시판 주소일 때만 쓰고, 아니면 `publication.target`에 올린다.
 - web: `{service:'web', connection, target, instructions, files:[단계 id]}`. subject·content는 빈 문자열, recipients는 `[]`. 지침 4000자 이하, 첨부 20개 이하(계획 단계 산출물만).
 - 단순 게시 업무(글·댓글 하나)는 조사·작성·게시를 같은 직원 한 명에게 맡긴다.
@@ -368,6 +374,7 @@ test/                     node:test
 - 금지 동작(모든 작업): 삭제·탈퇴·로그아웃·결제·송금·이체·비밀번호 버튼.
 - 되돌리기 어려운 버튼(발송·발행·게시·등록·작성 완료, web은 업로드·저장·제출·적용·반영·생성·추가 포함)은 `browser_click` 대신 `browser_submit`으로만 누르고 누를 때마다 `committing`을 기록한다. '게시판 선택'은 최종 버튼이 아니다.
 - web 작업 전용: `browser_type`(자유 입력, 파일 칸 제외), `browser_attach`(지정 첨부 파일만. 숨긴 파일 칸은 "파일 선택" 버튼 클릭으로 열린 선택 창에 넣고, 5초 안에 창이 없으면 거부). web 작업에서 `browser_fill_content`는 거부한다.
+- 첨부를 지정한 메일: `browser_attach`만 추가로 쓴다(지정 파일만, 발송 버튼을 누른 뒤에는 거부). `browser_submit`은 모든 파일을 첨부하고 화면의 첨부 목록에 파일 이름(또는 앞 12자)이 보일 때만 누른다. 실행 직전에 비밀 위치·크기·이름 중복을 다시 확인하고, 첨부 내용 해시를 발송 기록 `contentHash`에 넣는다(첨부 없는 메일의 기록 형식은 그대로).
 - `browser_text`: 허용 도메인 프레임(about:blank 편집기 프레임 포함)의 보이는 글자를 40000자씩 `offset`으로 이어 읽는다.
 - `browser_scroll`: ref를 주면 그 요소 위에서, 없으면 화면 가운데에서 굴린다(보이는 행만 그리는 표를 끝까지 읽기 위해).
 - 주소·프레임·링크·탭은 연결의 허용 도메인으로 검사한다.

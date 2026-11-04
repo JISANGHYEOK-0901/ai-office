@@ -1,5 +1,6 @@
 // Codex 비서실장은 계획·검토만 한다. 배정·재시도·반려 한도·인계는 프로그램이 진행한다.
 import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { loadOrg, writeFileAtomic } from '../lib/org.mjs';
@@ -14,6 +15,7 @@ import { stageResult, outputIssues, HTML_BRIEF } from '../lib/work-result.mjs';
 import { programRoot } from '../lib/paths.mjs';
 import { BUDGET_WARN_RATIO, MAX_MAILS_PER_RUN, MAX_PLAN_REVISIONS, MAX_PROGRESS_CHECKS, externalActionPolicy } from '../lib/guardrails.mjs';
 import { mailKey, preparePublications, splitMailBatch } from '../lib/publications.mjs';
+import { attachmentQuestion, attachmentRef, pickChoices, resolveAttachments } from '../lib/attachments.mjs';
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';
 import { CONNECTION_PROVIDERS, serviceProvider } from '../lib/connections.mjs';
@@ -30,7 +32,7 @@ export function checkpointFile(root, rootId) {
   return join(root, '.office', 'orchestrations', `${rootId}.json`);
 }
 
-export async function orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel = 4, resume = false, onDecision = () => {}, outbound = null, intent = null, judge = null }) {
+export async function orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel = 4, resume = false, onDecision = () => {}, outbound = null, intent = null, judge = null, home = homedir() }) {
   const task = run.task;
   const taskDir = join(root, 'outputs', ...task.split('/'));
   const file = checkpointFile(root, run.rootId);
@@ -79,6 +81,11 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     if (saved.pending?.some((q) => q.phase === 'mail-more')) {
       if (answer.decision === 'decline') state.mailDeclined = true;
       else if (answer.decision === 'approve' || answer.delegated) state.mailAllowance = (state.mailAllowance || 0) + MAX_MAILS_PER_RUN;
+    }
+    // 첨부 파일 확인 답장: 후보 번호("1번")를 고르면 그 파일로 확정한다. 경로를 적은 답장은 원문으로 다시 찾는다
+    if (saved.pending?.some((q) => q.phase === 'attachment')) {
+      state.attachmentChoices = { ...(state.attachmentChoices || {}), ...pickChoices(prompt, state.attachmentAsk) };
+      state.attachmentAsk = {};
     }
     // 예산 확인 답장: "그만"이면 멈추고, 그 밖에는 처음 예산만큼 늘려 이어 간다
     if (saved.pending?.some((q) => q.phase === 'budget')) {
@@ -186,8 +193,9 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       '담당이 없고 관련 부서가 둘 이상이면 needsMeeting:true와 meetingAgents(2~4명). 회의 제안이 주어졌으면 반영하고 needsMeeting:false.',
       '피드백이면 rerunStages에 수정할 단계 id만 넣으세요. 후속 단계는 프로그램이 다시 실행합니다.',
       '부서 팀장에게 배정하면 팀장은 구조화된 delegate 응답으로 같은 부서 직원에게 분담할 수 있습니다. 전달 부서의 필수/권장을 확인하세요.',
-      'plan.publications는 대표가 지시한 외부 작업 배열입니다. 외부 작업이 없으면 []. 각 항목은 {id,action,service,connection,agent,target,recipients,subject,content}입니다.',
+      'plan.publications는 대표가 지시한 외부 작업 배열입니다. 외부 작업이 없으면 []. 각 항목은 {id,action,service,connection,agent,target,recipients,subject,content,instructions,files,attachments}입니다.',
       'action은 mail/post/comment/web입니다. mail/post/comment의 service는 naverworks_mail/naver_blog/naver_cafe/daum_cafe/tistory/brunch이고, content에는 검토할 본문 산출물 단계 id 또는 파일 경로를 씁니다. 메일은 recipients 배열을 채우고, 글은 target에 해당 블로그/게시판/댓글 원문 주소를 지정하세요. 이때 instructions는 빈 문자열, files는 []입니다.',
+      '대표가 메일에 파일을 첨부하라고 했으면 그 메일의 attachments에 대표가 쓴 파일 이름이나 경로를 글자 그대로 적으세요(예: ["제휴제안서.pdf"]). 파일을 직접 찾거나 열지 마세요. 실행기가 작업 공간(보관함 포함)·다운로드·문서·데스크톱에서 찾아 모든 수신자 메일에 같은 파일로 붙이고, 못 찾거나 같은 이름이 여러 개면 대표에게 묻습니다. 첨부 지시가 없거나 메일이 아니면 attachments는 []입니다.',
       'web은 연결 계정의 일반 웹사이트(관리자 화면 등)에서 하는 작업입니다. service "web", connection에 연결된 일반 웹사이트 계정 id, target에 시작 화면 주소, instructions에 직원이 그 사이트에서 할 일(대표 지시 그대로 구체적으로), files에 첨부할 단계 id(예: 업로드할 HTML 산출물)를 씁니다. subject·content는 빈 문자열, recipients는 []입니다. 연결된 일반 웹사이트 계정이 없으면 connection을 빈 문자열로 두세요.',
       '글·댓글 하나를 올리는 것처럼 단순한 게시 업무는 조사·작성·게시를 같은 직원 한 명에게 맡기세요(단계마다 직원을 바꾸지 않음). 여러 부서의 전문성이 필요한 업무만 나눕니다.',
       '실제 외부 작업은 산출물 작성과 비서실장 검토를 마친 뒤 실행기가 브라우저로 진행합니다. 로그인 정보는 요청하거나 파일에 적지 마세요. 계정이 없으면 connection은 빈 문자열로 두고 자료 준비를 먼저 진행합니다. 연결 계정이 여러 개면 사용할 계정을 확인하세요.',
@@ -305,6 +313,27 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       if (!usable(chosen)) { needs.push(`${stage.target} 조회용 계정`); replan ||= !chosen; }
     }
     if (needs.length) return ask([{ phase: 'account', replan, question: `이 업무에는 다음 계정이 필요합니다: ${[...new Set(needs)].join(', ')}. 보관함/계정.env에 사이트 주소·아이디·비밀번호를 적거나 상단 '계정 연결'에서 계정을 추가한 뒤, '로그인 창 열기'로 처음 한 번 직접 로그인하고 "이어서 재개"라고 답해 주세요. 로그인을 마치면 창은 자동으로 닫힙니다.` }]);
+  }
+  // 메일 첨부: 대표가 지시문에 적은 파일을 서버가 찾는다(AI는 이름만 적음). 못 찾거나 여러 개면 조사·발송 전에 대표에게 묻는다
+  const mailAttachmentRefs = () => [...new Set((plan.publications || []).filter((p) => p.action === 'mail' && allowedActions().includes('mail')).flatMap((p) => (p.attachments || []).map(attachmentRef)).filter(Boolean))];
+  const resolveMailAttachments = () => {
+    const refs = mailAttachmentRefs();
+    if (!refs.length) return null;
+    const result = resolveAttachments(refs, { text: [state.originalRequest, ...state.decisions.map((d) => d.answer)].join('\n'), root, home, chosen: state.attachmentChoices || {} });
+    state.attachmentChoices = { ...(state.attachmentChoices || {}), ...Object.fromEntries(result.files.map((f) => [f.ref, f.path])) };
+    if (!result.problems.length) { persist(); return null; }
+    state.attachmentAsk = Object.fromEntries(result.problems.filter((p) => p.candidates.length).map((p) => [p.ref, p.candidates]));
+    return ask([{ phase: 'attachment', question: attachmentQuestion(result.problems, home) }]);
+  };
+  // 확정하지 못한 첨부가 하나라도 있으면 첨부 없이 보내지 않는다
+  const mailFiles = (publication) => (publication.attachments || []).map(attachmentRef).filter(Boolean).map((ref) => {
+    const path = state.attachmentChoices?.[ref];
+    if (!path) throw new Error(`첨부 파일 "${ref}"을(를) 확정하지 못해 메일을 보내지 않았습니다.`);
+    return { name: basename(path), path };
+  });
+  {
+    const asked = resolveMailAttachments();
+    if (asked) return asked;
   }
   const executeStage = async (stage, reason = '') => {
     const desc = `${reason ? '[반려] ' : ''}${stage.title}`;
@@ -552,6 +581,9 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           && plan.stages.every((s) => fingerprint(s) === state.completed[s.id])) {
         if (typeof review.report !== 'string' || !review.report.trim()) throw new Error('검토 보고서가 비어 있습니다.');
         state.approvedReview = { signature: reviewSignature, review, evidence }; persist();
+        // 계획 수정으로 첨부가 바뀌었을 수 있어 발송 전에 다시 확인한다(확정한 파일은 그대로 쓴다)
+        const attachmentAsked = resolveMailAttachments();
+        if (attachmentAsked) return attachmentAsked;
         // 메일 대량 발송 금지: 20통까지 보내고 남은 메일은 대표에게 다시 확인받는다("끝까지 자동으로" 위임이 있어도 같음)
         const isMail = (job) => job.publication.action === 'mail';
         const wasSent = (job) => isMail(job) && Boolean(state.mailSent[mailKey(job)]);
@@ -576,7 +608,8 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           const kind = { web: '웹사이트 작업', mail: '메일', post: '글', comment: '댓글' };
           const what = confirmJobs.every((job) => job.publication.action === 'web') ? '웹사이트 작업' : '외부 작업';
           return ask([{ phase: 'web-confirm', question: `아래 ${what}을 실행할까요? ("진행" 또는 "하지 마"로 답하세요. 다음부터 확인 없이 하려면 지시에 "끝까지 자동으로"를 적어 주세요.)\n`
-            + confirmJobs.map(({ publication: p, body, files = [] }, i) => `${i + 1}. ${p.action === 'web' ? '' : `${kind[p.action] || p.action} `}[${label(p)}] ${p.recipients?.length ? `받는사람 ${p.recipients.join(', ')}` : p.target}${p.subject ? ` · 제목: ${p.subject}` : ''} — ${body.replace(/\s+/g, ' ').slice(0, 300)}${files.length ? ` (첨부: ${files.map((f) => basename(f)).join(', ')})` : ''}`).join('\n')
+            + confirmJobs.map(({ publication: p, body, files = [] }, i) => { const attached = p.action === 'mail' ? mailFiles(p).map((f) => f.name) : files.map((f) => basename(f));
+              return `${i + 1}. ${p.action === 'web' ? '' : `${kind[p.action] || p.action} `}[${label(p)}] ${p.recipients?.length ? `받는사람 ${p.recipients.join(', ')}` : p.target}${p.subject ? ` · 제목: ${p.subject}` : ''} — ${body.replace(/\s+/g, ' ').slice(0, 300)}${attached.length ? ` (첨부: ${attached.join(', ')})` : ''}`; }).join('\n')
             + (batch.remaining.length ? `\n\n메일은 대량 발송을 막기 위해 한 번에 ${MAX_MAILS_PER_RUN}통까지만 보냅니다. 남은 ${batch.remaining.length}통은 위 메일을 보낸 뒤 다시 묻습니다.` : '') }]);
         }
         // 웹사이트 작업 추정은 넓은 문장 판별이라, 계획에 외부 작업이 없으면 비서실장 계획을 따른다(메일·게시는 확인)
@@ -592,7 +625,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           emit('agent.start', { engine, agent: publication.agent, instance, summary: '검토된 원문의 브라우저 업무를 시작합니다.' });
           try {
             const web = publication.action === 'web';
-            const attachments = files.map((f) => ({ name: basename(f), path: safeOutput(f) }));
+            const attachments = isMail(job) ? mailFiles(publication) : files.map((f) => ({ name: basename(f), path: safeOutput(f) }));
             const result = await outbound.deliver({ scope: run.rootId, publication, body, allowedActions: allowedActions(), instructionKey: instructionKey(), ...policy(), schedule: videoPolicy, signal,
               files: attachments, evidenceDir: join(taskDir, 'evidence'),
               execute: async (browser) => {
@@ -610,11 +643,12 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
                   // 이번 한 건만 알려 준다(여러 수신자 문안이 든 파일 경로를 주면 다른 사람 메일과 헷갈린다)
                   `이번 작업 한 건: ${JSON.stringify({ 종류: publication.action, 대상: publication.target, ...(publication.recipients?.length ? { 받는사람: publication.recipients } : {}), ...(publication.subject ? { 제목: publication.subject } : {}) })}`,
                   `본문 앞부분(확인용): ${JSON.stringify(String(body).slice(0, 80))}… 본문 전체는 browser_fill_content(field:"body")가 그대로 넣으니 파일을 읽거나 직접 타이핑하지 마세요.`,
+                  attachments.length ? `첨부할 파일(browser_attach의 file 값): ${attachments.map((a) => a.name).join(', ')}. 받는사람·제목·본문을 넣은 뒤 파일 첨부 칸 또는 "파일 첨부"·"내 PC" 같은 버튼의 ref로 browser_attach를 파일마다 호출하고, 화면의 첨부 목록에 파일 이름이 보이는지 확인한 다음 보내세요. 첨부가 빠지면 browser_submit이 거부합니다. 첨부 한도 초과 등으로 붙이지 못하면 보내지 말고 needs_decision으로 보고하세요.` : '',
                   'office_browser 도구만 사용해 사이트의 화면을 읽고 조작하세요. 쿠키·비밀번호·로그인 코드·개인 프로필 파일을 읽거나 출력하지 않습니다.',
                   'browser_snapshot으로 칸을 확인하고 각 칸의 ref에 맞는 field로 browser_fill_content를 부르세요: 받는사람 칸 → recipients, 제목 칸 → subject, 본문 편집기(여러 줄) → body. 도구가 칸 종류가 맞지 않으면 거부하니 그때는 화면을 다시 읽고 맞는 칸을 고르세요. 마지막 발송·발행·등록은 browser_submit으로만 실행합니다.',
                   '전송 완료 또는 실제 게시된 본문을 확인해 browser_finish로 증표를 만든 뒤 status:done JSON으로 보고하세요. 로그인/추가 인증/쓰기 권한이 필요하면 status:needs_decision과 질문을 반환하세요.',
                   '이메일·글·댓글 작성 외의 삭제·결제·계정 변경은 하지 않습니다. 결과가 불확실한 전송을 다시 누르지 마세요.',
-                ].join('\n\n') });
+                ].filter(Boolean).join('\n\n') });
                 const result = stageResult(text);
                 if (result.status === 'needs_decision') throw new Error(result.question || '외부 작업에 필요한 계정·권한을 확인해 주세요.');
                 return text;

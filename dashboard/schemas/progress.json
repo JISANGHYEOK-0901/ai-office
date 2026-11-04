@@ -179,6 +179,12 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [
@@ -192,7 +198,8 @@
               "action",
               "recipients",
               "instructions",
-              "files"
+              "files",
+              "attachments"
             ],
             "additionalProperties": false
           }

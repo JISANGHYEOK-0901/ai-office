@@ -490,7 +490,7 @@ AI 판단이 넓어져도 모든 경로가 같은 규칙을 거친다. 규칙 �
 - 일시정지(`runner.pause`): 단계 실행이 아닌 진행·대기 실행 전체를 멈춘다. 오케스트레이션은 `abort('user-pause')`, 대기열은 취소. `paused:true`이고 `userStopped`는 남기지 않는다. 지속 감시는 `desired:false, status:'paused'`.
 - 정리 노트: 업무 폴더 `pause-note.md`. 계획·완료 단계·대표 결정 대기, 감시 조회·발견·보고 수, 파일 목록(40개), 재개 방법. AI를 부르지 않는다. 일시정지 직전에 끝난 업무는 완료 결과를 유지한다.
 - 끊김: 서버 종료와 재시작 때 실행 중이던 비단계 실행에 `interrupted:true`. 답장으로 이어가면 지운다.
-- 일괄 재개(`runner.resumeAll`): 대화(rootId)별 마지막 비단계 실행 중 paused 또는 interrupted이고 stopped/failed이며 userStopped가 아니고 업무가 done이 아닌 것. 오케스트레이션은 "이어서 재개"로 체크포인트를 재사용한다. 이어갈 대화가 없으면 건너뛰고 사유를 돌려준다.
+- 일괄 재개(`runner.resumeAll`): 대화(rootId)별 마지막 비단계 실행 중 paused 또는 interrupted이고 stopped/failed이며 userStopped가 아니고 업무가 done이 아닌 것. 오케스트레이션은 "이어서 재개"로 체크포인트를 재사용한다. 이어갈 대화가 없으면 건너뛰고 사유를 돌려준다. 시작한 지 24시간이 넘은 interrupted 실행은 일시정지하지 않은 한 자동으로 재개하지 않고 사유를 돌려주며, 해당 대화의 답장으로 이어갈 수 있다.
 - 응답: `{pauseRequested, paused:[…]}`, `{resumeRequested, resumed:[…], skipped:[{reason}]}`.
 - 내역 정리(`DELETE /api/history`): 끝난 대화·로그·체크포인트를 지우고 완료 업무는 `historyArchivedAt`으로 목록에서 뺀다. 진행·결정 대기·재개 예정 감시와 연결된 대화, 최종산출물·원본·계정·발송 증표·산출물 조회용 메타데이터는 보존한다. 이벤트는 cutoff 시각 기준으로 가린다.
 

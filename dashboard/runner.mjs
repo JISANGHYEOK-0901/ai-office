@@ -20,6 +20,7 @@ import { looksLikeQuestion } from '../lib/work-result.mjs';
 import { RESUME_PROMPT, writePauseNote } from '../lib/pause.mjs';
 import { addTask, updateTask, loadTasks } from '../lib/tasks.mjs';
 import { isTaskId } from '../lib/plan.mjs';
+import { AUTO_RESUME_MAX_AGE_MS } from '../lib/guardrails.mjs';
 import { appendEvent, normalizeCodexItem, redact } from '../lib/events.mjs';
 import { buildPrompt, parseVerdict } from '../scripts/codex-review.mjs';
 import { AGENT_ID_PATTERN, RUN_MODELS, TOOL_PATTERN, codexModelArgs, killTree, resolveCommand, spawnCli, writePrompt } from '../lib/cli.mjs';
@@ -859,6 +860,11 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
     for (const run of latest.values()) {
       if (!(run.paused || run.interrupted) || run.userStopped || !['stopped', 'failed'].includes(run.status)) continue;
       if (run.task && tasks.find((t) => t.id === run.task)?.status === 'done') continue;
+      // 끊긴 시각은 다음 서버 시작 때 기록될 수 있어(노트북 종료 등) 실행을 시작한 시각으로 판단한다
+      if (!run.paused && Date.now() - Date.parse(run.startedAt || run.createdAt) > AUTO_RESUME_MAX_AGE_MS) {
+        skipped.push({ id: run.id, request: run.request, reason: `하루 넘게 멈춘 업무는 자동으로 이어가지 않습니다. 필요하면 그 업무 대화에 답장해 주세요(${String(run.request || '').slice(0, 30)})` });
+        continue;
+      }
       if (!publicRun(run).canReply) {
         skipped.push({ id: run.id, request: run.request, reason: '대기 중에 멈춰 이어갈 대화가 없습니다. 같은 지시를 다시 내려 주세요.' });
         continue;

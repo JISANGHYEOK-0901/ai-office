@@ -301,7 +301,7 @@ test/                     node:test
 ### 체크포인트와 대표 결정
 
 - 체크포인트 v2(`.office/orchestrations/<rootId>.json`)는 최초 요청과 질문·답변 이력을 가림 처리해 비공개로 보존한다. 공개 상태·이벤트에는 요약만 싣는다.
-- 대표 결정 질문의 phase: plan, account, stage, progress, review, budget, web-confirm, publish, deliver.
+- 대표 결정 질문의 phase: plan, account, stage, progress, review, budget, web-confirm, mail-more, publish, deliver.
 - 질문하면 업무는 blocked, 실행은 needsReply가 된다. 답장은 같은 계획의 대기 단계부터 이어 간다. 계획 전 질문도 최초 요청을 먼저 저장한다.
 - 서버를 다시 시작하면 진행 중이던 업무는 끊김으로 표시하고 "이어서 재개"로 체크포인트를 재사용한다. 승인된 업무의 산출물은 재개로 덮어쓰지 않는다.
 
@@ -346,6 +346,11 @@ test/                     node:test
 - web: `{service:'web', connection, target, instructions, files:[단계 id]}`. subject·content는 빈 문자열, recipients는 `[]`. 지침 4000자 이하, 첨부 20개 이하(계획 단계 산출물만).
 - 단순 게시 업무(글·댓글 하나)는 조사·작성·게시를 같은 직원 한 명에게 맡긴다.
 - 형식 검사(`preparePublications`): 본문이 있는지, 메일 수신자 형식, 문안 500개 이하, 게시 후보가 없으면 skipped 사유. 오류는 검토 반려로 처리한다.
+- 메일 20통 제한(`MAX_MAILS_PER_RUN`, `splitMailBatch`): 대량 발송을 막기 위해 메일은 수신자 기준 20통까지만 보낸다. 여러 문안·publication을 합쳐 센다. 위임("끝까지 자동으로")이 있어도 같다.
+  - 남은 메일이 있으면 앞 20통을 보낸 뒤 `phase: mail-more`로 "남은 메일 발송할까요?"를 묻는다. 질문에는 다음에 보낼 20통의 받는사람·제목을 보여 준다. approve면 20통을 더 허용하고, decline이면 남은 메일을 보고서 "확인 필요"에 "대표 결정으로 보내지 않음"으로 남기고 완료한다.
+  - 보낸 메일은 수신자·제목·본문 해시(`mailKey`)로 체크포인트(`mailSent`)에 기억한다. 이어 보낼 때 다시 보내지 않고 앞선 결과 줄만 보고한다. 문안은 다시 만들지 않는다.
+  - 예약 실행·지속 감시 업무는 묻지 않고 그 회차에 20통만 보낸다. 남은 메일은 "메일 한도 20통 초과로 이번 회차에 보내지 않음"으로 보고한다.
+  - 첫 실행 전 확인(web-confirm)에는 이번에 보낼 20통만 보여 주고 남은 통수를 안내한다.
 
 ### 위임과 실행 전 확인
 

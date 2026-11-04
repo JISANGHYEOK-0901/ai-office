@@ -12,8 +12,8 @@ import { codexRole, loadSettings } from '../lib/settings.mjs';
 import { parseVerdict } from '../scripts/codex-review.mjs';
 import { stageResult, outputIssues, HTML_BRIEF } from '../lib/work-result.mjs';
 import { programRoot } from '../lib/paths.mjs';
-import { BUDGET_WARN_RATIO, MAX_PLAN_REVISIONS, MAX_PROGRESS_CHECKS, externalActionPolicy } from '../lib/guardrails.mjs';
-import { preparePublications } from '../lib/publications.mjs';
+import { BUDGET_WARN_RATIO, MAX_MAILS_PER_RUN, MAX_PLAN_REVISIONS, MAX_PROGRESS_CHECKS, externalActionPolicy } from '../lib/guardrails.mjs';
+import { mailKey, preparePublications, splitMailBatch } from '../lib/publications.mjs';
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';
 import { CONNECTION_PROVIDERS, serviceProvider } from '../lib/connections.mjs';
@@ -55,7 +55,9 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     rejects: saved.delivered ? 0 : saved.rejects || 0,
     // 진행 점검·계획 수정 횟수는 대표 피드백으로 새로 시작할 때 다시 센다. 수정 이력은 남긴다
     progressChecks: saved.delivered ? 0 : saved.progressChecks || 0, revisionCount: saved.delivered ? 0 : saved.revisionCount || 0,
-    revisions: [...(saved.revisions || [])] };
+    revisions: [...(saved.revisions || [])],
+    // 메일 20통 단위 발송: 보낸 메일(내용 기준)은 대화 내내 기억하고, 허용 통수·남은 메일 거절은 대표 피드백으로 새로 시작할 때 다시 정한다
+    mailSent: { ...(saved.mailSent || {}) }, ...(saved.delivered ? { mailAllowance: null, mailDeclined: false } : {}) };
   // 업무 예산(guardrails): AI 호출 수·작업 시간. 대표 피드백으로 새로 시작하면 다시 센다. 답장을 기다린 시간은 세지 않는다
   const unattended = Boolean(run.schedule || run.monitorId);
   if (!saved.budget || saved.delivered) {
@@ -73,6 +75,11 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     answer = await judgeAnswer(prompt, saved.pending || [], { judge });
     if (saved.pending?.some((q) => q.phase === 'web-confirm')) state.webDecision = answer.decision === 'decline' ? 'declined'
       : answer.decision === 'approve' || answer.delegated ? 'approved' : state.webDecision;
+    // 남은 메일 확인 답장: "진행"이면 다음 20통을 허용하고, "하지 마"면 남은 메일은 보내지 않고 보고한다
+    if (saved.pending?.some((q) => q.phase === 'mail-more')) {
+      if (answer.decision === 'decline') state.mailDeclined = true;
+      else if (answer.decision === 'approve' || answer.delegated) state.mailAllowance = (state.mailAllowance || 0) + MAX_MAILS_PER_RUN;
+    }
     // 예산 확인 답장: "그만"이면 멈추고, 그 밖에는 처음 예산만큼 늘려 이어 간다
     if (saved.pending?.some((q) => q.phase === 'budget')) {
       if (answer.decision === 'decline') state.budgetStop = true;
@@ -184,7 +191,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       'web은 연결 계정의 일반 웹사이트(관리자 화면 등)에서 하는 작업입니다. service "web", connection에 연결된 일반 웹사이트 계정 id, target에 시작 화면 주소, instructions에 직원이 그 사이트에서 할 일(대표 지시 그대로 구체적으로), files에 첨부할 단계 id(예: 업로드할 HTML 산출물)를 씁니다. subject·content는 빈 문자열, recipients는 []입니다. 연결된 일반 웹사이트 계정이 없으면 connection을 빈 문자열로 두세요.',
       '글·댓글 하나를 올리는 것처럼 단순한 게시 업무는 조사·작성·게시를 같은 직원 한 명에게 맡기세요(단계마다 직원을 바꾸지 않음). 여러 부서의 전문성이 필요한 업무만 나눕니다.',
       '실제 외부 작업은 산출물 작성과 비서실장 검토를 마친 뒤 실행기가 브라우저로 진행합니다. 로그인 정보는 요청하거나 파일에 적지 마세요. 계정이 없으면 connection은 빈 문자열로 두고 자료 준비를 먼저 진행합니다. 연결 계정이 여러 개면 사용할 계정을 확인하세요.',
-      '제휴업체 조사 후 주소를 알아내는 메일 업무는 조사 단계 다음에 개인별 발송 문안 JSON 단계를 두세요. {messages:[{recipients:["회사 메일"],subject:"제목",body:"양식을 채운 본문"}],skipped:["연락처 미확인 업체·이유"]}를 작성하고 publication.content에 그 단계 id, recipients에는 []를 씁니다. 검토 후 실행기가 문안별로 자동 발송합니다. 주소·출처를 확인하지 못한 업체에는 보내지 않습니다.',
+      `제휴업체 조사 후 주소를 알아내는 메일 업무는 조사 단계 다음에 개인별 발송 문안 JSON 단계를 두세요. {messages:[{recipients:["회사 메일"],subject:"제목",body:"양식을 채운 본문"}],skipped:["연락처 미확인 업체·이유"]}를 작성하고 publication.content에 그 단계 id, recipients에는 []를 씁니다. 검토 후 실행기가 문안별로 발송합니다. 대량 발송을 막기 위해 메일은 한 번에 ${MAX_MAILS_PER_RUN}통까지만 보내고 남은 메일은 대표에게 다시 확인받아 이어 보내므로, messages에는 확인한 대상을 모두 적으세요. 주소·출처를 확인하지 못한 업체에는 보내지 않습니다.`,
       '여러 게시글은 검토할 본문 JSON 단계에 {posts:[{subject,body,target}],skipped:[사유]}를 작성하고 publication.content에 그 단계 id를 지정하세요. 실행기가 글마다 별도로 게시합니다. 올릴 게시판이 앞 단계(사이트 조회 등)에서 정해지면 그 게시판 주소(대표가 준 주소와 같은 사이트)를 target에 넣게 하세요. 비우면 publication.target에 올립니다. 유튜브 링크의 영상 ID는 작업 공간 공통 이력과 대조해 재게시를 차단합니다.',
       `대표가 허용한 외부 작업: ${JSON.stringify(allowedActions())}. 초안만 요청한 업무를 외부에 게시하지 마세요.`,
       `연결된 계정: ${JSON.stringify(outbound?.connections() || [])}`,
@@ -545,12 +552,19 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           && plan.stages.every((s) => fingerprint(s) === state.completed[s.id])) {
         if (typeof review.report !== 'string' || !review.report.trim()) throw new Error('검토 보고서가 비어 있습니다.');
         state.approvedReview = { signature: reviewSignature, review, evidence }; persist();
+        // 메일 대량 발송 금지: 20통까지 보내고 남은 메일은 대표에게 다시 확인받는다("끝까지 자동으로" 위임이 있어도 같음)
+        const isMail = (job) => job.publication.action === 'mail';
+        const wasSent = (job) => isMail(job) && Boolean(state.mailSent[mailKey(job)]);
+        const sentMails = () => prepared.jobs.filter(wasSent).length;
+        if (state.mailAllowance == null) state.mailAllowance = sentMails() + MAX_MAILS_PER_RUN;
+        const batch = splitMailBatch(prepared.jobs, { sent: Object.keys(state.mailSent), allowance: state.mailAllowance });
+        const mailLine = ({ publication: p }) => `받는사람 ${p.recipients.join(', ')} · 제목: ${p.subject}`;
         const publications = [];
         let posted = 0;
         // 위임이 없으면 외부 작업(웹사이트·메일·글·댓글)을 실행 전에 한 번에 묶어 확인받는다.
         // 대표가 미리 등록한 예약·상시 감시 업무의 메일·글·댓글은 등록이 곧 지시이므로 묻지 않는다(웹사이트 작업은 기존대로 확인)
         const needsConfirm = (job) => job.publication.action === 'web' || !unattended;
-        const confirmJobs = prepared.jobs.filter(needsConfirm);
+        const confirmJobs = batch.run.filter((job) => needsConfirm(job) && !wasSent(job));
         if (confirmJobs.length && !policy().delegated && !state.webDecision) {
           const list = outbound?.connections() || [];
           // 계정이 계획에 비어 있으면 실행 때처럼 그 서비스의 유일한 계정을 보여 준다
@@ -562,11 +576,15 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           const kind = { web: '웹사이트 작업', mail: '메일', post: '글', comment: '댓글' };
           const what = confirmJobs.every((job) => job.publication.action === 'web') ? '웹사이트 작업' : '외부 작업';
           return ask([{ phase: 'web-confirm', question: `아래 ${what}을 실행할까요? ("진행" 또는 "하지 마"로 답하세요. 다음부터 확인 없이 하려면 지시에 "끝까지 자동으로"를 적어 주세요.)\n`
-            + confirmJobs.map(({ publication: p, body, files = [] }, i) => `${i + 1}. ${p.action === 'web' ? '' : `${kind[p.action] || p.action} `}[${label(p)}] ${p.recipients?.length ? `받는사람 ${p.recipients.join(', ')}` : p.target}${p.subject ? ` · 제목: ${p.subject}` : ''} — ${body.replace(/\s+/g, ' ').slice(0, 300)}${files.length ? ` (첨부: ${files.map((f) => basename(f)).join(', ')})` : ''}`).join('\n') }]);
+            + confirmJobs.map(({ publication: p, body, files = [] }, i) => `${i + 1}. ${p.action === 'web' ? '' : `${kind[p.action] || p.action} `}[${label(p)}] ${p.recipients?.length ? `받는사람 ${p.recipients.join(', ')}` : p.target}${p.subject ? ` · 제목: ${p.subject}` : ''} — ${body.replace(/\s+/g, ' ').slice(0, 300)}${files.length ? ` (첨부: ${files.map((f) => basename(f)).join(', ')})` : ''}`).join('\n')
+            + (batch.remaining.length ? `\n\n메일은 대량 발송을 막기 위해 한 번에 ${MAX_MAILS_PER_RUN}통까지만 보냅니다. 남은 ${batch.remaining.length}통은 위 메일을 보낸 뒤 다시 묻습니다.` : '') }]);
         }
         // 웹사이트 작업 추정은 넓은 문장 판별이라, 계획에 외부 작업이 없으면 비서실장 계획을 따른다(메일·게시는 확인)
         if (allowedActions().some((action) => action !== 'web') && !(plan.publications || []).length) return ask([{ phase: 'plan', question: '요청하신 외부 작업의 대상·계정·본문을 계획에서 확인하지 못했습니다. 계정 연결과 대상 주소를 확인해 주세요.' }]);
-        for (const { publication, body, source: content, files = [] } of prepared.jobs) {
+        for (const job of batch.run) {
+          const { publication, body, files = [] } = job;
+          // 이미 보낸 메일은 다시 보내지 않고 앞서 확인한 결과만 보고한다
+          if (wasSent(job)) { publications.push(state.mailSent[mailKey(job)]); continue; }
           if (state.webDecision === 'declined' && needsConfirm({ publication })) { publications.push(`- ${publication.action === 'web' ? '웹사이트 작업' : `${publication.service} ${publication.action}`} ${publication.target}: 대표 결정으로 실행하지 않음`); continue; }
           if (!outbound) return ask([{ phase: 'plan', question: '외부 작업을 위해 계정 연결을 먼저 완료해 주세요.' }]);
           const instance = `${run.id}-publish-${publication.id || publications.length}`;
@@ -602,7 +620,8 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
                 return text;
               } });
             publications.push(web ? `- 웹사이트 작업 ${publication.target}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : '직원 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}${result.evidence ? ` · 증거 evidence/${result.evidence}` : ''}${result.summary ? `\n  - 확인 내용: ${redactContext(result.summary)}` : ''}`
-              : `- ${publication.service} ${publication.action}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : '브라우저 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}`);
+              : `- ${publication.service} ${publication.action}${isMail(job) ? ` (${mailLine(job)})` : ''}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : '브라우저 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}`);
+            if (isMail(job)) { state.mailSent[mailKey(job)] = publications.at(-1); persist(); }
             if (publication.action === 'post') posted++;
             emit('agent.stop', { engine, agent: publication.agent, instance, summary: '실제 외부 작업 결과를 확인했습니다.' });
           } catch (error) {
@@ -611,6 +630,16 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
             emit('agent.pause', { engine, agent: publication.agent, instance, summary: redactContext(error.message) });
             return ask([{ phase: 'publish', question: `외부 작업을 이어가기 위한 확인이 필요합니다. ${redactContext(error.message)}` }]);
           }
+        }
+        if (batch.remaining.length) {
+          // 대표가 있으면 다음 20통을 보낼지 묻는다. 예약·상시 감시 회차는 묻지 않고 남은 메일을 미발송으로 보고한다
+          if (!unattended && !state.mailDeclined && state.webDecision !== 'declined') {
+            const next = batch.remaining.slice(0, MAX_MAILS_PER_RUN);
+            return ask([{ phase: 'mail-more', question: `메일 ${sentMails()}통을 보냈습니다. 남은 메일이 ${batch.remaining.length}통 있습니다. 다음 ${next.length}통을 이어서 보낼까요? ("진행" 또는 "하지 마"로 답하세요. 대량 발송을 막기 위해 메일은 한 번에 ${MAX_MAILS_PER_RUN}통까지만 보내고, 끝까지 자동으로 맡긴 업무도 ${MAX_MAILS_PER_RUN}통마다 다시 묻습니다.)\n`
+              + next.map((job, i) => `${i + 1}. ${mailLine(job)}`).join('\n') + (batch.remaining.length > next.length ? `\n그 뒤 ${batch.remaining.length - next.length}통은 이 메일을 보낸 뒤 다시 묻습니다.` : '') }]);
+          }
+          const why = unattended ? `메일 한도 ${MAX_MAILS_PER_RUN}통 초과로 이번 회차에 보내지 않음` : '대표 결정으로 보내지 않음';
+          prepared.skipped.push(...batch.remaining.map((job) => `${why}: ${mailLine(job)}`));
         }
         const report = review.report + ((plan.publications || []).length ? '\n\n## 외부 작업 결과\n\n' + (publications.join('\n') || '- 실제 발송·게시 0건: 확인된 대상이 없습니다.')
           + (videoPolicy ? `\n\n영상 게시 ${posted}건 / 목표 ${videoPolicy.minPosts}~${videoPolicy.maxPosts}건.${posted < videoPolicy.minPosts ? ' 조건에 맞는 중복 없는 새 영상이 부족해 목표 수를 채우지 않았습니다.' : ''}` : '')

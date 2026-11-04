@@ -615,6 +615,51 @@ test('빠른 조회 직원이 없거나 계획을 만들 수 없으면 전체 �
   assert.ok(f.counts.plan >= 1, '외부 작업이 허용된 지시는 빠른 경로를 쓰지 않는다');
 });
 
+test('도구 문제는 대표에게 묻지 않고 계획을 고쳐 다시 실행하며, 고쳐도 안 되면 대표에게 알린다', async (t) => {
+  const { orchestrate } = await import('../dashboard/orchestrator.mjs');
+  const run = async (label, stageReply) => {
+    const root = mkdtempSync(join(tmpdir(), 'office-tools-'));
+    t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+    mkdirSync(join(root, 'org'));
+    writeFileSync(join(root, 'org', 'departments.json'), JSON.stringify([{ id: 'research', name: '리서치부', engine: 'claude' }]));
+    writeFileSync(join(root, 'org', 'roster.json'), JSON.stringify([{ id: 'research-1', name: '김대리', department: 'research' }]));
+    const task = '2026-11-04/run-tools-' + label;
+    mkdirSync(join(root, 'outputs', ...task.split('/')), { recursive: true });
+    const output = `outputs/${task}/research/research-1-a.md`;
+    const plans = [], stages = [];
+    const makePlan = (connection) => ({ version: 1, task, goal: '자료', deliverables: ['a'], review: { by: 'chief', criteria: '확인' }, gaps: [], publications: [],
+      stages: [{ id: 'a', title: '자료', dept: 'research', agent: 'research-1', inputs: [], output, done: '작성', dependsOn: [], connection, target: connection ? 'https://erp.example.com' : '' }] });
+    const execute = async ({ phase, prompt, browser }) => {
+      if (phase === 'plan') { plans.push(prompt); return JSON.stringify({ plan: makePlan(plans.length > 1 ? 'erp' : ''), question: '', needsMeeting: false, requestedActions: [] }); }
+      if (phase === 'review') return JSON.stringify({ verdict: 'pass', stages: [], reason: '', report: '# 결과\n\n확인했습니다.', question: '' });
+      stages.push({ prompt, browser: Boolean(browser) });
+      const reply = stageReply(stages.length, Boolean(browser));
+      if (reply.status === 'done') { mkdirSync(join(root, dirname(output)), { recursive: true }); writeFileSync(join(root, output), '완료'); }
+      return JSON.stringify(reply);
+    };
+    const outbound = { connections: () => [{ id: 'erp', label: 'ERP', provider: 'web', status: 'connected' }], browse: async ({ execute: go }) => go({ url: 'http://127.0.0.1:9/tools', token: 't', permissionsFile: join(tmpdir(), 'x.json'), write: true }) };
+    const onDecision = () => {};
+    const text = await orchestrate({ root, run: { id: 'run-tools-' + label, rootId: 'run-tools-' + label, engine: 'claude', task }, prompt: '사내 자료 정리', execute, signal: new AbortController().signal, outbound, onDecision, sourceCheck: async () => ({ checked: 0, broken: [], mismatched: [], unknown: [], skipped: 0 }) });
+    return { text, plans, stages };
+  };
+  // 직원이 질문으로 보내도(옛 형식) 도구 문제면 대표에게 묻지 않는다
+  const fixed = await run('fixed', (n, browser) => browser ? { status: 'done', summary: '작성' }
+    : { status: 'needs_decision', summary: '', question: '1. 연결된 브라우저(office_browser)를 연결해 다시 실행해도 될까요?\n2. 권장 기본값: 예' });
+  assert.equal(fixed.plans.length, 2, '계획을 고친다');
+  assert.match(fixed.plans[1], /대표에게 묻지 말고 계획을 고치세요/);
+  assert.deepEqual(fixed.stages.map((s) => s.browser), [false, true], '고친 단계는 브라우저를 받아 다시 실행한다');
+  assert.doesNotMatch(fixed.text, /대표 결정이 필요합니다/);
+  // 계획을 고쳐도 계속 안 되면 멈추고, 내부 id 없이 알린다
+  const stuck = await run('stuck', () => ({ status: 'replan', summary: '', reason: '영상 화면을 보는 도구가 필요합니다.' }));
+  assert.equal(stuck.plans.length, 3, '업무당 2회까지만 고친다');
+  assert.match(stuck.text, /대표 결정이 필요합니다[\s\S]*지금 도구로 끝내지 못했습니다[\s\S]*영상 화면/);
+  assert.doesNotMatch(stuck.text, /\[a\]|\n1\. /);
+  // 도구와 무관한 대표 결정은 그대로 묻는다
+  const decision = await run('decision', () => ({ status: 'needs_decision', summary: '', question: '대상 지역을 알려 주세요.' }));
+  assert.match(decision.text, /대상 지역을 알려 주세요/);
+  assert.equal(decision.plans.length, 1);
+});
+
 test('계획과 직원 지시는 요청 범위만 처리하도록 안내한다', async (t) => {
   const f = fixture(t);
   await f.final(f.runner.start({ prompt: '자료 10건 수집해 줘' }));

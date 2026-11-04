@@ -151,7 +151,8 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
   const ask = (questions) => {
     state.pending = questions.map((q) => ({ ...q, question: redactContext(q.question) }));
     onDecision();
-    return blocked('대표 결정이 필요합니다.\n\n' + state.pending.map((q, i) => `${i + 1}. ${q.stage ? `[${q.stage}] ` : ''}${q.question}`).join('\n\n'));
+    // 내부 단계 id는 대표에게 보이지 않는다. 질문이 하나면 번호도 붙이지 않는다(질문 안의 번호와 겹침)
+    return blocked('대표 결정이 필요합니다.\n\n' + (state.pending.length === 1 ? state.pending[0].question : state.pending.map((q, i) => `${i + 1}. ${q.question}`).join('\n\n')));
   };
   // 계획 전 질문으로 멈추더라도 최초 요청은 남긴다.
   persist();
@@ -221,7 +222,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       '대표가 메일에 파일을 첨부하라고 했으면 그 메일의 attachments에 대표가 쓴 파일 이름이나 경로를 글자 그대로 적으세요(예: ["제휴제안서.pdf"]). 파일을 직접 찾거나 열지 마세요. 실행기가 작업 공간(보관함 포함)·다운로드·문서·데스크톱에서 찾아 모든 수신자 메일에 같은 파일로 붙이고, 못 찾거나 같은 이름이 여러 개면 대표에게 묻습니다. 첨부 지시가 없거나 메일이 아니면 attachments는 []입니다.',
       'web은 연결 계정의 일반 웹사이트(관리자 화면 등)에서 하는 작업입니다. service "web", connection에 연결된 일반 웹사이트 계정 id, target에 시작 화면 주소, instructions에 직원이 그 사이트에서 할 일(대표 지시 그대로 구체적으로), files에 첨부할 단계 id(예: 업로드할 HTML 산출물)를 씁니다. subject·content는 빈 문자열, recipients는 []입니다. 연결된 일반 웹사이트 계정이 없으면 connection을 빈 문자열로 두세요.',
       '글·댓글 하나를 올리는 것처럼 단순한 게시 업무는 조사·작성·게시를 같은 직원 한 명에게 맡기세요(단계마다 직원을 바꾸지 않음). 여러 부서의 전문성이 필요한 업무만 나눕니다.',
-      '실제 외부 작업은 산출물 작성과 비서실장 검토를 마친 뒤 실행기가 브라우저로 진행합니다. 로그인 정보는 요청하거나 파일에 적지 마세요. 계정이 없으면 connection은 빈 문자열로 두세요. 실행기가 로그인 창을 띄운 뒤 계획을 다시 요청합니다. 연결 계정이 있고 로그인해야 읽을 수 있는 글을 조회하는 단계라면 그 단계의 stage.connection과 stage.target을 반드시 채우세요. 연결 계정이 여러 개면 사용할 계정을 확인하세요.',
+      '실제 외부 작업은 산출물 작성과 비서실장 검토를 마친 뒤 실행기가 브라우저로 진행합니다. 로그인 정보는 요청하거나 파일에 적지 마세요. 실제 게시·발송·댓글 등록은 stages에 넣지 말고 publications에만 두세요. 계정이 없으면 connection은 빈 문자열로 두세요. 실행기가 로그인 창을 띄운 뒤 계획을 다시 요청합니다. 연결 계정이 있고 로그인해야 읽을 수 있는 글을 조회하는 단계라면 그 단계의 stage.connection과 stage.target을 반드시 채우세요. 연결 계정이 여러 개면 사용할 계정을 확인하세요.',
       `제휴업체 조사 후 주소를 알아내는 메일 업무는 조사 단계 다음에 개인별 발송 문안 JSON 단계를 두세요. {messages:[{recipients:["회사 메일"],subject:"제목",body:"양식을 채운 본문"}],skipped:["연락처 미확인 업체·이유"]}를 작성하고 publication.content에 그 단계 id, recipients에는 []를 씁니다. 검토 후 실행기가 문안별로 발송합니다. 대량 발송을 막기 위해 메일은 한 번에 ${MAX_MAILS_PER_RUN}통까지만 보내고 남은 메일은 대표에게 다시 확인받아 이어 보내므로, messages에는 확인한 대상을 모두 적으세요. 주소·출처를 확인하지 못한 업체에는 보내지 않습니다.`,
       '여러 게시글은 검토할 본문 JSON 단계에 {posts:[{subject,body,target}],skipped:[사유]}를 작성하고 publication.content에 그 단계 id를 지정하세요. 실행기가 글마다 별도로 게시합니다. 올릴 게시판이 앞 단계(사이트 조회 등)에서 정해지면 그 게시판 주소(대표가 준 주소와 같은 사이트)를 target에 넣게 하세요. 비우면 publication.target에 올립니다. 유튜브 링크의 영상 ID는 작업 공간 공통 이력과 대조해 재게시를 차단합니다.',
       `대표가 허용한 외부 작업: ${JSON.stringify(allowedActions())}. 초안만 요청한 업무를 외부에 게시하지 마세요.`,
@@ -471,7 +472,8 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           `${desc}\n\n## 목표·대표 요청\n업무: ${task}\n${context()}`,
           `## 입력·출력·완료 기준\n입력: ${JSON.stringify(inputs)}\n출력: ${stage.output}\n완료 기준: ${stage.done}${reason ? `\n반려 사유(모두 반영): ${reason}` : ''}`,
           guide.length ? `## 이 단계 안내\n${guide.join('\n')}` : '',
-          `## 응답 형식\n마지막 응답은 JSON입니다. status=done(작성 완료), needs_decision(대표 결정), reroute(부서 오전달), delegate(팀장 분담). summary/question/department/agent/reason/assignments 필드를 쓰세요.\n`
+          `## 응답 형식\n마지막 응답은 JSON입니다. status=done(작성 완료), needs_decision(대표 결정), reroute(부서 오전달), delegate(팀장 분담), replan(도구 부족). summary/question/department/agent/reason/assignments 필드를 쓰세요.\n`
+            + '도구·브라우저·권한·로그인 상태는 대표가 답해서 바뀌는 일이 아니므로 대표에게 묻지 마세요. 지금 도구로 못 하는 일이면 status=replan, reason에 필요한 것(예: 로그인한 카페 글 조회, 공개 웹 검색)을 적으세요. 비서실장이 계획을 고칩니다. 확인할 수 없는 항목(조회수·영상 내용 등)만 남았으면 미확인으로 표시하고 status=done으로 끝내세요.\n'
             + '질문이 필요하면 산출물을 억지로 쓰지 말고 question에 원문을 적으세요. 오전달이면 적합한 department/agent와 reason을 제안하세요.\n'
             + `팀장만 같은 부서의 근무중 직원에게 assignments:[{agent,title,output,done}]로 분담할 수 있습니다. 실행기는 분담 결과를 모아 팀장에게 다시 전달합니다. 직접 다른 직원을 호출하지 마세요.\n`
             + `부서 근무중 실행 직원: ${JSON.stringify(org.roster.filter((a) => available(a.id, stage.dept)).map((a) => ({ id: a.id, name: a.name, lead: a.lead, role: a.role, specialty: a.specialty || a.description })))}`,
@@ -532,6 +534,21 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     clearDependents(new Set([stage.id]));
     persist();
     emit('flow.cooperate', { from: stage.dept, to: route.department, summary: redact(`오전달 재배정: ${route.reason || result.reason}`) });
+  };
+  // 직원이 도구가 없어 못 한 일: 대표에게 넘기지 않고 비서실장이 계획을 고친다(업무당 2회). 그래도 안 되면 그때 대표에게 알린다
+  const replanForTools = async (stage, result) => {
+    state.toolReplans = (state.toolReplans || 0) + 1;
+    const need = redactContext(String(result.reason || result.question || result.summary || '필요한 도구가 없습니다.')).slice(0, 800);
+    if (state.toolReplans > 2) throw new Error(`"${stage.title}" 단계를 지금 도구로 끝내지 못했습니다. 필요한 것: ${need}`);
+    const revised = await planning(`직원이 도구가 없어 "${stage.id}" 단계를 끝내지 못했습니다: ${need}\n이 문제는 대표에게 묻지 말고 계획을 고치세요. 로그인해야 읽는 사이트 조회는 그 단계의 connection·target에 연결 계정을 넣고, 공개 웹 검색은 connection을 빈 문자열로 둔 단계로 나눕니다. 실제 게시·발송·댓글 등록은 stages에 넣지 말고 publications에만 둡니다. 완료된 단계(${JSON.stringify(Object.keys(state.completed))})는 그대로 두고, 이 단계를 고쳐 전체 계획을 응답하세요.`);
+    checkStop();
+    if (revised.question?.trim()) throw new Error(revised.question);
+    if (!revised.plan) throw new Error(`"${stage.title}" 단계의 계획을 고치지 못했습니다. 필요한 것: ${need}`);
+    applyRevision(revised.plan, `도구 부족으로 계획 수정: ${need}`);
+    // 내용이 그대로여도 다시 실행해야 한다
+    clearDependents(new Set([stage.id].filter((id) => plan.stages.some((s) => s.id === id))));
+    persist();
+    emit('flow.notice', { summary: `"${stage.title}" 단계에 필요한 도구가 없어 계획을 고쳤습니다.` });
   };
   const delegate = (stage, result) => {
     if (!org.roster.find((a) => a.id === stage.agent)?.lead || state.delegated[stage.id]) throw new Error('부서 팀장만 한 번 분담할 수 있습니다. 담당을 확인해 주세요.');
@@ -608,7 +625,8 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           // 질문/이관/분담은 완료 이벤트를 만들지 않는다.
           emit('agent.pause', { agent: stage.agent, instance: `${run.id}-${stage.id}`, summary: redact(result.question || result.reason || result.summary) });
           try {
-            if (result.status === 'reroute') await transfer(stage, result);
+            if (result.status === 'replan') await replanForTools(stage, result);
+            else if (result.status === 'reroute') await transfer(stage, result);
             else if (result.status === 'delegate') delegate(stage, result);
             else waiting.set(stage.id, { phase: 'stage', stage: stage.id, question: result.question?.trim() || '진행에 필요한 결정을 알려 주세요.' });
           } catch (err) {

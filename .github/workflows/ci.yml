@@ -10,7 +10,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
-        node: [20, 22]
+        # lts/*: 가이드가 설치하라고 안내하는 현재 LTS(GUIDE 3-3단계)도 검증한다
+        node: [20, 22, 'lts/*']
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

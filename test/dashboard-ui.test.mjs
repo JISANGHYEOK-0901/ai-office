@@ -101,7 +101,7 @@ test('routeBetween: 목적지에서 끝나고, 세로 통로는 부서 방을 �
   for (const from of [...depts, l.chief]) {
     for (const to of [l.ceo, l.chief, l.meeting, ...depts]) {
       const start = from.seats[0] || from.doorIn;
-      const dest = to.spots ? to.spots[0] : (to.seats[0] || to.doorIn);
+      const dest = to.spots?.[0] || to.seats?.[0] || to.doorIn;
       const pts = routeBetween(start, from, dest, to);
       assert.deepEqual(pts.at(-1), { x: dest.x, y: dest.y });
       if (from === to) { assert.equal(pts.length, 1); continue; }
@@ -695,6 +695,18 @@ test('지시 접수 중에는 상태를 표시하고 같은 지시를 다시 보
   assert.match(html, /id="chiefSendStatus"[^>]*role="status"/);
   assert.match(src, /if \(chiefSending\) return;/);
   assert.match(src, /chiefSubmit'\)\.disabled = chiefSending \|\|/);
+});
+
+test('직원은 대표실이 아니라 비서실장에게 보고하러 간다', async () => {
+  const src = await readFile(path.join(PUBLIC, 'office.js'), 'utf8');
+  const report = src.match(/function startReport\(ch\) \{[\s\S]*?\n  \}/)[0];
+  assert.match(report, /layout\.chief\.spots/);
+  assert.match(report, /goTo\(ch, spot, layout\.chief,/);
+  assert.doesNotMatch(report, /layout\.ceo/);
+  const layout = layoutOffice([]);
+  for (const spot of layout.chief.spots) {
+    assert.ok(spot.x > layout.chief.x && spot.x < layout.chief.x + layout.chief.w && spot.y > layout.chief.y && spot.y < layout.chief.y + layout.chief.h, '보고 자리는 비서실 안이다');
+  }
 });
 
 test('입력창 승인 의사는 결과 모달로 연결하며 승인·반려 API를 호출하지 않는다', async () => {

@@ -140,9 +140,8 @@ export function layoutOffice(departments = [], { maxCols = 4 } = {}) {
   const topW = Math.max(meeting.x + meeting.w, chief.x + chief.w) - MARGIN;
   const width = Math.max(gridW, topW) + MARGIN * 2;
   const height = (n ? y - GAP : meeting.y + TOP_H) + MARGIN;
-  // 대표실 보고 자리, 회의실 모임 자리
-  ceo.spots = [-36, -12, 12, 36, -60, 60].map((dx) => ({ x: ceo.x + ceo.w / 2 + dx, y: ceo.y + 138 }));
-  chief.spots = [-40, 40, -64, 64].map((dx) => ({ x: chief.x + chief.w / 2 + dx, y: chief.y + 150 }));
+  // 직원은 비서실장에게 보고한다(대표는 비서실장 보고만 받는다). 비서실 보고 자리, 회의실 모임 자리
+  chief.spots = [-40, 40, -64, 64, -16, 16].map((dx) => ({ x: chief.x + chief.w / 2 + dx, y: chief.y + 150 }));
   const mx = meeting.x + meeting.w / 2;
   meeting.spots = [];
   for (const dy of [74, 142]) for (const dx of [-84, -42, 0, 42, 84]) meeting.spots.push({ x: mx + dx, y: meeting.y + dy });
@@ -424,7 +423,7 @@ export function createOffice(canvas, handlers = {}) {
   let seen = new Set();
   let firstUpdate = true;
   let reviewers = new Set();
-  let ceoBubbleUntil = 0;
+  let chiefBubbleUntil = 0;
   let themeName = 'neon';
   let chiefAgent = null; // 비서실장(메인 세션) 상태
   let attention = new Map(); // agentId → 'reply'|'approve'|'gap'
@@ -554,9 +553,9 @@ export function createOffice(canvas, handlers = {}) {
   }
 
   function startReport(ch) {
-    const spot = layout.ceo.spots[[...chars.values()].filter((c) => c.job === 'report').length % layout.ceo.spots.length];
+    const spot = layout.chief.spots[[...chars.values()].filter((c) => c.job === 'report').length % layout.chief.spots.length];
     ch.job = 'report';
-    goTo(ch, spot, layout.ceo, { type: 'wait', secs: 1.8, text: '보고드립니다!', then: 'home' });
+    goTo(ch, spot, layout.chief, { type: 'wait', secs: 1.8, text: '보고드립니다!', then: 'home' });
   }
 
   function syncChars(prevSig) {
@@ -761,7 +760,7 @@ export function createOffice(canvas, handlers = {}) {
       const a = ch.after || { type: 'stand' };
       if (a.type === 'sit') { ch.mode = 'sit'; if (ch.job !== 'handoff') ch.job = null; } else if (a.type === 'wait') {
         ch.mode = 'stand'; ch.waitUntil = t + a.secs; ch.bubble = { text: a.text, until: t + a.secs, kind: 'say' };
-        if (ch.job === 'report') ceoBubbleUntil = t + a.secs;
+        if (ch.job === 'report') chiefBubbleUntil = t + a.secs;
       } else ch.mode = 'stand';
     }
   }
@@ -1057,7 +1056,6 @@ export function createOffice(canvas, handlers = {}) {
     ctx.fillStyle = pal.monitor; ctx.fillRect(cx + 14, room.y + 56, 22, 16);
     ctx.fillStyle = pal.screenOn; ctx.fillRect(cx + 16, room.y + 58, 18, 11);
     ctx.fillStyle = '#ffffff'; ctx.fillRect(cx - 34, room.y + 68, 7, 5);
-    if (t < ceoBubbleUntil) bubbles.push({ x: cx, y: room.y + 46, text: '수고했어요!', kind: 'say' });
   }
 
   function drawMeeting(room, t) {
@@ -1142,6 +1140,7 @@ export function createOffice(canvas, handlers = {}) {
     ctx.fillStyle = pal.chair; ctx.fillRect(x0 + 13, y0 + 16, 18, 18);
     // 회의실에 가 있으면(킥오프·회의) 자리는 비워 둔다
     const seated = chiefCh.mode === 'sit';
+    if (seated && t < chiefBubbleUntil) bubbles.push({ x: seat.x, y: seat.y - 30, text: '수고했어요!', kind: 'say' });
     if (seated) {
       drawCharacter(ctx, seat.x, seat.y, CHIEF_LOOK, {
         pose: 'sit', typing: working, frame: Math.floor(t * 7), bob: !working && Math.floor(t * 0.8) % 2 === 0, outline: pal.outline, blush: pal.blush,

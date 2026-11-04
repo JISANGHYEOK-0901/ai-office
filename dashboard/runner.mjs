@@ -345,7 +345,8 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
     if (controlled) { spec.orchestration = true; activateTask(taskId); }
     // 지시창에서 판별한 외부 작업·위임(근거 확인됨). 없으면 오케스트레이터가 규칙으로 판별한다
     if (intent && Array.isArray(intent.actions)) spec.intent = { actions: intent.actions.filter((a) => typeof a === 'string'), delegated: intent.delegated === true,
-      ...(typeof intent.outputDir === 'string' && intent.outputDir ? { outputDir: intent.outputDir } : {}), source: intent.source };
+      ...(typeof intent.outputDir === 'string' && intent.outputDir ? { outputDir: intent.outputDir } : {}), source: intent.source,
+      ...(intent.quick === true ? { quick: true, quickAgent: typeof intent.quickAgent === 'string' ? intent.quickAgent : '' } : {}) };
     return addRun(spec, agentId || 'chief', typeof display === 'string' && display ? display : prompt, { id, task: taskId, monitorId, deliveryKey, schedule });
   }
 
@@ -622,7 +623,7 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
     live.set(run.id, entry);
     Object.assign(run, { status: 'running', startedAt: new Date().toISOString() });
     changed(run);
-    const execute = async ({ agentId = null, prompt, phase, readOnly = false, deadlineAt = null, browser = null }) => {
+    const execute = async ({ agentId = null, prompt, phase, readOnly = false, deadlineAt = null, browser = null, model = null, effort = null }) => {
       controller.signal.throwIfAborted();
       const tools = agentId ? null : await toolStatus();
       controller.signal.throwIfAborted();
@@ -630,8 +631,8 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
       const completed = new Promise((resolveChild, rejectChild) => { settle = { resolveChild, rejectChild }; });
       const control = agentId ? null : resolveControlChief({ engine: spec.engine, model: spec.model, effort: spec.effort },
         { phase, tools, mode: loadSettings(root).mode });
-      const childSpec = buildSpec(agentId, prompt, control?.model || null, null,
-        control ? { engine: control.engine, effort: control.effort } : {});
+      const childSpec = buildSpec(agentId, prompt, control?.model || model, null,
+        control ? { engine: control.engine, effort: control.effort } : effort ? { effort } : {});
       if (readOnly && childSpec.engine === 'codex') childSpec.args[childSpec.args.indexOf('-s') + 1] = 'read-only';
       if (readOnly && childSpec.engine === 'claude') childSpec.args.push('--tools', 'Read,Glob,Grep');
       childSpec.phase = phase;

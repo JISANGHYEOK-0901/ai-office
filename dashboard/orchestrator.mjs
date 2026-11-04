@@ -18,6 +18,7 @@ import { mailKey, preparePublications, splitMailBatch } from '../lib/publication
 import { attachmentQuestion, attachmentRef, pickChoices, resolveAttachments } from '../lib/attachments.mjs';
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 import { checkSources, sourceProblemReason } from '../lib/source-check.mjs';
+import { QUICK_GUIDE, quickPlan, quickReport } from '../lib/quick.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';
 import { CONNECTION_PROVIDERS, serviceProvider } from '../lib/connections.mjs';
 
@@ -251,6 +252,14 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
   const accountReplan = answering && saved.pending?.some((q) => q.phase === 'account' && q.replan);
   // 외부 작업 확인 뒤에는 바뀐 허용 범위로 계획을 다시 세운다
   const actionReplan = answering && saved.pending?.some((q) => q.phase === 'action-confirm');
+  // 단순 조회 빠른 경로: 계획 호출 없이 직원 한 명에게 바로 맡긴다. 계획을 만들 수 없으면 기존 흐름으로 간다
+  const fastPlan = !saved.originalRequest && intent?.quick === true && !allowedActions().length ? quickPlan({ org, task, request: state.originalRequest, agentId: intent.quickAgent }) : null;
+  // 빠른 조회는 전달할 문서를 만들지 않으므로 필수 전달 부서를 거치지 않는다
+  if (fastPlan && validatePlan(fastPlan, { root, org, taskId: task, fileExists: existsSync, skipRequiredHandoffs: true }).ok) {
+    state.quick = true;
+    response = { plan: fastPlan, rerunStages: [] };
+    plan = fastPlan;
+  } else
   if ((resume || answering) && saved.plan && !publicationCorrection && !accountReplan && !actionReplan
       && (resume && saved.approvedReview || !saved.pending?.some((q) => q.phase === 'plan'))) {
     response = { plan: saved.plan, rerunStages: [] };
@@ -295,7 +304,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       }
     }
   }
-  const checked = validatePlan(plan, { root, org, taskId: task, fileExists: existsSync });
+  const checked = validatePlan(plan, { root, org, taskId: task, fileExists: existsSync, skipRequiredHandoffs: state.quick === true });
   if (!checked.ok) return blocked(checked.errors.join('\n'));
   // 직원에게 전달하는 경로는 표시용 compactPlan과 분리해 전체 실제 경로를 쓴다.
   plan = normalizePlanInputs(plan, { root, taskId: task, fileExists: existsSync });
@@ -400,11 +409,14 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           site ? `사이트 조회: 연결 계정 브라우저(office_browser 도구)로 ${stage.target}에서 시작해 필요한 자료를 조회하세요. 읽기 전용이라 저장·등록·수정·삭제는 하지 않습니다. 대표 요청의 의도에 맞는 메뉴·탭·필터를 사이트를 둘러보며 스스로 찾아 쓰고(대표가 범위를 정했으면 그 범위의 자료만 엽니다. 예: 특정 회원의 글이면 작성자 검색·필터를 먼저 쓰고 공지·다른 게시판은 열지 않음), 목록은 browser_text의 offset으로 끝까지 읽으세요. 결과는 출력 파일에 직접 작성하고, 대표가 요구한 항목(연락처 등)은 빠뜨리지 마세요. 조건에 맞는 항목이 없으면 그 사실과 확인한 화면·조건을 출력 파일에 적으세요. 이 단계에서는 연결 사이트 밖(웹 검색·다른 사이트)은 볼 수 없습니다. 그런 자료는 다른 단계가 맡으니 사이트 안 자료만 정리하고, 사이트 밖 자료가 없다는 이유로 대표에게 묻지 마세요.` : '',
           mailDraft ? '이번 산출물은 메일 문안 JSON입니다. 입력 조사 자료의 회사별 연락처·출처를 확인하고 대표 양식을 채운 messages:[{recipients:[주소],subject,body}]와 skipped:[미확인 업체·이유]를 작성하세요. 실제 메일은 지금 보내지 않습니다.' : '',
           html ? `${HTML_BRIEF}\nHTML 보고서 기본 양식: ${join(programRoot(), 'org/templates/report.html')}. 읽어서 정보 구조·스타일을 참고하고 업무에 맞게 작성하세요. {{REPORT_*}} 빈 항목은 모두 채우거나 불필요한 섹션과 함께 제거하세요. 근거가 없으면 꾸미기 위해 숫자·차트를 만들지 마세요.` : '',
+          state.quick ? QUICK_GUIDE : '',
           state.delegated[stage.id] ? '부서 직원의 분담 결과를 입력에서 읽고 취합하세요. 이미 분담했으므로 다시 delegate하지 마세요.' : '',
           issue ? `앞 실행의 산출물 검사 실패: ${issue}. 수정하여 지정된 파일을 작성하세요.` : '',
           '완료 기준을 채우면 바로 끝내세요. 기준에 없는 추가 조사·확인은 하지 않습니다.',
         ].filter(Boolean);
         text = await runStage({ phase: 'stage', agentId: stage.agent,
+        // 빠른 조회는 Claude Sonnet/low(실측 54~78초), Codex 직원은 medium으로 실행한다
+        ...(state.quick ? (engine === 'codex' ? { effort: 'medium' } : { model: 'sonnet', effort: 'low' }) : {}),
         prompt: [
           // 첫 줄은 단계 제목(재작업이면 [반려]로 시작: 직원 지침의 재작업 규칙과 맞춘다)
           `${desc}\n\n## 목표·대표 요청\n업무: ${task}\n${context()}`,
@@ -425,6 +437,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       checkStop();
       const result = stageResult(text);
       if (result.status !== 'done') return { stage, result };
+      if (state.quick) state.quickSummary = redactContext(String(result.summary || ''));
       const hash = fingerprint(stage);
       if (hash) {
         state.completed[stage.id] = hash;
@@ -439,7 +452,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     throw new Error(`${stage.title}: ${issue || '산출물 검사 실패'}. 한 번 재시도했지만 완료하지 못했습니다.`);
   };
   const savePlan = (candidate) => {
-    const check = validatePlan(candidate, { root, org, taskId: task, fileExists: existsSync });
+    const check = validatePlan(candidate, { root, org, taskId: task, fileExists: existsSync, skipRequiredHandoffs: state.quick === true });
     if (!check.ok) throw new Error(check.errors.join('\n'));
     candidate = normalizeRefs(normalizePlanInputs(candidate, { root, taskId: task, fileExists: existsSync }));
     plan = { ...candidate, stages: candidate.stages.map((stage) => ({ ...stage,
@@ -595,7 +608,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         checkStop();
         writeFileAtomic(join(taskDir, 'source-check.json'), JSON.stringify(sources, null, 2) + '\n');
         const problems = [...sources.broken, ...sources.mismatched];
-        if (problems.length && !state.sourceRetried) {
+        if (problems.length && !state.sourceRetried && !state.quick) {
           state.sourceRetried = true;
           const targets = plan.stages.filter((s) => problems.some((p) => p.stage === s.id));
           state.rejects++;
@@ -623,7 +636,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         writeFileAtomic(join(taskDir, 'reviews', `${reviewer.id}.md`), text);
         evidence.push({ reviewer: reviewer.id, verdict, text });
       }
-      let review = cached?.review || parseObject(await execute({ phase: 'review', prompt: [
+      let review = cached?.review || (state.quick ? { verdict: 'pass', stages: [], reason: '빠른 조회는 최종 검토를 생략합니다.', question: '', report: quickReport({ goal: plan.goal, summary: state.quickSummary, sources }) } : parseObject(await execute({ phase: 'review', prompt: [
         '비서실장으로서 산출물을 읽기 전용으로 검토하세요. JSON만 응답하세요.',
         '{verdict:"pass"|"reject"|"revise"|"block"|"question",stage:"빈 문자열(예전 형식)",stages:[{id:"고칠 단계 id",reason:"그 단계에서 고칠 점"}],reason:"근거",report:"보고서 Markdown",question:"질문 또는 빈 문자열",revisedPlan:null}',
         `reject: 산출물을 고치면 되는 단계를 stages에 모두 적고 단계마다 구체적인 수정 사항을 쓰세요(한 번에 묶어 반려). revise: 기존 단계로는 채울 수 없는 부족한 부분이 있으면 단계를 추가·변경한 전체 계획을 revisedPlan에 주세요. 완료된 단계는 그대로 두며, 남은 계획 수정 가능 횟수는 ${MAX_PLAN_REVISIONS - state.revisionCount}회입니다. 반려·보완을 할지, 확인 필요로 남기고 통과시킬지는 남은 예산을 보고 정하세요. 반려는 재작업으로 시간이 많이 듭니다. 외부 제출·재무·법률 자료가 아니면 사실 오류, 건수 미달, 깨진 출처처럼 대표 요청을 못 채운 경우에만 반려하고, 표기·형식·추가 근거 보완은 보고서의 확인 필요에 적고 통과시키세요.`,
@@ -635,7 +648,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         sources ? `출처 자동 확인(접속 여부·페이지 제목만 확인, 본문 수치 미확인): 확인 ${sources.checked}건, 열리지 않음 ${JSON.stringify(sources.broken)}, 제목 불일치 ${JSON.stringify(sources.mismatched)}, 차단·시간 초과로 확인 불가 ${sources.unknown.length}건. 이미 한 번 고칠 기회를 준 항목이면 다시 반려하지 말고 보고서의 확인 필요에 적으세요.` : '',
         budgetLeft(),
         '당신이 최종 검토자입니다. 별도 검증실 부재는 공백이 아니므로 대체 검토 알림을 만들지 마세요. 요청한 전문 검토에 FIX/BLOCK/ERROR가 있거나 산출물이 없으면 pass를 내리지 마세요. 보고서에는 결과·산출물 경로·근거·확인 필요·실제 역량 공백을 포함하세요.',
-      ].filter(Boolean).join('\n\n') }));
+      ].filter(Boolean).join('\n\n') })));
       checkStop();
       if (review.verdict === 'pass' && prepared.errors.length) review = { verdict: 'reject', stage: prepared.errors[0].stage, reason: prepared.errors.map((e) => e.reason).join(' ') };
       if (review.verdict === 'question' && review.question?.trim()) return ask([{ phase: 'review', question: review.question }]);

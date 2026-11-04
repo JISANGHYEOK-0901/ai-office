@@ -30,6 +30,19 @@ test('AI가 판별한 일시정지·재개·외부 작업·위임은 근거가 �
   assert.deepEqual(saved.actions, []);
 });
 
+test('빠른 조회는 단순 조회에만 쓰고, 정밀 확인·제작·외부 작업·판별 실패는 전체 흐름으로 간다', async () => {
+  const judge = (fields = {}) => ai({ quick: true, quickAgent: 'research-1', ...fields });
+  const plain = await judgeCommand('미국 중간선거 최신 자료 10건 수집해줘', { judge: judge() });
+  assert.deepEqual([plain.quick, plain.quickAgent], [true, 'research-1']);
+  for (const text of ['중간선거 자료 10건 검증해서 수집해줘', '자료 찾아서 보고서로 만들어줘', '경쟁사 자료 찾아 분석해줘', '자료 찾아 HTML로 만들어줘']) {
+    assert.equal((await judgeCommand(text, { judge: judge() })).quick, false, text);
+  }
+  assert.equal((await judgeCommand('자료 찾아서 카페에 글 올려줘', { judge: judge({ externalActions: [{ action: 'post', evidence: '카페에 글 올려줘' }] }) })).quick, false);
+  assert.equal((await judgeCommand('자료 찾아줘', { judge: judge({ quick: false }) })).quick, false);
+  assert.ok(!(await judgeCommand('자료 찾아줘', { judge: async () => null })).quick, '판별 실패');
+  assert.match((await import('../lib/intent.mjs')).commandPrompt('자료', new Date(), [{ id: 'research-1' }]), /quickAgent.*research-1/);
+});
+
 test('상시 실행(멈출 때까지·기간·종료 시각)과 예약(매일·1회·N회)을 근거와 함께 판별한다', async () => {
   const forever = await judgeCommand('새 자료 나오면 알려 주고 내가 그만하라고 할 때까지 계속 봐', { now: NOW, judge: ai({ standing: 'until_stop', standingEvidence: '그만하라고 할 때까지 계속', intervalMinutes: 10 }) });
   assert.deepEqual(forever.continuous, { intervalMs: 600000, durationMs: null });

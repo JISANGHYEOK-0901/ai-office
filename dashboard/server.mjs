@@ -32,6 +32,7 @@ import { loadTasks as loadTaskList, updateTask, saveTasks } from '../lib/tasks.m
 import { readPrivate, writePrivate } from '../lib/private-state.mjs';
 import { createRunner } from './runner.mjs';
 import { judgeCommand } from '../lib/intent.mjs';
+import { quickCandidates } from '../lib/quick.mjs';
 import { createJudge } from '../lib/ai-judge.mjs';
 import { ensureVault } from '../lib/vault.mjs';
 import { buildState } from './state.mjs';
@@ -806,7 +807,7 @@ export async function startServer({
     if (model !== null && typeof model !== 'string') throw new HttpError(400, 'model은 문자열이어야 합니다.');
     // 의도는 비서실장(AI)이 판별하고, 권한이 되는 판단은 대표 원문 근거가 있을 때만 쓴다(실패하면 규칙 판별)
     await toolProbe;
-    const intent = await judgeCommand(prompt, { judge, now: scheduleNow() });
+    const intent = await judgeCommand(prompt, { judge, now: scheduleNow(), staff: quickCandidates(loadOrg(root)) });
     // "하던 작업 멈추고 정리해 둬"/"이어서 해줘"는 새 업무가 아니라 일시정지·일괄 재개다
     if (intent.kind === 'pause') {
       const result = runner.pause();
@@ -831,7 +832,7 @@ export async function startServer({
     // 지시에 적은 저장 위치는 업무를 시작하기 전에 검사한다(끝난 뒤에 저장 실패로 알게 되지 않게)
     if (intent.outputDir) { try { customOutputDirectory(root, intent.outputDir); } catch (err) { throw new HttpError(400, `저장 위치를 쓸 수 없습니다: ${err.message}`); } }
     const run = await callRunner(() => runner.start({ prompt, model, engine: body.engine || null, effort: body.effort || null,
-      continuous, intent: { actions: intent.actions, delegated: intent.delegated, outputDir: intent.outputDir || null, source: intent.source } }), '작업을 시작하지 못했습니다.');
+      continuous, intent: { actions: intent.actions, delegated: intent.delegated, outputDir: intent.outputDir || null, source: intent.source, quick: intent.quick === true, quickAgent: intent.quickAgent || '' } }), '작업을 시작하지 못했습니다.');
     scheduleBroadcast();
     return run;
   }

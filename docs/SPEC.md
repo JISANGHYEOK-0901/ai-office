@@ -169,7 +169,7 @@ test/                     node:test
 
 ### 비서실장 설정과 실행 모드
 
-- `org/company.json`의 `chief:{engine, model, effort}`는 비서실장 설정이다. 기본은 codex·`gpt-6.1-sol`·`max`다.
+- `org/company.json`의 `chief:{engine, model, effort}`는 비서실장 설정이다. 기본은 codex·`gpt-6.1-sol`·`high`다(저장된 값은 그대로 쓴다).
 - 단계별 비서실장 모델(`resolveControlChief`):
   - 최종 검토: 회사 설정의 비서실장 모델.
   - 진행 점검: Claude Sonnet/medium. Claude를 쓸 수 없으면 Codex medium(더 낮게 설정했으면 그 값).
@@ -232,7 +232,7 @@ test/                     node:test
 
 ### 회의
 
-- 계획은 대표가 요청한 범위와 결과물만 담는다. 자료 수집·뉴스 찾기는 요청한 건수만 실무 직원 한 명의 한 단계로 끝내고, HTML·보고서·재검증 단계는 대표가 요청했거나 외부 제출·재무·법률 자료일 때만 넣는다.
+- 계획은 대표가 요청한 범위와 결과물만 담는다. 자료 수집·뉴스 찾기는 요청한 건수만 sonnet 이상 실무 직원(없으면 팀장) 한 명의 한 단계로 끝내고, 같은 사건 1건·원문 제목·직접 연 페이지의 수치·부족 사유 표시를 완료 기준에 넣으며, HTML·보고서·재검증 단계는 대표가 요청했거나 외부 제출·재무·법률 자료일 때만 넣는다.
 - 한 부서가 끝낼 수 있는 일은 담당이 없어도 회의 없이 배정한다. 여러 부서가 함께 해야 하고 분담을 정하기 어려울 때만 `needsMeeting:true`와 `meetingAgents`(근무중 실행 직원 2~4명)를 낸다.
 - 참석자에게 읽기 전용으로 범위·산출물·분담·가정을 받고 meeting.md에 모은 뒤 계획을 다시 받는다. 이벤트는 `meeting.start`/`meeting.end`.
 

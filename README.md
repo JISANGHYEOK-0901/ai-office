@@ -15,7 +15,7 @@
 
 AI Office는 **각자 자기 컴퓨터에서, 자기 claude·codex 로그인으로** 실행합니다. 대시보드를 다른 사람과 공유하거나 원격으로 접속하는 방식이 아닙니다.
 
-**가장 쉬운 방법:** 아래 3번처럼 Claude 또는 Codex만 설치·로그인한 뒤, 터미널의 AI에게 "https://github.com/JISANGHYEOK-0901/ai-office 를 내 홈 폴더에 받아서, README와 AGENTS.md 안내대로 AI Office 쓸 수 있게 환경설정하고 서버 켜줘"라고 말합니다. AI가 아래 1·2·4·5를 대신 합니다(비밀번호·관리자 허용 창은 직접 입력). 다음부터는 `cd ~/ai-office` 후 `claude`(또는 `codex`)로 시작합니다. 비개발자용 단계는 `GUIDE.html` "3. 처음 한 번만: 설치하기"에 있습니다.
+**가장 쉬운 방법:** 아래 3번처럼 Claude 또는 Codex만 설치·로그인한 뒤, 터미널의 AI에게 "https://github.com/JISANGHYEOK-0901/ai-office 를 내 홈 폴더에 받아서, README와 AGENTS.md 안내대로 AI Office 쓸 수 있게 환경설정하고 서버 켜줘"라고 말합니다. AI가 아래 1·4·5를 대신 하고 Node가 없으면 2도 시도합니다(비밀번호·관리자 허용 창은 직접 입력). Node는 2번 명령으로 먼저 설치해 두면 가장 확실합니다. 다음부터는 `cd ~/ai-office` 후 `claude`(또는 `codex`)로 시작합니다. 비개발자용 단계는 `GUIDE.html` "3. 처음 한 번만: 설치하기"에 있습니다.
 
 1. **받기**
 
@@ -24,9 +24,10 @@ AI Office는 **각자 자기 컴퓨터에서, 자기 claude·codex 로그인으�
    cd ai-office
    ```
 
-2. **Node 20 이상 설치**
-   - macOS: `brew install node` 또는 [nodejs.org](https://nodejs.org)의 LTS 설치 파일
-   - Windows(PowerShell): `winget install OpenJS.NodeJS.LTS` 또는 nodejs.org의 LTS 설치 파일. 설치 후 **새 PowerShell 창**을 엽니다.
+2. **Node 20 이상 설치** (현재 LTS 권장. CI는 20·22와 현재 LTS(`lts/*`)를 검증합니다)
+   - macOS(Node 공식 권장 nvm, 비밀번호 불필요): `touch ~/.zshrc && curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.8/install.sh | bash && \. "$HOME/.nvm/nvm.sh" && nvm install --lts`. Homebrew가 있으면 `brew install node`도 됩니다.
+   - Windows(PowerShell): `winget install OpenJS.NodeJS.LTS`(관리자 허용 창에서 "예")
+   - 명령이 어려우면 [nodejs.org](https://nodejs.org)의 LTS 설치 파일을 씁니다. 설치 후 **새 터미널(PowerShell) 창**을 열고 `node --version`이 v20 이상인지 확인합니다.
 
 3. **claude·codex 설치와 로그인** (둘 중 하나만 있어도 됩니다. 공식 설치 프로그램은 Node가 필요 없습니다)
 

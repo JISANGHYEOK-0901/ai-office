@@ -30,6 +30,27 @@ test('AI가 판별한 일시정지·재개·외부 작업·위임은 근거가 �
   assert.deepEqual(saved.actions, []);
 });
 
+test('대시보드 내역 지우기: 문장 형태와 근거가 맞을 때만 받고 다른 자료의 내역은 업무로 둔다', async () => {
+  for (const text of ['작업 내역 지워줘', '작업내역 다 지워', '업무 기록 삭제해줘', '끝난 업무 내역 전부 지워 주세요', '실행 기록 초기화해줘', '내역 초기화해줘', '대화 기록 비워줘']) {
+    assert.equal((await judgeCommand(text, { judge: ai({ kind: 'task' }) })).kind, 'clear_history', text);
+  }
+  for (const text of ['고객 상담 내역 지워줘', 'ERP에서 주문 내역 삭제해줘', '작업 내역을 표로 정리해서 보고서로 만들어줘', '카페 활동 기록 삭제 방법 알려줘']) {
+    assert.equal((await judgeCommand(text, { judge: ai({ kind: 'task' }) })).kind, 'task', text);
+  }
+  // 규칙 형태가 아니어도 AI 판별과 근거, 대시보드 내역을 가리키는 말이 맞으면 받는다
+  const said = '오늘 끝낸 작업 내역이 많으니까 지워 두자';
+  assert.equal((await judgeCommand(said, { judge: ai({ kind: 'clear_history', kindEvidence: said }) })).kind, 'clear_history');
+  assert.equal((await judgeCommand('주문 데이터 싹 지워', { judge: ai({ kind: 'clear_history', kindEvidence: '주문 데이터 싹 지워' }) })).kind, 'task', 'AI가 잘못 봐도 지우지 않는다');
+  assert.equal((await judgeCommand(said, { judge: ai({ kind: 'clear_history', kindEvidence: '지어낸 근거 문장' }) })).kind, 'task');
+});
+
+test('업무 끝내기 문장은 업무를 가리키는 말이 있을 때만 받는다', async () => {
+  const { taskCloseIntent, historyClearIntent } = await import('../lib/pause.mjs');
+  for (const text of ['이 업무 끝내줘', '업무 종료', '이 작업 취소해줘', '이 일은 그만해', '작업 마무리해 줘']) assert.equal(taskCloseIntent(text), true, text);
+  for (const text of ['그만', '하지 마', '끝까지 자동으로', '보고서 작업 끝내줘', '기본값으로 진행']) assert.equal(taskCloseIntent(text), false, text);
+  assert.equal(historyClearIntent('작업 내역 없애줘'), true);
+});
+
 test('빠른 조회는 단순 조회에만 쓰고, 정밀 확인·제작·외부 작업·판별 실패는 전체 흐름으로 간다', async () => {
   const judge = (fields = {}) => ai({ quick: true, quickAgent: 'research-1', ...fields });
   const plain = await judgeCommand('미국 중간선거 최신 자료 10건 수집해줘', { judge: judge() });

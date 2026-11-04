@@ -32,6 +32,7 @@ import { loadTasks as loadTaskList, updateTask, saveTasks } from '../lib/tasks.m
 import { readPrivate, writePrivate } from '../lib/private-state.mjs';
 import { createRunner } from './runner.mjs';
 import { judgeCommand } from '../lib/intent.mjs';
+import { historyClearIntent, taskCloseIntent } from '../lib/pause.mjs';
 import { quickCandidates } from '../lib/quick.mjs';
 import { createJudge } from '../lib/ai-judge.mjs';
 import { ensureVault } from '../lib/vault.mjs';
@@ -823,6 +824,7 @@ export async function startServer({
       scheduleBroadcast();
       return { resumeRequested: true, ...result };
     }
+    if (intent.kind === 'clear_history') return { historyCleared: true, ...clearHistory() };
     if (body.schedule !== false) {
       const requested = intent.source === 'ai' ? intent.schedule : await callRunner(() => scheduleRequest(prompt, scheduleNow()), '예약 시각을 확인해 주세요.');
       if (requested) {
@@ -859,9 +861,25 @@ export async function startServer({
     if (prompt.length > MAX_PROMPT) throw new HttpError(400, `답장은 ${MAX_PROMPT}자 이하여야 합니다.`);
     const model = body.model || null;
     if (model !== null && typeof model !== 'string') throw new HttpError(400, 'model은 문자열이어야 합니다.');
+    // 대화 창에서 말해도 바로 처리한다. 이 대화에서 내역을 지우라는 말은 이 업무도 끝내라는 뜻이다
+    if (historyClearIntent(prompt)) { closeTaskOf(id); return { historyCleared: true, ...clearHistory() }; }
+    if (taskCloseIntent(prompt)) return closeTaskOf(id);
     const run = await callRunner(() => runner.reply(id, { prompt, model, engine: body.engine || null, effort: body.effort || null }), '답장을 보내지 못했습니다.');
     scheduleBroadcast();
     return run;
+  }
+
+  // 답을 기다리는 업무를 결과 없이 끝낸다. 내역 초기화로 지울 수 있게 되고, 이미 쓴 산출물은 그대로 둔다
+  function closeTaskOf(id) {
+    const run = runner.list().find((r) => r.id === id);
+    if (!run) throw new HttpError(404, `실행을 찾을 수 없습니다: ${id}`);
+    if (runner.list().some((r) => (r.rootId || r.id) === (run.rootId || run.id) && ['running', 'queued'].includes(r.status))) throw new HttpError(409, '진행 중인 업무는 먼저 중지해 주세요.');
+    if (run.task) {
+      runner.clearNeedsReply(run.task);
+      updateTask(root, run.task, (task) => { if (task.status === 'done') return false; task.status = 'closed'; task.updated = new Date().toISOString(); return true; });
+    }
+    loadTasks(); scheduleBroadcast();
+    return { taskClosed: true, task: run.task || null };
   }
 
   async function stopRun(id) {
@@ -939,6 +957,7 @@ export async function startServer({
     schedules?.list(); // 종료 실행이 정리되기 전에 예약의 최근 결과를 보존한다.
     const cleared = runner.clearHistory();
     const archived = new Set(cleared.taskIds);
+    const waiting = runner.list().filter((run) => !run.phase && run.needsReply).length;
     const list = loadTaskList(root), now = new Date().toISOString();
     for (const task of list) if (archived.has(task.id)) { task.historyArchivedAt = now; task.resultSeenAt ||= now; }
     saveTasks(root, list);
@@ -948,7 +967,7 @@ export async function startServer({
     // 활성 프로세스도 쓰는 이벤트 파일은 덮어쓰지 않고 표시 기준 시각을 저장한다.
     writePrivate(join(officePath, 'history.json'), { clearedAt: now });
     loadTasks(); scheduleBroadcast();
-    return { ok: true, removedRuns: cleared.runIds.length, removedTasks: cleared.taskIds.length };
+    return { ok: true, removedRuns: cleared.runIds.length, removedTasks: cleared.taskIds.length, keptWaiting: waiting };
   }
 
   // 그 업무에 연결된 세션(.office/sessions.json: 세션 → 업무)
@@ -1414,6 +1433,7 @@ export async function startServer({
       if (method === 'POST' && parts.length === 2) return sendJson(res, 202, await startRunOnce(body));
       if (method === 'POST' && parts.length === 4 && action === 'stop') return sendJson(res, 200, await stopRun(id));
       if (method === 'POST' && parts.length === 4 && action === 'reply') return sendJson(res, 202, await replyRun(id, body));
+      if (method === 'POST' && parts.length === 4 && action === 'close') { if (!runner) throw new HttpError(409, '데모 모드에서는 업무를 끝낼 수 없습니다.'); return sendJson(res, 200, closeTaskOf(id)); }
     }
     if (resource === 'tasks' && method === 'POST' && parts.length >= 4) {
       const taskAction = parts.at(-1);

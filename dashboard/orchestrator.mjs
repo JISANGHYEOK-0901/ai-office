@@ -166,7 +166,10 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
   persist();
   if (state.budgetStop) {
     state.budgetStop = false;
-    return blocked('대표 결정으로 업무를 멈췄습니다. 지금까지의 산출물은 업무 폴더에 남아 있습니다. 이어서 하려면 "이어서 해줘"라고 지시해 주세요.');
+    // 대표가 그만하라고 했으므로 답을 기다리는 업무로 남기지 않는다(내역 초기화로 지울 수 있다)
+    updateTask(root, task, (t) => { t.status = 'closed'; t.updated = new Date().toISOString(); return true; });
+    persist();
+    return '대표 결정으로 업무를 끝냈습니다. 지금까지의 산출물은 업무 폴더에 남아 있습니다.';
   }
   // 예산 점검: 80%를 쓰면 대표에게 계속할지 묻는다. 대표가 없는 예약·상시 감시 업무는 묻지 않고 100%에서 이 주기만 멈춘다
   const budgetText = () => `AI 호출 ${state.budget.calls}/${state.budget.limitCalls}회, 작업 ${Math.round(activeMs() / 60000)}/${Math.round(state.budget.limitMs / 60000)}분`;

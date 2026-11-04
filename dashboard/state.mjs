@@ -378,7 +378,7 @@ export function buildState({ org, events, runs = [], tasks = [], plans = null, o
     if (t.status === 'review') {
       attention.push({ kind: 'approve', agent: CHIEF_ID, task: t.id, since: t.updated ?? t.lastActivity ?? t.created ?? null, text: `'${t.title ?? t.id}' 결과 확인 대기` });
     }
-    if (t.gaps.length && t.status !== 'done') {
+    if (t.gaps.length && t.status !== 'done' && t.status !== 'closed') {
       const text = t.gaps.map((g) => `${g.need}${g.suggestion ? ` → ${g.suggestion}` : ''}`).join(' / ');
       attention.push({ kind: 'gap', agent: CHIEF_ID, task: t.id, since: t.created ?? t.lastActivity ?? null, text: `역량 공백: ${text}` });
     }

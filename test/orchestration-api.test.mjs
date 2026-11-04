@@ -116,9 +116,44 @@ test('HTTP: 지시창의 일시정지·재개 문장은 새 업무를 만들지 
   };
   assert.deepEqual(await post({ prompt: '지금까지 하던 작업 멈추고 자료 정리한 다음 다음에 이어갈 수 있게해줘' }), { pauseRequested: true, paused: [] });
   assert.deepEqual(await post({ prompt: '이어서 해줘' }), { resumeRequested: true, resumed: [], skipped: [] });
+  const cleared = await post({ prompt: '작업 내역 지워줘' });
+  assert.equal(cleared.historyCleared, true, '비서실장 지시로 내역을 바로 지운다');
   const state = await (await fetch(base + '/api/state')).json();
   assert.equal(state.runs.length, 0);
   assert.equal(state.tasks.length, 0);
+});
+
+test('HTTP: 답을 기다리는 업무는 "이 업무 끝내줘"로 끝나고 내역 초기화로 지워지며 파일은 남는다', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'office-api-close-'));
+  mkdirSync(join(root, 'org')); mkdirSync(join(root, '.office'), { recursive: true });
+  writeFileSync(join(root, 'org/departments.json'), JSON.stringify([{ id: 'research', name: '리서치부', engine: 'codex', codexRole: 'exec' }]));
+  writeFileSync(join(root, 'org/roster.json'), JSON.stringify([{ id: 'research-1', name: '김대리', department: 'research' }]));
+  const task = '2026-11-04/run-waiting';
+  const at = new Date().toISOString();
+  mkdirSync(join(root, 'outputs', ...task.split('/')), { recursive: true });
+  writeFileSync(join(root, 'outputs', ...task.split('/'), 'draft.md'), '초안');
+  writeFileSync(join(root, '.office/tasks.json'), JSON.stringify([{ id: task, title: '대기 업무', status: 'blocked', created: at }]));
+  writeFileSync(join(root, '.office/runs.json'), JSON.stringify([{ id: 'run-waiting', rootId: 'run-waiting', target: 'chief', engine: 'codex', status: 'done', needsReply: true, orchestration: true, task, request: '대기 업무', createdAt: at, startedAt: at, endedAt: at }]));
+  const missing = join(root, 'must-not-run.mjs');
+  let server;
+  t.after(async () => { await server?.close(); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); });
+  server = await startServer({ root, port: 0, quiet: true, env: { ...process.env, CLAUDE_BIN: missing, CODEX_BIN: missing } });
+  const base = `http://127.0.0.1:${server.port}`;
+  const call = async (method, path, body) => (await fetch(base + path, { method, headers: { 'X-Office-Token': server.token, Origin: base, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) })).json();
+  const state = async () => (await fetch(base + '/api/state')).json();
+  // 답을 기다리는 업무는 내역 초기화로 지우지 않고 남겼다고 알린다
+  const kept = await call('DELETE', '/api/history');
+  assert.equal(kept.keptWaiting, 1);
+  assert.equal((await state()).runs.filter((r) => r.id === 'run-waiting').length, 1);
+  assert.deepEqual(await call('POST', '/api/runs/run-waiting/reply', { prompt: '이 업무 끝내줘' }), { taskClosed: true, task });
+  const closed = await state();
+  assert.equal(closed.runs.find((r) => r.id === 'run-waiting').needsReply, false);
+  assert.ok(!closed.attention.some((a) => a.kind === 'reply' && a.task === task), '답변 필요 표시가 사라진다');
+  const removed = await call('DELETE', '/api/history');
+  assert.equal(removed.keptWaiting, 0);
+  assert.equal(removed.removedRuns, 1);
+  assert.equal((await state()).runs.length, 0);
+  assert.equal(readFileSync(join(root, 'outputs', ...task.split('/'), 'draft.md'), 'utf8'), '초안', '파일은 남는다');
 });
 
 test('HTTP: 지시창 의도는 AI 판별을 쓰고(규칙이 못 잡는 표현), 판별이 안 되면 규칙으로 처리한다', async (t) => {

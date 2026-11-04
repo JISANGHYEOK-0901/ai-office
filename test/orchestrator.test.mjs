@@ -998,9 +998,9 @@ test('업무 예산 80%에서 계속할지 묻고, "계속"이면 처음 예산�
     assert.equal(f.counts.review, 0, '검토 전에 멈춘다');
     const next = f.runner.reply(first.id, { prompt: answer });
     await f.final(next);
-    assert.equal(loadTasks(f.root)[0].status, done ? 'done' : 'blocked', answer);
+    assert.equal(loadTasks(f.root)[0].status, done ? 'done' : 'closed', answer);
     assert.deepEqual([f.counts.a, f.counts.b], [1, 1], '완료 단계는 반복하지 않는다');
-    if (!done) assert.match(f.runner.result(next.id).text, /대표 결정으로 업무를 멈췄습니다/);
+    if (!done) assert.match(f.runner.result(next.id).text, /대표 결정으로 업무를 끝냈습니다/);
     const checkpoint = JSON.parse(readFileSync(join(f.root, '.office', 'orchestrations', `${first.rootId}.json`)));
     assert.equal(checkpoint.budget.limitCalls, done ? 10 : 5);
     // 날짜별 사용량 기록의 호출 수는 업무 예산이 센 호출 수와 같다(상시 업무 하루 사용량 집계에 쓰임)

@@ -12,7 +12,7 @@ export const STATUS_LABEL = { working: '작업중', standby: '대기', idle: '�
 const RUN_LABEL = { running: '실행 중', queued: '대기열', done: '완료', failed: '실패', stopped: '중지됨' };
 // 일시정지(대표의 "멈추고 정리" 지시)와 서버 종료로 끊긴 실행은 "이어서 해줘"로 재개할 수 있어 중지·실패와 구분한다
 const runLabel = (r) => r.paused && r.status === 'stopped' ? '일시정지' : r.interrupted && ['stopped', 'failed'].includes(r.status) ? '끊김·재개 가능' : RUN_LABEL[r.status] || r.status;
-const TASK_LABEL = { active: '진행', review: '사용자 확인', done: '완료', blocked: '막힘' };
+const TASK_LABEL = { active: '진행', review: '사용자 확인', done: '완료', blocked: '막힘', closed: '끝냄' };
 // 업무의 마지막 실행이 일시정지·끊김이면 '진행'·'막힘' 대신 그 상태를 보여 준다
 export function taskLabel(task, runs = []) {
   const last = runs.filter((r) => !r.phase && r.task === task.id).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))).at(-1);
@@ -662,7 +662,7 @@ export function collectGaps(raw = {}) {
 }
 
 // ───────────────────── 산출물 ─────────────────────
-export const TASK_STATUS_LABEL = { active: '진행', review: '사용자 확인', done: '완료', blocked: '막힘' };
+export const TASK_STATUS_LABEL = { active: '진행', review: '사용자 확인', done: '완료', blocked: '막힘', closed: '끝냄' };
 
 export function normalizeOutputs(data) {
   const list = Array.isArray(data) ? data : Array.isArray(data?.tasks) ? data.tasks : Array.isArray(data?.outputs) ? data.outputs : [];
@@ -2114,6 +2114,8 @@ export function chiefResultMessage(result) {
     return n ? `진행 중이던 업무 ${n}건을 일시정지하고 업무 폴더마다 정리 노트(pause-note.md)를 남겼어요. 서버를 꺼도 되고, 다음에 "이어서 해줘"라고 쓰면 다시 시작합니다.`
       : '지금 진행 중인 업무가 없어 일시정지할 것이 없어요.';
   }
+  if (result.taskClosed) return '업무를 끝냈어요. 지금까지 만든 파일은 업무 폴더에 남아 있습니다. 내역 초기화로 목록에서 지울 수 있어요.';
+  if (result.historyCleared) return `내역을 지웠어요(업무 ${result.removedTasks ?? 0}건, 실행 ${result.removedRuns ?? 0}건). 최종 산출물·계정·발송 증표와 진행 중인 업무는 그대로입니다.${result.keptWaiting ? ` 답변을 기다리는 업무 ${result.keptWaiting}건은 남겼어요. 그 대화에서 "이 업무 끝내줘"라고 하면 지울 수 있습니다.` : ''}`;
   if (result.resumeRequested) {
     const n = result.resumed?.length || 0;
     const skipped = result.skipped?.length ? ` 이어가지 못한 ${result.skipped.length}건: ${result.skipped.map((s) => s.reason).join(' / ')}` : '';
@@ -2325,6 +2327,7 @@ function renderThread() {
   else if (threadSending) status = '보내는 중…';
   const disabled = S.demo || !latest || busy || !latest.canReply || threadSending;
   $('threadSend').disabled = disabled;
+  $('threadClose').hidden = S.demo || !latest?.needsReply || busy;
   $('threadPrompt').disabled = S.demo || !latest?.canReply;
   $('threadModel').disabled = disabled;
   $('threadStatus').textContent = status;
@@ -2355,9 +2358,9 @@ async function submitThread(ev) {
   try {
     const model = $('threadModelRow').hidden ? '' : $('threadModel').value;
     const effort = $('threadEffort').value;
-    await api('POST', `/api/runs/${encodeURIComponent(latest.id)}/reply`, { prompt, ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
+    const sent = await api('POST', `/api/runs/${encodeURIComponent(latest.id)}/reply`, { prompt, ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
     $('threadPrompt').value = '';
-    toast(`${runWho(latest)}에게 답장을 보냈어요.`);
+    toast(sent?.historyCleared || sent?.taskClosed ? chiefResultMessage(sent) : `${runWho(latest)}에게 답장을 보냈어요.`);
     await refresh();
   } catch (e) {
     $('threadError').textContent = e.message; $('threadError').hidden = false;
@@ -3206,6 +3209,17 @@ function renderCompletion() {
   state.ready = Boolean(final && reportFile && !files?.error);
 }
 
+// 답을 기다리는 업무를 끝낸다. 만든 파일은 남고, 내역 초기화로 목록에서 지울 수 있게 된다
+async function closeThreadTask() {
+  const runs = threadOf(S.runs, S.runs.find((r) => (r.rootId || r.id) === ui.thread?.rootId)?.id);
+  const latest = runs.at(-1);
+  if (!latest || !await confirmBox('이 업무를 여기서 끝낼까요? 지금까지 만든 파일은 업무 폴더에 남습니다.', '업무 끝내기')) return;
+  try {
+    toast(chiefResultMessage(await api('POST', `/api/runs/${encodeURIComponent(latest.id)}/close`)));
+    await refresh();
+  } catch (error) { toast(error.message, { type: 'error' }); }
+}
+
 async function clearHistory() {
   if (S.demo) return;
   if (!await confirmBox('완료된 업무와 종료된 실행을 목록에서 지우고 대화·실행 로그를 정리할까요? 최종 산출물, 계정, 발송 증표, 진행 중이거나 답변을 기다리는 업무는 보존합니다.', '내역 초기화')) return;
@@ -3214,7 +3228,7 @@ async function clearHistory() {
     const result = await api('DELETE', '/api/history');
     resultCache.clear(); threadSig = '';
     await refresh();
-    toast(`업무 ${result.removedTasks}건 · 실행 ${result.removedRuns}건의 내역을 정리했어요.`);
+    toast(chiefResultMessage({ historyCleared: true, ...result }));
   } catch (error) { toast(error.message, { type: 'error' }); }
   finally { renderChiefSettings(); }
 }
@@ -3475,6 +3489,7 @@ function init() {
     renderFeed();
   });
   $('clearHistoryBtn').addEventListener('click', clearHistory);
+  $('threadClose').addEventListener('click', closeThreadTask);
   $('completionFolder').addEventListener('click', () => openFolder(ui.completion?.taskId));
   $('completionDialog').addEventListener('close', () => {
     const current = ui.completion;

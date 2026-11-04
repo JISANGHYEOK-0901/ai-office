@@ -567,34 +567,47 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
     });
 
     function finish(r, { status, summary }) {
-      if (entry.done) return;
-      entry.done = true;
+      if (entry.done || entry.finishing) return;
+      entry.finishing = true;
       // 중지 요청 뒤 리더만 끝났으면 SIGTERM을 무시한 손자가 남아 있을 수 있어 SIGKILL 타이머를 유지한다
       if (!(entry.stopRequested && groupAlive(child?.pid))) clearTimeout(entry.killTimer);
-      live.delete(r.id);
+      // close는 자식의 stdout 종료만 뜻한다. 파일 쓰기 스트림이 끝나기 전에 done을 공개하면
+      // Windows CI처럼 완료 직후 로그를 읽는 쪽에서 빈 파일을 볼 수 있다.
+      const complete = () => {
+        entry.done = true;
+        live.delete(r.id);
+        const verdict = status === 'done' ? parseVerdict(spec.lastMessage) : 'ERROR';
+        delete r.resultError;
+        delete r.lastText;
+        const fullText = spec.review ? '' : (spec.fullText || spec.lastAssistant || '');
+        if (fullText) saveResult(r, fullText);
+        const needsReply = !spec.phase && status === 'done' && Boolean(r.sessionId) && looksLikeQuestion(fullText);
+        // 비서실장이 실행 중에 task start 로 만든 업무는 훅이 sessions.json 에만 연결한다. run 에도 남겨
+        // 산출물 탭의 대화 스레드·사용자 반려(이어서 답하기)가 같은 업무의 run 을 찾게 한다
+        if (!r.task && r.sessionId) {
+          const linked = sessionTask(r.sessionId);
+          if (linked) r.task = linked;
+        }
+        Object.assign(r, { status, summary, needsReply, endedAt: new Date().toISOString() });
+        if (needsReply) {
+          emit({ engine: spec.engine, session: `run-${r.id}`, instance: `run-${r.id}`, agent: spec.agentId || 'chief', kind: 'reply.wait', run: r.id, ...(r.task ? { task: r.task } : {}), summary: redact(lastParagraph(fullText), 160) });
+        }
+        // REVIEWS 지표·업무 판정에 잡히도록 codex-review.mjs 와 같은 review.end 이벤트를 남긴다
+        if (codexEvent) emit({ ...evBase, kind: 'review.end', verdict, summary: redact(summary || verdict) });
+        changed(r);
+        spec.onComplete?.(r, fullText || summary);
+        entry.onDone?.();
+        pump();
+      };
+      if (log.closed || log.destroyed) { complete(); return; }
+      const afterLog = () => {
+        log.off('error', afterLog);
+        log.off('close', afterLog);
+        complete();
+      };
+      log.once('error', afterLog);
+      log.once('close', afterLog);
       log.end();
-      const verdict = status === 'done' ? parseVerdict(spec.lastMessage) : 'ERROR';
-      delete r.resultError;
-      delete r.lastText;
-      const fullText = spec.review ? '' : (spec.fullText || spec.lastAssistant || '');
-      if (fullText) saveResult(r, fullText);
-      const needsReply = !spec.phase && status === 'done' && Boolean(r.sessionId) && looksLikeQuestion(fullText);
-      // 비서실장이 실행 중에 task start 로 만든 업무는 훅이 sessions.json 에만 연결한다. run 에도 남겨
-      // 산출물 탭의 대화 스레드·사용자 반려(이어서 답하기)가 같은 업무의 run 을 찾게 한다
-      if (!r.task && r.sessionId) {
-        const linked = sessionTask(r.sessionId);
-        if (linked) r.task = linked;
-      }
-      Object.assign(r, { status, summary, needsReply, endedAt: new Date().toISOString() });
-      if (needsReply) {
-        emit({ engine: spec.engine, session: `run-${r.id}`, instance: `run-${r.id}`, agent: spec.agentId || 'chief', kind: 'reply.wait', run: r.id, ...(r.task ? { task: r.task } : {}), summary: redact(lastParagraph(fullText), 160) });
-      }
-      // REVIEWS 지표·업무 판정에 잡히도록 codex-review.mjs 와 같은 review.end 이벤트를 남긴다
-      if (codexEvent) emit({ ...evBase, kind: 'review.end', verdict, summary: redact(summary || verdict) });
-      changed(r);
-      spec.onComplete?.(r, fullText || summary);
-      entry.onDone?.();
-      pump();
     }
   }
 
@@ -731,7 +744,7 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
       if (run.status === 'queued') Object.assign(run, { status: 'stopped', endedAt: now, summary: '서버 종료로 대기 중인 실행을 취소했습니다.' });
       spec.onComplete?.(run);
     }
-    for (const run of runs) if (!run.phase && run.status === 'running') run.interrupted = true;
+    for (const run of runs) if (!run.phase && run.status === 'running' && !live.get(run.id)?.finishing) run.interrupted = true;
     const orchestrations = [...live.values()].filter((e) => e.controller);
     for (const entry of orchestrations) entry.controller.abort('server-shutdown');
     persist();
@@ -748,6 +761,7 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
       };
       // 리더가 끝났어도 그룹(손자 프로세스)이 남아 있으면 SIGKILL 시점까지 기다린다
       entry.onDone = () => { if (!groupAlive(entry.child.pid)) done(); };
+      if (entry.finishing && !groupAlive(entry.child.pid)) return;
       requestStop(entry);
       clearTimeout(entry.killTimer);
       // 리더가 끝나도 그룹이 남을 수 있어 유예 시간 뒤에는 무조건 SIGKILL을 보낸다.
@@ -762,6 +776,8 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
   function stop(runId, { reason = 'user' } = {}) {
     const run = runs.find((r) => r.id === runId);
     if (!run) throw httpError(404, `실행을 찾을 수 없습니다: ${runId}`);
+    const entry = live.get(runId);
+    if (entry?.finishing) return publicRun(run);
     if (run.continuous && reason === 'user' && run.needsReply && !BUSY.has(run.status)) {
       const checkpoint = readPrivate(monitorFile(root, run.rootId));
       checkpoint.desired = false; checkpoint.status = 'stopped'; writePrivate(monitorFile(root, run.rootId), checkpoint);
@@ -778,7 +794,6 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
       item?.spec.onComplete?.(run);
       return publicRun(run);
     }
-    const entry = live.get(runId);
     if (run.status !== 'running' || !entry) return publicRun(run);
     if (entry.controller) {
       entry.controller.abort('user-stop');

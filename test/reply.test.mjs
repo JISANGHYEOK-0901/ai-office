@@ -336,6 +336,23 @@ process.stdin.on('end', () => {
   }
 });
 
+test('자식 종료 직후에는 로그 닫힘까지 완료 상태와 서버 종료를 기다린다', async (t) => {
+  const root = makeRoot();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const { calls, spawnImpl } = fakeSpawner();
+  const runner = createRunner({ root, spawnImpl });
+  const run = runner.start({ agentId: 'research-1', prompt: '로그 확인' });
+  const child = calls[0].child;
+  child.stderr.write('종료 직전 출력');
+  const childClosed = new Promise((resolve) => child.once('close', resolve));
+  child.finish(0);
+  await childClosed;
+  assert.equal(runner.list()[0].status, 'running', '자식 종료만으로 완료를 공개하지 않는다');
+  await runner.stopAll({ graceMs: 20 });
+  assert.equal(runner.list()[0].status, 'done');
+  assert.match(readFileSync(join(root, '.office', 'runs', `${run.id}.log`), 'utf8'), /종료 직전 출력/);
+});
+
 // ---- HTTP API ----
 function request(base, method, path, { body, headers = {} } = {}) {
   return new Promise((resolve, reject) => {

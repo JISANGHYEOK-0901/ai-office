@@ -56,11 +56,17 @@ test('한도와 비밀값 위치', () => {
   assert.equal(SECRET_MENTION.test('cat outputs/report.md'), false);
 });
 
-test('진행 점검은 검토처럼 회사 설정의 비서실장 모델로 실행한다(계획만 고정 모델)', async () => {
+test('최종 검토는 회사 설정 모델, 진행 점검은 가벼운 모델, 계획은 고정 모델로 실행한다', async () => {
   const { resolveControlChief } = await import('../lib/settings.mjs');
-  const chief = { engine: 'claude', model: 'sonnet', effort: 'low' };
+  const chief = { engine: 'codex', model: 'gpt-6.1-sol', effort: 'max' };
   const tools = { claude: { installed: true, loggedIn: true } };
-  assert.deepEqual(resolveControlChief(chief, { phase: 'progress', tools }), chief);
+  const noClaude = { claude: { installed: false } };
+  assert.deepEqual(resolveControlChief(chief, { phase: 'progress', tools }), { engine: 'claude', model: 'sonnet', effort: 'medium' });
+  assert.deepEqual(resolveControlChief(chief, { phase: 'progress', tools: noClaude }), { engine: 'codex', model: 'gpt-6.1-sol', effort: 'medium' });
+  assert.deepEqual(resolveControlChief(chief, { phase: 'progress', tools, mode: 'codex' }), { engine: 'codex', model: 'gpt-6.1-sol', effort: 'medium' });
+  assert.deepEqual(resolveControlChief({ ...chief, effort: 'low' }, { phase: 'progress', tools: noClaude }).effort, 'low', '더 낮게 고른 값은 올리지 않는다');
+  assert.equal(resolveControlChief({ engine: 'claude', model: 'opus', effort: 'high' }, { phase: 'progress', tools: noClaude }).engine, 'codex');
+  assert.equal(resolveControlChief(chief, { phase: 'progress', tools: { claude: {} } }).engine, 'codex', 'Claude 로그인 확인 전에도 멈추지 않는다');
   assert.deepEqual(resolveControlChief(chief, { phase: 'review', tools }), chief);
   assert.deepEqual(resolveControlChief(chief, { phase: 'plan', tools }), { engine: 'claude', model: 'opus', effort: 'high' });
 });

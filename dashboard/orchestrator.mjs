@@ -206,7 +206,8 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       `파일 조회 기준 폴더는 작업 공간 ${root}입니다. .office/… 등 요청의 상대 원본 경로는 작업 공간 기준입니다. inputs에는 앞 단계 id 또는 작업 공간 내부 원본의 절대 경로를 쓰세요. 기존 업무 상대 입력도 지원합니다. 파일 부재를 묻기 전에 Read/Glob으로 작업 공간과 업무 폴더를 확인하세요. 경로 검사 실패는 먼저 계획을 수정하고 실제로 있는 원본의 복구를 대표에게 요구하지 마세요.`,
       'plan.goal은 업무를 알아보기 쉬운 짧은 한국어 이름으로 쓰세요(최종산출물 폴더 이름이 됩니다). 대표에게 전달할 단계의 title은 대표가 받는 파일 이름이 됩니다. 내용을 바로 알 수 있는 한국어 이름으로 지으세요(예: 업무 내용·대상·조건이 드러나게). 작업 파일 output 이름은 지금 규칙대로 둡니다.',
       'plan.deliverables에는 대표에게 최종 전달할 단계 id를 고르세요. 최종 HTML·문서·첨부 등 요청 결과만 포함하고 계획·중간 조사·검토용 문안은 제외하세요. 별도 첨부가 없으면 []. 실행기가 검토 후 최종산출물/날짜/업무명 폴더로 모읍니다.',
-      '담당이 없고 관련 부서가 둘 이상이면 needsMeeting:true와 meetingAgents(2~4명). 회의 제안이 주어졌으면 반영하고 needsMeeting:false.',
+      '대표가 요청한 범위와 결과물만 계획하세요. 속도가 중요합니다. 자료 수집·뉴스 찾기는 대표가 말한 건수만 해당 부서 실무 직원 한 명의 한 단계로 끝냅니다(팀장 배정, 건수를 넘는 후보 수집, 재검증·취합 단계를 더하지 않음). HTML·보고서는 대표가 요청했을 때만 만들고, 아니면 결과를 md 파일 하나로 전달합니다. done에는 제목·출처 링크·날짜·요약처럼 요청에 필요한 항목만 쓰고, 건수를 채우면 바로 끝내게 하세요. 교차 검증 같은 정밀 확인은 대표가 요청했거나 외부 제출·재무·법률 자료일 때만 넣습니다.',
+      '담당이 없어도 자료 수집·조사·글 작성처럼 한 부서가 끝낼 수 있는 일은 회의 없이 그 부서에 바로 배정하세요(needsMeeting:false). 여러 부서가 함께 해야 하고 분담을 정하기 어려운 일만 needsMeeting:true와 meetingAgents(2~4명). 회의 제안이 주어졌으면 반영하고 needsMeeting:false.',
       '피드백이면 rerunStages에 수정할 단계 id만 넣으세요. 후속 단계는 프로그램이 다시 실행합니다.',
       '부서 팀장에게 배정하면 팀장은 구조화된 delegate 응답으로 같은 부서 직원에게 분담할 수 있습니다. 전달 부서의 필수/권장을 확인하세요.',
       'plan.publications는 대표가 지시한 외부 작업 배열입니다. 외부 작업이 없으면 []. 각 항목은 {id,action,service,connection,agent,target,recipients,subject,content,instructions,files,attachments}입니다.',
@@ -400,6 +401,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           html ? `${HTML_BRIEF}\nHTML 보고서 기본 양식: ${join(programRoot(), 'org/templates/report.html')}. 읽어서 정보 구조·스타일을 참고하고 업무에 맞게 작성하세요. {{REPORT_*}} 빈 항목은 모두 채우거나 불필요한 섹션과 함께 제거하세요. 근거가 없으면 꾸미기 위해 숫자·차트를 만들지 마세요.` : '',
           state.delegated[stage.id] ? '부서 직원의 분담 결과를 입력에서 읽고 취합하세요. 이미 분담했으므로 다시 delegate하지 마세요.' : '',
           issue ? `앞 실행의 산출물 검사 실패: ${issue}. 수정하여 지정된 파일을 작성하세요.` : '',
+          '완료 기준을 채우면 바로 끝내세요. 기준에 없는 추가 조사·확인은 하지 않습니다.',
         ].filter(Boolean);
         text = await runStage({ phase: 'stage', agentId: stage.agent,
         prompt: [

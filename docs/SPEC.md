@@ -191,6 +191,7 @@ test/                     node:test
 ### 의도 판별
 
 - 판단은 AI, 권한은 근거 검사로 나눈다(`lib/intent.mjs`, `lib/ai-judge.mjs`).
+- 지시 접수 중(판별 최대 15초)에는 지시창이 전달 중 상태를 표시하고 버튼을 잠근다. 서버도 접수 중인 같은 지시를 409로 거절해 다른 탭·터미널의 중복 업무를 막는다.
 - 호출: 로그인된 Claude면 `claude -p --model haiku --output-format json --json-schema <스키마> --tools ''`, 아니면 `codex exec -s read-only --output-schema … -c model_reasoning_effort="low"`. 작업 공간 밖(임시 폴더)에서 실행한다. 제한 15초.
 - 테스트용 가짜 CLI(`.js`)면 판별하지 않는다. `AI_OFFICE_JUDGE=on`으로 켜고 `off`로 끈다.
 - 지시창(`judgeCommand`, `schemas/intent.json`): kind(task/pause/resume), externalActions(mail/post/comment/web), delegated, standing(none/until_stop/duration/deadline + 분·종료 시각·간격), 예약(scheduleTime·scheduleDate·scheduleTimes), outputDir와 각 근거. 예약 날짜는 오늘부터, 횟수는 1~365만 받는다.

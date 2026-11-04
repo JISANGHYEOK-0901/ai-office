@@ -787,6 +787,14 @@ export async function startServer({
   }
 
   // ---- 실행 ----
+  // 지시 판별을 기다리는 동안(최대 15초) 같은 지시가 또 들어오면 중복 업무를 만들지 않는다(다른 탭·터미널 포함)
+  const startingRuns = new Set();
+  async function startRunOnce(body) {
+    const key = typeof body.prompt === 'string' ? body.prompt.normalize('NFKC').replace(/\s+/g, ' ').trim() : '';
+    if (key && startingRuns.has(key)) throw new HttpError(409, '같은 지시를 접수하고 있습니다. 잠시만 기다려 주세요.');
+    startingRuns.add(key);
+    try { return await startRun(body); } finally { startingRuns.delete(key); }
+  }
   async function startRun(body) {
     if (!runner) throw new HttpError(409, '데모 모드에서는 작업을 실행할 수 없습니다.');
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
@@ -1398,7 +1406,7 @@ export async function startServer({
       if (method === 'POST' && parts.length === 4 && action === 'duty') return sendJson(res, 200, await setDuty(id, body));
     }
     if (resource === 'runs') {
-      if (method === 'POST' && parts.length === 2) return sendJson(res, 202, await startRun(body));
+      if (method === 'POST' && parts.length === 2) return sendJson(res, 202, await startRunOnce(body));
       if (method === 'POST' && parts.length === 4 && action === 'stop') return sendJson(res, 200, await stopRun(id));
       if (method === 'POST' && parts.length === 4 && action === 'reply') return sendJson(res, 202, await replyRun(id, body));
     }

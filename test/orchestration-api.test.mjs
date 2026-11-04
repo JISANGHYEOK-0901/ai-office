@@ -129,9 +129,9 @@ test('HTTP: 지시창 의도는 AI 판별을 쓰고(규칙이 못 잡는 표현)
   const bin = join(root, 'judge.mjs');
   // 판별 스키마(kindEvidence)에만 응답하고 그 밖의 실행은 하지 않는 가짜 CLI
   writeFileSync(bin, `const a=process.argv.slice(2);if(a.includes('--version')){console.log('Fixture 1.0');process.exit(0)}if(a.includes('auth')){console.log(JSON.stringify({loggedIn:true}));process.exit(0)}if(a.includes('login')){console.log('Logged in');process.exit(0)}
-let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{const s=a.includes('--json-schema')?JSON.parse(a[a.indexOf('--json-schema')+1]):{properties:{}};
+let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>setTimeout(()=>{const s=a.includes('--json-schema')?JSON.parse(a[a.indexOf('--json-schema')+1]):{properties:{}};
 if(!s.properties.kindEvidence)process.exit(1);
-const pause=input.includes('오늘은 여기까지');console.log(JSON.stringify({type:'result',structured_output:{kind:pause?'pause':'task',kindEvidence:pause?'오늘은 여기까지':'',externalActions:[],delegated:false,delegatedEvidence:'',standing:'none',standingEvidence:'',durationMinutes:0,deadline:'',intervalMinutes:0,scheduleTime:'',scheduleDate:'',scheduleTimes:0,scheduleEvidence:''}}));});`);
+const pause=input.includes('오늘은 여기까지');console.log(JSON.stringify({type:'result',structured_output:{kind:pause?'pause':'task',kindEvidence:pause?'오늘은 여기까지':'',externalActions:[],delegated:false,delegatedEvidence:'',standing:'none',standingEvidence:'',durationMinutes:0,deadline:'',intervalMinutes:0,scheduleTime:'',scheduleDate:'',scheduleTimes:0,scheduleEvidence:''}}));},300));`);
   let server;
   t.after(async () => { await server?.close(); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); });
   server = await startServer({ root, port: 0, quiet: true, env: { ...process.env, CLAUDE_BIN: bin, CODEX_BIN: bin, AI_OFFICE_JUDGE: 'on' } });
@@ -141,4 +141,10 @@ const pause=input.includes('오늘은 여기까지');console.log(JSON.stringify(
   assert.deepEqual(await post({ prompt: '오늘은 여기까지 하고 내일 마저 하자' }), { pauseRequested: true, paused: [] });
   const state = await (await fetch(base + '/api/state')).json();
   assert.equal(state.tasks.length, 0);
+  // 판별을 기다리는 동안 같은 지시를 또 보내면 한 건만 처리하고, 끝난 뒤에는 다시 보낼 수 있다
+  const same = { prompt: '오늘은 여기까지 하고 내일 마저 하자' };
+  const results = await Promise.all([post(same), post({ prompt: '  오늘은 여기까지 하고  내일 마저 하자 ' })]);
+  assert.equal(results.filter((r) => r.pauseRequested).length, 1);
+  assert.match(results.find((r) => !r.pauseRequested).error, /같은 지시를 접수/);
+  assert.deepEqual(await post(same), { pauseRequested: true, paused: [] });
 });

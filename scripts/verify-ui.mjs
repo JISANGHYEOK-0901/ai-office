@@ -183,6 +183,37 @@ try {
     check(`${theme} 테마 목록 색상`, 'click', () => assert.equal(colors.background, colors.expected));
     await shot(`${theme}-select-open.png`); await page.keyboard.press('Escape');
   }
+  // 지시 접수 중: 바로 표시하고, 응답 전에 다시 눌러도 한 번만 보낸다
+  let chiefPosts = 0, releaseChief;
+  const chiefHeld = new Promise((resolve) => { releaseChief = resolve; });
+  await page.route('**/api/runs', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    chiefPosts++;
+    await chiefHeld;
+    return route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ pauseRequested: true, paused: [] }) });
+  });
+  await page.locator('#chiefInput').fill('가상 지시 접수 표시 확인');
+  await page.locator('#chiefSubmit').click();
+  await page.locator('#chiefSendStatus').filter({ hasText: '전달하고 있습니다' }).waitFor();
+  const sendingLabel = await page.locator('#chiefSubmit').textContent();
+  const sendingLocked = await page.locator('#chiefSubmit').isDisabled();
+  check('지시 접수 중 표시와 버튼 잠금', 'click', () => { assert.equal(sendingLabel, '전달 중…'); assert.equal(sendingLocked, true); });
+  await page.locator('#chiefInput').press('Enter');
+  await page.locator('#chiefSubmit').click({ force: true }).catch(() => {});
+  await shot('chief-sending-desktop.png');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('#chiefSendStatus').scrollIntoViewIfNeeded();
+  await shot('chief-sending-mobile.png');
+  const sendingFits = await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+  check('접수 중 모바일 가로 넘침 없음', 'click', () => assert.equal(sendingFits, true));
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  check('접수 중 다시 눌러도 한 번만 전송', 'click', () => assert.equal(chiefPosts, 1));
+  releaseChief();
+  await page.waitForFunction(() => document.querySelector('#chiefSubmit').textContent === '지시하기' && !document.querySelector('#chiefSubmit').disabled);
+  const sentStatus = await page.locator('#chiefSendStatus').textContent();
+  const sentInput = await page.locator('#chiefInput').inputValue();
+  check('접수가 끝나면 입력창과 버튼 복구', 'click', () => { assert.equal(sentStatus, ''); assert.equal(sentInput, ''); });
+  await page.unroute('**/api/runs');
   await page.setViewportSize({ width: 390, height: 844 });
   await trigger('chiefModel').scrollIntoViewIfNeeded(); await trigger('chiefModel').click();
   await geometry('chiefModel'); await shot('mobile-model-open.png');

@@ -661,6 +661,7 @@ node scripts/codex-review.mjs --target outputs/<날짜>/<slug> [--reviewers <id�
 - 오류 응답: `{error:"한국어 메시지"}`. 검증 실패 400, 없음 404, 충돌 409. 데모 모드의 변경 요청은 409.
 - 상태 변경 API는 `X-Office-Token`(index.html에 주입), 같은 `Origin`, `Content-Type: application/json`을 모두 요구한다. 본문 1MB(가져오기 8MB).
 - 루프백이 아닌 `--host`는 시작 때 출력하는 `?key=` 주소로 받은 HttpOnly·SameSite=Strict 쿠키만 허용한다.
+- 터미널 지시 넣기(`scripts/office-ask.mjs`, `npm run office:ask`): 프로그램 폴더에서 연 터미널 AI가 대표 대신 `ask`(POST /api/runs), `status`·`wait`(GET /api/state, /api/runs/:id/result), `reply`(POST /api/runs/:id/reply)를 지시창과 같은 API·헤더로 부른다. 접속 정보(주소·토큰·pid)는 루프백 실행 중에만 `<작업 공간>/.office/dashboard-access.json`(0600)에 남기고 close에서 지운다. 실행기가 띄운 모든 AI 프로세스에는 `OFFICE_AI_RUN=1`을 붙이고, 이 표시(또는 `OFFICE_CHIEF_RUN`·`OFFICE_ORCHESTRATOR_CHILD`)가 있으면 명령이 거부한다. 작업 공간 연결 파일(shim)은 만들지 않는다. 지시문 원문 보존 규칙은 `office-request` 스킬에 둔다.
 - 정적 html에는 CSP(`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; … frame-ancestors 'none'`)를 붙이고 `X-Frame-Options: DENY`를 둔다. html 미리보기는 토큰으로 읽은 원문을 CSP meta가 든 Blob으로 `sandbox=""` iframe에 띄운다.
 
 ## 12. Windows·macOS 공통 동작

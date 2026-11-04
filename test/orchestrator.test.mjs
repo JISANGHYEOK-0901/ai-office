@@ -257,6 +257,42 @@ test('일시정지는 진행 업무를 멈추고 정리 노트를 남기며 "이
   assert.deepEqual(f.runner.resumeAll(), { resumed: [], skipped: [] });
 });
 
+test('하루 넘게 끊긴 업무는 일괄 재개하지 않고 사유를 알리며, 대화 답장으로는 이어갈 수 있다', async (t) => {
+  const f = fixture(t, { pauseB: true, independent: true });
+  const first = f.runner.start({ prompt: '어제 맡긴 업무를 실행해 줘' });
+  await waitFor(() => f.calls.some((c) => c.kind === 'b'));
+  await f.runner.stopAll({ graceMs: 10 });
+  assert.equal((await f.final(first)).interrupted, true);
+  const file = join(f.root, '.office', 'runs.json');
+  const at = new Date(Date.now() - 25 * 3600e3).toISOString();
+  writeFileSync(file, JSON.stringify(JSON.parse(readFileSync(file, 'utf8')).map((r) => r.id === first.id ? { ...r, createdAt: at, startedAt: at } : r)));
+  f.restart();
+  const old = f.runner.resumeAll();
+  assert.deepEqual(old.resumed, []);
+  assert.equal(old.skipped[0].id, first.id);
+  assert.match(old.skipped[0].reason, /하루 넘게 멈춘.*어제 맡긴 업무/);
+  assert.equal(f.runner.list().find((r) => r.id === first.id).interrupted, true, '사유만 알리고 상태는 그대로 둔다');
+  const replied = f.runner.reply(first.id, { prompt: '이어서 재개' });
+  assert.equal((await f.final(replied)).status, 'done');
+});
+
+test('대표가 일시정지한 업무는 하루가 지나도 일괄 재개한다', async (t) => {
+  const f = fixture(t, { pauseB: true, independent: true });
+  const first = f.runner.start({ prompt: '오래 걸리는 업무를 실행해 줘' });
+  await waitFor(() => f.calls.some((c) => c.kind === 'b'));
+  f.runner.pause();
+  await f.final(first);
+  await f.runner.stopAll({ graceMs: 10 });
+  const file = join(f.root, '.office', 'runs.json');
+  const at = new Date(Date.now() - 72 * 3600e3).toISOString();
+  writeFileSync(file, JSON.stringify(JSON.parse(readFileSync(file, 'utf8')).map((r) => r.id === first.id ? { ...r, createdAt: at, startedAt: at } : r)));
+  f.restart();
+  const { resumed, skipped } = f.runner.resumeAll();
+  assert.deepEqual(skipped, []);
+  assert.deepEqual(resumed.map((r) => r.from), [first.id]);
+  await f.final({ id: resumed[0].id });
+});
+
 test('서버 종료로 끊긴 업무도 재개 대상이고, 대표가 직접 중지한 업무는 일괄 재개하지 않는다', async (t) => {
   const f = fixture(t, { pauseB: true, independent: true });
   const first = f.runner.start({ prompt: '두 단계 업무를 실행해 줘' });

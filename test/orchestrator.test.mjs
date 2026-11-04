@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -550,6 +550,46 @@ test('일반 웹사이트 업무: 위임이 없으면 실행 전에 묶어서 �
   assert.deepEqual([f.counts.plan, f.counts.review], [1, 1], '확인 답장 뒤 계획·검토를 반복하지 않는다');
   assert.equal(loadTasks(f.root)[0].status, 'done');
   assert.match(f.runner.result(second.id).text, /웹사이트 작업[\s\S]*직원 확인 완료[\s\S]*evidence\/upload-1\.png[\s\S]*확인 내용: 공개 주소 확인/);
+});
+
+test('출처가 어긋나면 담당에게 한 번만 되돌리고, 로그인 사이트 조회 업무는 확인하지 않는다', async (t) => {
+  const { orchestrate } = await import('../dashboard/orchestrator.mjs');
+  const run = async (stageExtra, label) => {
+    const root = mkdtempSync(join(tmpdir(), 'office-source-'));
+    t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+    mkdirSync(join(root, 'org'));
+    writeFileSync(join(root, 'org', 'departments.json'), JSON.stringify([{ id: 'research', name: '리서치부', engine: 'claude' }]));
+    writeFileSync(join(root, 'org', 'roster.json'), JSON.stringify([{ id: 'research-1', name: '김대리', department: 'research' }]));
+    const task = '2026-11-04/run-source-' + label;
+    mkdirSync(join(root, 'outputs', ...task.split('/')), { recursive: true });
+    const prompts = [], reviews = [];
+    const sourceCalls = [];
+    const output = `outputs/${task}/research/research-1-a.md`;
+    const plan = { version: 1, task, goal: '자료', deliverables: ['a'], review: { by: 'chief', criteria: '확인' }, gaps: [], publications: [],
+      stages: [{ id: 'a', title: '자료', dept: 'research', agent: 'research-1', inputs: [], output, done: '작성', dependsOn: [], ...stageExtra }] };
+    const execute = async ({ phase, prompt }) => {
+      if (phase === 'plan') return JSON.stringify({ plan, question: '', needsMeeting: false, requestedActions: [] });
+      if (phase === 'review') { reviews.push(prompt); return JSON.stringify({ verdict: 'pass', stages: [], reason: '', report: '# 결과\n\n확인했습니다.', question: '' }); }
+      prompts.push(prompt);
+      mkdirSync(join(root, dirname(output)), { recursive: true });
+      writeFileSync(join(root, output), `완료 ${prompts.length} https://a.example/x`);
+      return JSON.stringify({ status: 'done', summary: '작성' });
+    };
+    const outbound = { connections: () => [{ id: 'erp', label: 'ERP', provider: 'web', status: 'connected' }], browse: async ({ execute: go }) => go({}) };
+    const report = await orchestrate({ root, run: { id: 'run-source-' + label, rootId: 'run-source-' + label, engine: 'claude', task }, prompt: '자료 정리', execute, signal: new AbortController().signal, outbound,
+      sourceCheck: async (files) => { sourceCalls.push(files); return { checked: 1, broken: [{ url: 'https://a.example/x', stage: 'a', status: 404 }], mismatched: [], unknown: [], skipped: 0 }; } });
+    return { report, prompts, reviews, sourceCalls, root, task };
+  };
+  const checked = await run({}, 'plain');
+  assert.equal(checked.prompts.length, 2, '한 번만 되돌린다');
+  assert.match(checked.prompts[1], /\[반려\][\s\S]*처음부터 다시 조사하지 말고[\s\S]*열리지 않음\(404\)/);
+  assert.equal(checked.sourceCalls.length, 2);
+  assert.equal(checked.reviews.length, 1);
+  assert.match(checked.reviews[0], /출처 자동 확인[\s\S]*열리지 않음[\s\S]*a\.example/);
+  assert.ok(existsSync(join(checked.root, 'outputs', ...checked.task.split('/'), 'source-check.json')));
+  const site = await run({ connection: 'erp', target: 'https://erp.example.com' }, 'site');
+  assert.equal(site.sourceCalls.length, 0, '내부 자료 주소를 밖으로 열지 않는다');
+  assert.equal(site.prompts.length, 1);
 });
 
 test('계획과 직원 지시는 요청 범위만 처리하도록 안내한다', async (t) => {

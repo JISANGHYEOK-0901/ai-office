@@ -17,6 +17,7 @@ import { BUDGET_WARN_RATIO, MAX_MAILS_PER_RUN, MAX_PLAN_REVISIONS, MAX_PROGRESS_
 import { mailKey, preparePublications, splitMailBatch } from '../lib/publications.mjs';
 import { attachmentQuestion, attachmentRef, pickChoices, resolveAttachments } from '../lib/attachments.mjs';
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
+import { checkSources, sourceProblemReason } from '../lib/source-check.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';
 import { CONNECTION_PROVIDERS, serviceProvider } from '../lib/connections.mjs';
 
@@ -34,7 +35,7 @@ export function checkpointFile(root, rootId) {
   return join(root, '.office', 'orchestrations', `${rootId}.json`);
 }
 
-export async function orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel = 4, resume = false, onDecision = () => {}, outbound = null, intent = null, judge = null, home = homedir() }) {
+export async function orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel = 4, resume = false, onDecision = () => {}, outbound = null, intent = null, judge = null, home = homedir(), sourceCheck = checkSources }) {
   const task = run.task;
   const taskDir = join(root, 'outputs', ...task.split('/'));
   const file = checkpointFile(root, run.rootId);
@@ -583,6 +584,29 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       emit('flow.review_request', { summary: '단계 산출물 검토를 요청했습니다.' });
       const reviewSignature = createHash('sha256').update(JSON.stringify([plan, state.completed, state.reviewGeneration, state.rejects])).digest('hex');
       const cached = state.approvedReview?.signature === reviewSignature ? state.approvedReview : null;
+      // 출처 자동 확인(AI 호출 없음): 어긋난 항목은 담당에게 한 번만 되돌리고, 그 뒤 결과는 검토 근거로만 쓴다.
+      // 로그인한 사이트의 조회 결과가 섞인 업무는 내부 주소가 나갈 수 있어 확인하지 않는다
+      let sources = null;
+      if (!cached && !plan.stages.some((s) => typeof s.connection === 'string' && s.connection.trim())) {
+        const files = plan.stages.filter((s) => /\.(?:md|txt|html?|csv|json)$/i.test(s.output)).flatMap((s) => {
+          try { return [{ stage: s.id, text: readFileSync(safeOutput(s.output), 'utf8') }]; } catch { return []; }
+        });
+        sources = await sourceCheck(files, { signal });
+        checkStop();
+        writeFileAtomic(join(taskDir, 'source-check.json'), JSON.stringify(sources, null, 2) + '\n');
+        const problems = [...sources.broken, ...sources.mismatched];
+        if (problems.length && !state.sourceRetried) {
+          state.sourceRetried = true;
+          const targets = plan.stages.filter((s) => problems.some((p) => p.stage === s.id));
+          state.rejects++;
+          state.rejectionReasons = Object.fromEntries(targets.map((s) => [s.id, sourceProblemReason(problems.filter((p) => p.stage === s.id))]));
+          state.rejectionReason = '';
+          clearDependents(new Set(targets.map((s) => s.id)));
+          persist();
+          for (const s of targets) emit('flow.review', { verdict: 'reject', to: s.dept, target: s.agent, stage: s.id, summary: redact('출처 자동 확인에서 어긋난 항목을 되돌렸습니다.') });
+          continue;
+        }
+      }
       const reviewers = cached || plan.review?.by === 'chief' || !plan.review?.by ? [] : org.roster.filter((a) => a.active !== false
         && (plan.review.by === 'codex' || plan.review.by === a.id)
         && org.departments.some((d) => d.id === a.department && d.active !== false && d.engine === 'codex' && codexRole(d) === 'review'));
@@ -608,6 +632,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         context(), plan.stages.some((s) => /\.html?$/i.test(s.output)) ? HTML_BRIEF : '',
         `외부 작업 형식 검사: ${JSON.stringify(prepared.errors)}. 메일 문안은 수신자·출처·본문이 대표 지시와 맞는지 확인하세요. 아직 실제 전송 전이므로 보고서에서 발송·게시 완료로 쓰지 마세요. 실행기가 실제 결과를 별도로 붙입니다.`,
         `outputs/${task}/review-notes.md가 있으면 추가 검증 근거를 읽고 산출물·이미지와 대조하세요.`,
+        sources ? `출처 자동 확인(접속 여부·페이지 제목만 확인, 본문 수치 미확인): 확인 ${sources.checked}건, 열리지 않음 ${JSON.stringify(sources.broken)}, 제목 불일치 ${JSON.stringify(sources.mismatched)}, 차단·시간 초과로 확인 불가 ${sources.unknown.length}건. 이미 한 번 고칠 기회를 준 항목이면 다시 반려하지 말고 보고서의 확인 필요에 적으세요.` : '',
         budgetLeft(),
         '당신이 최종 검토자입니다. 별도 검증실 부재는 공백이 아니므로 대체 검토 알림을 만들지 마세요. 요청한 전문 검토에 FIX/BLOCK/ERROR가 있거나 산출물이 없으면 pass를 내리지 마세요. 보고서에는 결과·산출물 경로·근거·확인 필요·실제 역량 공백을 포함하세요.',
       ].filter(Boolean).join('\n\n') }));

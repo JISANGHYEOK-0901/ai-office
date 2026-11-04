@@ -702,6 +702,59 @@ test('일반 웹사이트 업무: "하지 마"면 실행하지 않고, 위임 �
   assert.equal(calls.length, 1);
 });
 
+test('로그인 창: 링크가 있으면 계획 전에 열고, 로그인하면 답장 없이 이어 가며, 닫으면 답장으로 다시 연다', async (t) => {
+  let accounts = [];
+  const opened = [], delivered = [];
+  let result = () => ({ status: 'connected', id: 'n1' });
+  let planAtOpen = null;
+  const f = fixture(t, { publication: true, outbound: { connections: () => accounts,
+    requestLogin: async (args) => { opened.push(args); planAtOpen = f.counts.plan; const r = result(); if (r.status === 'connected') accounts = [{ id: 'n1', label: '네이버', provider: 'naver', status: 'connected' }]; return r; },
+    async deliver(args) { delivered.push(args); return { status: 'confirmed', resultUrl: 'https://blog.naver.com/x/1' }; } } });
+  const run = f.runner.start({ prompt: 'https://blog.naver.com/fixture 블로그에 글 게시해 줘. 끝까지 자동으로' });
+  const done = await f.final(run);
+  assert.equal(done.needsReply, false, '로그인하면 답장 없이 이어 간다');
+  assert.equal(opened[0].provider, 'naver');
+  assert.equal(planAtOpen, 0, '계획 전에 로그인 창을 연다');
+  assert.equal(f.counts.plan, 1, '계획은 연결 계정을 알고 한 번만 세운다');
+  assert.equal(delivered.length, 1);
+
+  // 창을 닫으면 이유를 알리고, AI 판별 없이 답장으로 다시 연다
+  accounts = []; opened.length = 0;
+  result = () => ({ status: 'closed', id: 'n1' });
+  const g = fixture(t, { publication: true, outbound: { connections: () => accounts,
+    requestLogin: async (args) => { opened.push(args); const r = result(); if (r.status === 'connected') accounts = [{ id: 'n1', label: '네이버', provider: 'naver', status: 'connected' }]; return r; },
+    async deliver() { return { status: 'confirmed', resultUrl: 'https://blog.naver.com/x/1' }; } } });
+  const second = g.runner.start({ prompt: 'https://blog.naver.com/fixture 블로그에 글 게시해 줘. 끝까지 자동으로' });
+  assert.equal((await g.final(second)).needsReply, true);
+  assert.match(g.runner.result(second.id).text, /로그인 창이 닫혀[\s\S]*답장을 보내면 창을 다시 엽니다/);
+  assert.equal(g.counts.plan, 0);
+  result = () => ({ status: 'connected', id: 'n1' });
+  const retried = g.runner.reply(second.id, { prompt: '웹을 네가 띄워 줘' });
+  assert.equal((await g.final(retried)).needsReply, false);
+  assert.equal(opened.length, 2);
+
+  // 링크가 없으면 계획 뒤에 열고, 로그인 뒤 계획을 다시 세운다
+  accounts = []; opened.length = 0;
+  const h = fixture(t, { publication: true, outbound: { connections: () => accounts,
+    requestLogin: async (args) => { opened.push(args); accounts = [{ id: 'n1', label: '네이버', provider: 'naver', status: 'connected' }]; return { status: 'connected', id: 'n1' }; },
+    async deliver() { return { status: 'confirmed', resultUrl: 'https://blog.naver.com/x/1' }; } } });
+  await h.final(h.runner.start({ prompt: '자료를 정리하고 블로그에 게시해 줘. 끝까지 자동으로' }));
+  assert.equal(opened.length, 1);
+  assert.equal(h.counts.plan, 2);
+  assert.equal(loadTasks(h.root)[0].status, 'done');
+
+  // "하지 마"면 외부 작업 없이 초안까지만 마친다
+  accounts = []; opened.length = 0;
+  const calls = [];
+  const d = fixture(t, { publication: true, outbound: { connections: () => accounts, requestLogin: async () => ({ status: 'closed', id: 'n1' }), async deliver(args) { calls.push(args); return { status: 'confirmed' }; } } });
+  const declined = d.runner.start({ prompt: 'https://blog.naver.com/fixture 블로그에 글 게시해 줘' });
+  await d.final(declined);
+  const stop = d.runner.reply(declined.id, { prompt: '하지 마' });
+  assert.equal((await d.final(stop)).status, 'done');
+  assert.equal(calls.length, 0);
+  assert.match(d.runner.result(stop.id).text, /대표 결정으로 실행하지 않음/);
+});
+
 test('필요한 계정이 없으면 작업 전에 묻고, 등록 뒤 이어서 진행한다(웹사이트 계정은 계획을 다시 세운다)', async (t) => {
   let accounts = [];
   const delivered = [];
@@ -721,7 +774,8 @@ test('필요한 계정이 없으면 작업 전에 묻고, 등록 뒤 이어서 �
   accounts = [{ id: 'naver-1', label: '홍보용', provider: 'naver', status: 'connected', hasCredentials: true, firstLoginDone: true, source: 'file' }];
   await f.final(f.runner.reply(again.id, { prompt: '로그인했어, 이어서 재개' }));
   assert.equal(delivered.length, 1);
-  assert.deepEqual([f.counts.plan, f.counts.a, f.counts.b], [1, 1, 1], '블로그 계정은 계획을 다시 세우지 않는다');
+  assert.deepEqual([f.counts.a, f.counts.b], [1, 1]);
+  assert.ok(f.counts.plan >= 2, '계정 없이 세운 계획은 등록 뒤 다시 세운다(조회 단계에 브라우저를 붙이기 위해)');
   // 같은 서비스 계정이 여럿이면 어느 계정을 쓸지 묻는다
   accounts = [{ id: 'n1', label: 'A', provider: 'naver', status: 'connected' }, { id: 'n2', label: 'B', provider: 'naver', status: 'connected' }];
   const g = fixture(t, { publication: true, outbound });

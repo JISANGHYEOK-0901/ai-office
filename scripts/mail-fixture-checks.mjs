@@ -83,8 +83,9 @@ export async function verifyMailEditor() {
 // 카페 글쓰기처럼 제목이 textarea이고, 입력은 안쪽 프레임의 숨은 편집 칸이 받아 붙여넣기만 처리해 링크 카드를 만드는 편집기
 const CAFE_INPUT = `<!doctype html><html lang="ko"><body><div id="capture" contenteditable="true" style="width:17px;height:200px"></div>
 <script>document.getElementById('capture').addEventListener('paste',(e)=>{e.preventDefault();const t=e.clipboardData.getData('text/plain');const doc=parent.document;
-const p=doc.createElement('p');p.className='text';p.textContent=t;doc.getElementById('content').appendChild(p);
-if(/youtube\\.com\\/shorts\\//.test(t)){const c=doc.createElement('div');c.className='card';c.textContent='영상 카드';doc.getElementById('content').appendChild(c);}});
+// 실제 편집기처럼 링크를 단독으로 붙여넣을 때만 영상 카드가 되고, 글과 섞이면 글자로 남는다
+if(/^https:\\/\\/www\\.youtube\\.com\\/shorts\\/\\S+$/.test(t.trim())){const c=doc.createElement('div');c.className='card';c.textContent='영상 카드';doc.getElementById('content').appendChild(c);return;}
+const p=doc.createElement('p');p.className='text';p.textContent=t;doc.getElementById('content').appendChild(p);});
 document.getElementById('capture').addEventListener('beforeinput',(e)=>e.preventDefault());</script></body></html>`;
 const CAFE_WRITE = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>카페 글쓰기</title></head><body>
 <button id="board" type="button" onclick="this.textContent='수다방 선택됨'">게시판 선택</button>
@@ -116,7 +117,8 @@ export async function verifyCafeEditor() {
       try { return await action(context); } finally { await context.close(); }
     }, close: async () => {} };
     broker = createBrowserWork({ root, store, sessions, providersForTests: (_provider, url) => new URL(url).origin === origin });
-    const body = 'https://www.youtube.com/shorts/AbCdEfGhI_1';
+    const link = 'https://www.youtube.com/shorts/AbCdEfGhI_1';
+    const body = `귀여운 강아지 영상이에요\n${link}\n다들 한번 보세요`;
     const result = await broker.deliver({ scope: 'cafe-editor', allowedActions: ['post'], instructionKey: 'k', signal: new AbortController().signal, body,
       publication: { id: 'c1', action: 'post', service: 'naver_cafe', connection: account.id, target: `${origin}/write`, recipients: [], subject: '강아지 반응이 너무 웃기네요ㅎㅎ' },
       execute: async ({ url, token }) => {
@@ -137,13 +139,13 @@ export async function verifyCafeEditor() {
         await call('browser_submit', { ref: ref(/^등록$/) });
         await call('browser_finish'); return 'done';
       } });
-    assert.equal(result.status, 'confirmed', '글 화면에 제목·본문이 보이면 게시 완료로 확인한다');
+    assert.equal(result.status, 'confirmed', '링크가 카드로 바뀌어도 글 화면의 제목·본문으로 게시 완료를 확인한다');
     assert.equal(posts.length, 1);
     assert.equal(posts[0].board, '수다방 선택됨');
     assert.equal(posts[0].title, '강아지 반응이 너무 웃기네요ㅎㅎ');
-    assert.equal(posts[0].text, body, '본문은 한 번만 들어간다');
-    assert.equal(posts[0].card, true, '붙여넣기로 넣어 링크가 영상 카드가 된다');
-    return [{ name: '카페 편집기: textarea 제목, 게시판 선택 클릭, 붙여넣기로 영상 카드, 등록 확인', interaction: 'click', passed: true }];
+    assert.equal(posts[0].text, '귀여운 강아지 영상이에요\n다들 한번 보세요', '글은 순서대로 한 번만 들어가고 링크는 글자로 남지 않는다');
+    assert.equal(posts[0].card, true, '글과 링크를 나눠 붙여넣어 링크가 영상 카드가 된다');
+    return [{ name: '카페 편집기: textarea 제목, 게시판 선택 클릭, 글과 링크를 나눠 영상 카드, 등록 확인', interaction: 'click', passed: true }];
   } finally {
     await broker?.close(); await browser?.close(); site?.close();
     await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });

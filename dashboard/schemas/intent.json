@@ -81,6 +81,12 @@
     },
     "outputDirEvidence": {
       "type": "string"
+    },
+    "quick": {
+      "type": "boolean"
+    },
+    "quickAgent": {
+      "type": "string"
     }
   },
   "required": [
@@ -99,7 +105,9 @@
     "scheduleTimes",
     "scheduleEvidence",
     "outputDir",
-    "outputDirEvidence"
+    "outputDirEvidence",
+    "quick",
+    "quickAgent"
   ],
   "additionalProperties": false
 }

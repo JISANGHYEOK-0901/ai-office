@@ -38,6 +38,7 @@ function fixture(t, options = {}) {
   mkdirSync(join(root, 'org'));
   const org = structuredClone(ORG);
   if (options.allClaude) org.departments.filter((d) => d.codexRole === 'exec').forEach((d) => { d.engine = 'claude'; });
+  if (options.handoffRequired) Object.assign(org.departments[0], { handoffPolicy: 'required', handoffs: ['dev'] });
   if (options.delegate) { org.roster[0].lead = true; org.roster.push({ id: 'research-2', name: '박사원', department: 'marketing' }); }
   writeFileSync(join(root, 'org', 'departments.json'), JSON.stringify(org.departments));
   writeFileSync(join(root, 'org', 'roster.json'), JSON.stringify(options.noReviewers ? org.roster.filter((a) => a.department !== 'verify') : org.roster));
@@ -590,6 +591,28 @@ test('출처가 어긋나면 담당에게 한 번만 되돌리고, 로그인 사
   const site = await run({ connection: 'erp', target: 'https://erp.example.com' }, 'site');
   assert.equal(site.sourceCalls.length, 0, '내부 자료 주소를 밖으로 열지 않는다');
   assert.equal(site.prompts.length, 1);
+});
+
+test('빠른 조회: 계획·검토 없이 직원 한 명이 Sonnet/low로 끝내고 생략 사실을 보고한다', async (t) => {
+  const f = fixture(t, { allClaude: true, handoffRequired: true });
+  const run = f.runner.start({ prompt: '미국 중간선거 최신 자료 10건 수집해줘', intent: { actions: [], delegated: false, source: 'ai', quick: true, quickAgent: 'research-1' } });
+  assert.equal((await f.final(run)).status, 'done');
+  assert.deepEqual([f.counts.plan, f.counts.review], [0, 0], '계획·검토 호출 없음');
+  const stage = f.calls.find((c) => /출력: /.test(c.input || ''));
+  assert.equal(f.calls.filter((c) => /출력: /.test(c.input || '')).length, 1);
+  assert.deepEqual([stage.args[stage.args.indexOf('--agent') + 1], stage.args[stage.args.indexOf('--model') + 1], stage.args[stage.args.indexOf('--effort') + 1]], ['research-1', 'sonnet', 'low']);
+  assert.match(stage.input, /빠른 조회입니다/);
+  assert.match(stage.input, /같은 사건은 1건으로/);
+  const report = f.runner.result(run.id).text;
+  assert.match(report, /최종 검토를 거치지 않았습니다/);
+  assert.equal(loadTasks(f.root)[0].status, 'done');
+});
+
+test('빠른 조회 직원이 없거나 계획을 만들 수 없으면 전체 흐름으로 간다', async (t) => {
+  const f = fixture(t, { allClaude: true });
+  const run = f.runner.start({ prompt: '자료 찾아줘', intent: { actions: ['web'], delegated: false, source: 'ai', quick: true, quickAgent: '' } });
+  await f.final(run);
+  assert.ok(f.counts.plan >= 1, '외부 작업이 허용된 지시는 빠른 경로를 쓰지 않는다');
 });
 
 test('계획과 직원 지시는 요청 범위만 처리하도록 안내한다', async (t) => {

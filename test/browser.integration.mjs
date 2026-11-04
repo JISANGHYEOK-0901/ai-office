@@ -121,3 +121,40 @@ test('실제 브라우저: 인증 화면의 보호 조치만 감지하고, 보�
   await assert.rejects(sessions.withSession(account.id, 'https://cafe.naver.com/a/1', new AbortController().signal, async () => {}), AccountProtected);
   assert.equal(launched, 0, '보호 상태에서는 브라우저를 띄우지 않는다');
 });
+
+test('실제 브라우저: 같은 계정의 작업은 한 창·한 탭에서 이어 가고 창이 닫혔을 때만 새로 띄운다', async (t) => {
+  const temp = mkdtempSync(join(tmpdir(), 'office-reuse-')), root = join(temp, 'workspace'); mkdirSync(root);
+  const site = createServer((req, res) => { res.setHeader('content-type', 'text/html; charset=utf-8'); res.end(`<h1>${req.url}</h1>`); });
+  await new Promise((resolve) => site.listen(0, '127.0.0.1', resolve));
+  const base = `http://localhost:${site.address().port}`;
+  let launched = 0;
+  const browser = { launchPersistentContext: async (profile, options) => { launched++; return chromium.launchPersistentContext(profile, { ...options, channel: undefined, headless: true }); } };
+  const store = createConnectionStore({ root, base: join(temp, 'private') });
+  const account = store.create({ provider: 'web', label: '사이트', startUrl: `${base}/`, hosts: [] });
+  store.update(account.id, { status: 'connected', manualLoginAt: 'x' });
+  const sessions = createBrowserSessions({ store, browser, channel: null });
+  t.after(async () => { await sessions.close(); await new Promise((resolve) => site.close(resolve)); await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); });
+  const signal = new AbortController().signal;
+  const seen = [];
+  const job = (path) => sessions.withSession(account.id, `${base}${path}`, signal, async (context) => {
+    seen.push({ context, tabs: context.pages().length, url: context.pages().at(-1).url() });
+    return context;
+  });
+  const first = await job('/one');
+  await first.newPage(); // 앞 작업이 탭을 더 열어 둔 경우
+  const second = await job('/two');
+  assert.equal(launched, 1, '창을 다시 띄우지 않는다');
+  assert.equal(second, first);
+  assert.equal(seen[1].tabs, 1, '탭 하나로 이어 간다');
+  assert.ok(seen[1].url.endsWith('/two'));
+  await first.close(); // 대표가 창을 닫음
+  const third = await job('/three');
+  assert.equal(launched, 2, '닫혔을 때만 새로 띄운다');
+  assert.notEqual(third, first);
+  // 탭만 닫혀도 같은 창에서 새 탭으로 이어 간다
+  for (const page of third.pages()) await page.close();
+  const fourth = await job('/four');
+  assert.equal(fourth, third);
+  assert.equal(launched, 2);
+  assert.ok(seen.at(-1).url.endsWith('/four'));
+});

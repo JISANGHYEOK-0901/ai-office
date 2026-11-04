@@ -660,6 +660,38 @@ test('도구 문제는 대표에게 묻지 않고 계획을 고쳐 다시 실행
   assert.equal(decision.plans.length, 1);
 });
 
+test('글·댓글 사이에 설정한 간격을 둔다', async (t) => {
+  const { orchestrate } = await import('../dashboard/orchestrator.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'office-gap-'));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  mkdirSync(join(root, 'org'));
+  writeFileSync(join(root, 'org', 'departments.json'), JSON.stringify([{ id: 'biz', name: '제휴', engine: 'claude' }]));
+  writeFileSync(join(root, 'org', 'roster.json'), JSON.stringify([{ id: 'biz-1', name: '김대리', department: 'biz' }]));
+  saveSettings(root, { postGapSeconds: 90 });
+  const task = '2026-11-04/run-gap';
+  mkdirSync(join(root, 'outputs', ...task.split('/')), { recursive: true });
+  const output = `outputs/${task}/biz/biz-1-a.json`;
+  const plan = { version: 1, task, goal: '댓글', deliverables: [], review: { by: 'chief', criteria: '확인' }, gaps: [],
+    publications: [{ id: 'c', action: 'post', service: 'naver_cafe', connection: 'n1', agent: 'biz-1', target: 'https://cafe.naver.com/a/1', recipients: [], subject: '', content: 'a', instructions: '', files: [], attachments: [] }],
+    stages: [{ id: 'a', title: '문안', dept: 'biz', agent: 'biz-1', inputs: [], output, done: '작성', dependsOn: [], connection: '', target: '' }] };
+  const posts = [{ subject: '첫 글', body: '첫 본문', target: 'https://cafe.naver.com/a/1' }, { subject: '둘째 글', body: '둘째 본문', target: 'https://cafe.naver.com/a/2' }, { subject: '셋째 글', body: '셋째 본문', target: 'https://cafe.naver.com/a/3' }];
+  const waits = [], delivered = [];
+  const execute = async ({ phase }) => {
+    if (phase === 'plan') return JSON.stringify({ plan, question: '', needsMeeting: false, requestedActions: [] });
+    if (phase === 'review') return JSON.stringify({ verdict: 'pass', stages: [], reason: '', report: '# 결과\n\n확인했습니다.', question: '' });
+    mkdirSync(join(root, dirname(output)), { recursive: true }); writeFileSync(join(root, output), JSON.stringify({ posts, skipped: [] }));
+    return JSON.stringify({ status: 'done', summary: '작성' });
+  };
+  const outbound = { connections: () => [{ id: 'n1', label: '네이버', provider: 'naver', status: 'connected' }], async deliver(args) { delivered.push(args.body); return { status: 'confirmed', resultUrl: 'https://cafe.naver.com/a/1' }; } };
+  const text = await orchestrate({ root, run: { id: 'run-gap', rootId: 'run-gap', engine: 'claude', task }, prompt: '카페에 글 올려줘. 끝까지 자동으로', intent: { actions: ['post'], delegated: true, source: 'ai' }, execute, signal: new AbortController().signal, outbound,
+    sourceCheck: async () => ({ checked: 0, broken: [], mismatched: [], unknown: [], skipped: 0 }), wait: async (ms) => { waits.push(ms); } });
+  assert.equal(delivered.length, 3, text);
+  assert.equal(waits.length, 2, '첫 게시 전에는 기다리지 않는다');
+  assert.ok(waits.every((ms) => ms > 85000 && ms <= 90000));
+  assert.throws(() => saveSettings(root, { postGapSeconds: -1 }), /간격/);
+  assert.equal(loadSettings(root).postGapSeconds, 90);
+});
+
 test('계획과 직원 지시는 요청 범위만 처리하도록 안내한다', async (t) => {
   const f = fixture(t);
   await f.final(f.runner.start({ prompt: '자료 10건 수집해 줘' }));

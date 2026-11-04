@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
-import { createBrowserSessions, requiresLogin } from '../lib/browser-session.mjs';
+import { AccountProtected, accountProtected, createBrowserSessions, requiresLogin } from '../lib/browser-session.mjs';
 import { createBrowserWork } from '../lib/browser-work.mjs';
 import { createConnectionStore } from '../lib/connections.mjs';
 import { verifyBrowserWork } from '../scripts/browser-fixture-checks.mjs';
@@ -100,4 +100,24 @@ test('실제 브라우저: 공개 웹 조회는 쿠키 없는 임시 브라우�
   assert.ok(seen.every((r) => !r.cookie), '쿠키를 보내지 않는다');
   assert.ok(!seen.some((r) => r.url === '/inner'), '막은 주소는 요청하지 않는다');
   assert.equal(store.list().length, 0, '연결 계정을 만들지 않는다');
+});
+
+test('실제 브라우저: 인증 화면의 보호 조치만 감지하고, 보호 상태 계정은 다시 열지 않는다', async (t) => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  const shown = async (url, html) => { await page.route('**/*', (route) => route.fulfill({ contentType: 'text/html; charset=utf-8', body: `<!doctype html><body>${html}</body>` })); await page.goto(url); const r = await accountProtected(page); await page.unrouteAll(); return r; };
+  assert.equal(await shown('https://nid.naver.com/user2/help/idRelease', '<h1>회원님의 아이디를 보호조치 하였습니다</h1>'), true);
+  assert.equal(await shown('https://nid.naver.com/nidlogin.login', '<h1>계정 보호모드</h1>'), true);
+  assert.equal(await shown('https://nid.naver.com/nidlogin.login', '<input type="password">'), false);
+  assert.equal(await shown('https://cafe.naver.com/a/1', '<p>게시글: 계정 보호조치 푸는 법</p>'), false, '글 본문에는 반응하지 않는다');
+  const temp = mkdtempSync(join(tmpdir(), 'office-protect-')), root = join(temp, 'workspace'); mkdirSync(root);
+  t.after(() => rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const store = createConnectionStore({ root, base: join(temp, 'private') });
+  const account = store.create({ provider: 'naver', label: '' });
+  store.update(account.id, { status: 'protected', manualLoginAt: 'x' });
+  let launched = 0;
+  const sessions = createBrowserSessions({ store, browser: { launchPersistentContext: async () => { launched++; throw new Error('열면 안 됨'); } }, channel: null });
+  await assert.rejects(sessions.withSession(account.id, 'https://cafe.naver.com/a/1', new AbortController().signal, async () => {}), AccountProtected);
+  assert.equal(launched, 0, '보호 상태에서는 브라우저를 띄우지 않는다');
 });

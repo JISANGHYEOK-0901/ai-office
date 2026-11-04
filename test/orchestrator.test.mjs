@@ -180,11 +180,11 @@ test('Codex 최종 검토가 있으면 검증실 부서 없이 Codex 검토 요�
 
 test('비서실장 기본 Codex sol 6.1 max: 직원 배정·검토·사용자 확인과 사용량', async (t) => {
   const f = fixture(t);
-  assert.deepEqual(loadSettings(f.root).chief, { engine: 'codex', model: 'gpt-6.1-sol', effort: 'max' });
+  assert.deepEqual(loadSettings(f.root).chief, { engine: 'codex', model: 'gpt-6.1-sol', effort: 'high' });
   const run = f.runner.start({ prompt: '자료를 조사하고 문서를 만들어 줘' });
   const result = await f.final(run);
   assert.equal(result.status, 'done');
-  assert.deepEqual([result.engine, result.model, result.effort], ['codex', 'gpt-6.1-sol', 'max']);
+  assert.deepEqual([result.engine, result.model, result.effort], ['codex', 'gpt-6.1-sol', 'high']);
   assert.equal(loadTasks(f.root).find((t) => t.id === run.task).status, 'done');
   assert.equal(result.canReply, true);
   assert.equal(result.usage.input, f.calls.length * 10);
@@ -558,6 +558,9 @@ test('계획과 직원 지시는 요청 범위만 처리하도록 안내한다',
   const plan = f.calls.find((c) => c.kind === 'plan').input;
   assert.match(plan, /대표가 요청한 범위와 결과물만 계획/);
   assert.match(plan, /한 부서가 끝낼 수 있는 일은 회의 없이/);
+  assert.match(plan, /sonnet 이상인 실무 직원/);
+  assert.match(plan, /같은 사건은 1건으로.*제목은 원문 그대로.*직접 연 페이지.*실제 건수와 부족 사유/);
+  assert.match(f.calls.find((c) => c.kind === 'review').input, /표기·형식·추가 근거 보완은 보고서의 확인 필요/);
   assert.match(f.calls.find((c) => c.kind === 'a').input, /완료 기준을 채우면 바로 끝내세요/);
 });
 

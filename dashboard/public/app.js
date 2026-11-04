@@ -171,7 +171,7 @@ export function normalizeState(raw = {}) {
     presets: presetList(raw.presets),
     demo: !!raw.demo,
     tools: raw.tools && typeof raw.tools === 'object' ? raw.tools : {},
-    settings: raw.settings || { mode: 'auto', chief: { engine: 'codex', model: 'gpt-6.1-sol', effort: 'max' } },
+    settings: raw.settings || { mode: 'auto', chief: { engine: 'codex', model: 'gpt-6.1-sol', effort: 'high' } },
     models: raw.models || { codex: [{ id: 'gpt-6.1-sol', label: 'gpt-6.1-sol', efforts: CODEX_EFFORTS }],
       claude: ['haiku', 'sonnet', 'opus'].map((id) => ({ id, label: id, efforts: ['low', 'medium', 'high', 'xhigh', 'max'] })) },
     mode: raw.mode || 'none',
@@ -791,7 +791,7 @@ function saveChiefSelection(event) {
   const engine = $('chiefEngine').value;
   if (event.target.id === 'chiefEngine') {
     fillModels($('chiefModel'), engine, engine === 'codex' ? 'gpt-6.1-sol' : 'sonnet');
-    fillEfforts($('chiefEffort'), engine, $('chiefModel').value, engine === 'codex' ? 'max' : 'high');
+    fillEfforts($('chiefEffort'), engine, $('chiefModel').value, 'high');
   } else if (event.target.id === 'chiefModel') {
     fillEfforts($('chiefEffort'), engine, $('chiefModel').value, $('chiefEffort').value);
   }

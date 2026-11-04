@@ -30,7 +30,7 @@ async function fixture(t) {
 test('설정 API: 기본 Codex → Claude 변경·저장·재조회, 인증과 잘못된 조합 검사', async (t) => {
   const { root, api } = await fixture(t);
   const initial = await api('GET', '/api/state');
-  assert.deepEqual(initial.data.settings.chief, { engine: 'codex', model: 'gpt-6.1-sol', effort: 'max' });
+  assert.deepEqual(initial.data.settings.chief, { engine: 'codex', model: 'gpt-6.1-sol', effort: 'high' });
   assert.ok(initial.data.models.codex.some((m) => m.id === 'gpt-6.1-sol'));
   const chief = { engine: 'claude', model: 'sonnet', effort: 'high' };
   assert.equal((await api('PUT', '/api/settings', { chief }, false)).status, 403);

@@ -4,7 +4,7 @@
 
 - **Claude Code·Codex로 실행 조직을 구성합니다.** 부서 엔진에 맞는 직원 지침을 생성하고 대시보드 실행기가 각 직원에게 업무를 배정합니다. Claude 직원은 `.claude/agents/<id>.md`, Codex 직원은 `.codex/agents/<id>.md` 지침을 사용합니다.
 - **프로그램과 작업 공간을 나눕니다.** 이 레포는 대시보드 프로그램이고, 회사 데이터와 AI 직원의 실행 위치는 레포 밖의 **작업 공간**(기본 `~/AIOffice`, Windows `%USERPROFILE%\AIOffice`)입니다. AI 직원은 프로그램 코드를 고칠 수 없고, `git pull`로 업데이트해도 회사 데이터와 섞이지 않습니다(아래 "작업 공간").
-- **계획·실무는 Claude, 최종 검토는 기본 Codex gpt-6.1-sol/max.** 최종 검토의 제공자·모델·effort를 선택하고 저장할 수 있습니다. 계획·조율은 로그인된 Claude Opus를 쓰고 직원은 업무별 모델을 따릅니다. Claude를 사용할 수 없는 환경은 Codex로 전체 실행할 수 있습니다.
+- **계획·실무는 Claude, 최종 검토는 기본 Codex gpt-6.1-sol/high.** 최종 검토의 제공자·모델·effort를 선택하고 저장할 수 있습니다. 계획·조율은 로그인된 Claude Opus를 쓰고 직원은 업무별 모델을 따릅니다. Claude를 사용할 수 없는 환경은 Codex로 전체 실행할 수 있습니다.
 - **모두 로컬에서 동작합니다.** Node 20 이상과 Playwright를 사용합니다. `npm ci`로 의존성을 설치하고 실행하며 서버 호스팅은 필요 없습니다. 브라우저 업무는 설치된 Chrome 또는 Playwright Chromium을 사용합니다.
 
 설계 정본은 [`docs/SPEC.md`](docs/SPEC.md)(현재 동작 기준)이고, 날짜별 결정 원문은 [`docs/DECISIONS.md`](docs/DECISIONS.md)에 있습니다.
@@ -153,16 +153,16 @@ npm run migrate    # 레포 안의 예전 데이터를 작업 공간으로 옮�
 
 ## 업무 흐름과 화면
 
-비서실장의 **최종 검토** 기본 설정은 **Codex · gpt-6.1-sol · max**입니다. 상단 입력창 옆에서 제공자(Claude/Codex), 모델, effort를 선택하면 저장되며 새로고침·다음 실행에도 유지됩니다. 계획·조율은 로그인된 Claude Opus/high가 맡습니다. 직원은 부서 엔진과 직원 모델을 따르며 일반 실무 Sonnet, 복잡한 기획·최종 취합 Opus, 단순 수집·분류 Haiku를 권장합니다. Codex 모델은 부서와 직원 설정에서도 선택 상자로 고릅니다. 직원 설정을 비우면 부서 기본값을 따릅니다. max·ultra는 처리 시간과 사용량이 커질 수 있습니다.
+비서실장의 **최종 검토** 기본 설정은 **Codex · gpt-6.1-sol · high**입니다(이미 저장한 설정은 유지됩니다). 상단 입력창 옆에서 제공자(Claude/Codex), 모델, effort를 선택하면 저장되며 새로고침·다음 실행에도 유지됩니다. 계획·조율은 로그인된 Claude Opus/high가 맡습니다. 직원은 부서 엔진과 직원 모델을 따르며 일반 실무와 사실을 정리하는 수집 Sonnet, 복잡한 기획·최종 취합 Opus, 대량 페이지 분류 Haiku를 권장합니다. Codex 모델은 부서와 직원 설정에서도 선택 상자로 고릅니다. 직원 설정을 비우면 부서 기본값을 따릅니다. max·ultra는 처리 시간과 사용량이 커질 수 있습니다.
 
 **모델 권장 설정:** 상단 선택은 최종 검토에 적용되고 다음 실행에도 유지됩니다. 단계 묶음마다 도는 진행 점검은 속도를 위해 Claude Sonnet/medium(Claude가 없으면 Codex medium)이 맡습니다.
 
 | 업무 | 상단 비서실장 설정(Claude 사용 시) | 상단 비서실장 설정(Codex만 사용 시) |
 |---|---|---|
-| 평소 조사·자료 수집·글 초안 | Claude · sonnet · high | Codex · gpt-6.1-sol · high |
-| 외부 제출 문서·숫자가 중요한 분석 | Codex · gpt-6.1-sol · max(기본값) 또는 Claude · opus · high | Codex · gpt-6.1-sol · max(기본값) |
+| 평소 조사·자료 수집·글 초안 | Codex · gpt-6.1-sol · high(기본값) 또는 Claude · sonnet · high | Codex · gpt-6.1-sol · high(기본값) |
+| 외부 제출 문서·숫자가 중요한 분석 | Codex · gpt-6.1-sol · max 또는 Claude · opus · high | Codex · gpt-6.1-sol · max |
 
-계획은 Claude를 쓸 수 있으면 자동으로 Opus/high가 맡습니다. 실제 기록에서 검토 1회는 Codex gpt-6-astra/max 8건이 중앙값 221초(최대 380초), Claude Sonnet이 16~33초였습니다. 표본이 적고 업무가 달라 참고용이며 결과 품질 차이는 측정하지 않았습니다.
+계획은 Claude를 쓸 수 있으면 자동으로 Opus/high가 맡습니다. 실제 기록에서 검토 1회는 Codex max가 약 4분 안팎(gpt-6-astra 8건 중앙값 221초, gpt-6.1-sol 1건 269초), Claude Sonnet이 16~33초였습니다. 표본이 적고 업무가 달라 참고용이며 결과 품질 차이는 측정하지 않았습니다. Codex 검토는 원문을 검색해 대조할 수 있고, Claude 검토에는 웹 도구가 없습니다.
 
 실행기가 직원별 배정·협조·반려(업무 예산 안에서)·자동 완료까지 이어갑니다. Claude 미설치·미로그인 또는 명시 Codex 모드에서는 Codex가 계획도 맡습니다. Codex만 로그인돼 있어도 실행 부서를 구성할 수 있습니다. 새 Codex 부서의 역할은 실행 또는 읽기 전용 검토로 고릅니다. 기존 검증실은 역할을 직접 바꾸기 전까지 읽기 전용을 유지합니다.
 

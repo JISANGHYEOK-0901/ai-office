@@ -229,6 +229,9 @@ try {
   assert.deepEqual([await page.locator('#budgetCalls').inputValue(), await page.locator('#budgetMinutes').inputValue()], ['40', '60']);
   await page.locator('#budgetCalls').fill('50');
   await page.locator('#budgetMinutes').fill('90');
+  // 글·댓글 간격: 기본 120초를 보여 주고, 바꾼 값을 저장한다
+  assert.equal(await page.locator('#postGapSeconds').inputValue(), '120');
+  await page.locator('#postGapSeconds').fill('300');
   await page.locator('#companySubmit').click();
   await page.waitForFunction(() => !document.querySelector('#companyDialog').open);
   await page.locator('#companyBtn').click();
@@ -236,6 +239,7 @@ try {
   assert.equal(await page.locator('#finalOutputParent').inputValue(), destination);
   assert.equal(await page.locator('#finalOutputPath').textContent(), join(destination, '최종산출물'));
   assert.deepEqual([await page.locator('#budgetCalls').inputValue(), await page.locator('#budgetMinutes').inputValue()], ['50', '90']);
+  assert.equal(await page.locator('#postGapSeconds').inputValue(), '300');
   await page.locator('#budgetTitle').scrollIntoViewIfNeeded();
   await shot('final-output-settings.png');
   // 좁은 화면에서도 예산 입력칸이 가로로 넘치지 않는다

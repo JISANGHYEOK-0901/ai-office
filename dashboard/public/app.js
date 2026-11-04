@@ -2371,7 +2371,7 @@ async function submitThread(ev) {
 let connectionBusy = false;
 let connectionEditing = null;
 let connectionCache = [];
-const CONNECTION_LABEL = { disconnected: '연결 전', connecting: '로그인 창 열림', connected: '연결됨', needs_login: '재연결 필요' };
+const CONNECTION_LABEL = { disconnected: '연결 전', connecting: '로그인 창 열림', connected: '연결됨', needs_login: '재연결 필요', protected: '계정 보호 조치' };
 async function refreshConnections() {
   const response = await fetch('/api/connections', { headers: { 'X-Office-Token': token } });
   const data = await response.json(); if (!response.ok) throw new Error(data.error || '연결 계정을 불러오지 못했습니다.');
@@ -2443,7 +2443,7 @@ async function openCompany() {
   $('companyRules').disabled = true;
   $('finalOutputParent').disabled = true;
   $('finalOutputParent').value = '';
-  for (const id of ['budgetCalls', 'budgetMinutes']) { $(id).disabled = true; $(id).value = ''; }
+  for (const id of ['budgetCalls', 'budgetMinutes', 'postGapSeconds']) { $(id).disabled = true; $(id).value = ''; }
   $('finalOutputPath').textContent = '불러오는 중…';
   $('companySubmit').disabled = true;
   $('orgImportBtn').disabled = S.demo;
@@ -2463,7 +2463,8 @@ async function openCompany() {
     $('finalOutputPath').textContent = data.finalOutputs?.directory || '';
     $('budgetCalls').value = data.settings?.budget?.calls ?? 40;
     $('budgetMinutes').value = data.settings?.budget?.minutes ?? 60;
-    for (const id of ['budgetCalls', 'budgetMinutes']) $(id).disabled = S.demo;
+    $('postGapSeconds').value = data.settings?.postGapSeconds ?? 120;
+    for (const id of ['budgetCalls', 'budgetMinutes', 'postGapSeconds']) $(id).disabled = S.demo;
     $('companyRules').disabled = false;
     $('finalOutputParent').disabled = S.demo;
     $('companySubmit').disabled = S.demo;
@@ -2487,7 +2488,7 @@ async function submitCompany(ev) {
   btn.disabled = true;
   try {
     const out = await api('PUT', '/api/company', { rules: $('companyRules').value, finalOutputParent: $('finalOutputParent').value,
-      budget: { calls: Number($('budgetCalls').value), minutes: Number($('budgetMinutes').value) } });
+      budget: { calls: Number($('budgetCalls').value), minutes: Number($('budgetMinutes').value) }, postGapSeconds: Number($('postGapSeconds').value) });
     previewCache.clear();
     $('companyDialog').close();
     toast(`회사 규칙·최종산출물 저장 위치·업무 예산을 저장했어요. 에이전트 파일 ${out?.sync?.changed?.length ?? 0}개를 갱신했어요.`);

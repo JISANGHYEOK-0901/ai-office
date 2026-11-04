@@ -24,6 +24,12 @@ import { CONNECTION_PROVIDERS, allowedServiceUrl, serviceProvider } from '../lib
 
 // 계정 없이 공개 웹을 보는 단계의 예약 값(연결 계정 id가 아니다)
 const PUBLIC_CONNECTION = 'public';
+const waitFor = (ms, signal) => new Promise((resolve, reject) => {
+  const done = () => { signal.removeEventListener('abort', stop); resolve(); };
+  const timer = setTimeout(done, ms);
+  const stop = () => { clearTimeout(timer); reject(signal.reason || new Error('중지됨')); };
+  signal.addEventListener('abort', stop, { once: true });
+});
 const ACTION_LABEL = { mail: '메일 발송', post: '글 게시', comment: '댓글 등록', web: '웹사이트 작업' };
 
 export function parseObject(text) {
@@ -38,7 +44,7 @@ export function checkpointFile(root, rootId) {
   return join(root, '.office', 'orchestrations', `${rootId}.json`);
 }
 
-export async function orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel = 4, resume = false, onDecision = () => {}, outbound = null, intent = null, judge = null, home = homedir(), sourceCheck = checkSources }) {
+export async function orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel = 4, resume = false, onDecision = () => {}, outbound = null, intent = null, judge = null, home = homedir(), sourceCheck = checkSources, wait = waitFor }) {
   const task = run.task;
   const taskDir = join(root, 'outputs', ...task.split('/'));
   const file = checkpointFile(root, run.rootId);
@@ -409,7 +415,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       // 이 계획은 계정 없이 세워 조회 단계에 브라우저가 없다. 연결 계정을 알려 주고 계획을 한 번 다시 세운다
       state.pending = [{ phase: 'account', replan: true, question: '계정 연결을 마쳐 계획을 다시 세웁니다.' }];
       persist();
-      return orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel, resume: true, onDecision, outbound, intent, judge, home, sourceCheck });
+      return orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel, resume: true, onDecision, outbound, intent, judge, home, sourceCheck, wait });
     }
     if (needs.length) return ask([{ phase: 'account', replan, question: `이 업무에는 다음 계정이 필요합니다: ${[...new Set(needs)].join(', ')}. 보관함/계정.env에 사이트 주소·아이디·비밀번호를 적거나 상단 '계정 연결'에서 계정을 추가한 뒤, '로그인 창 열기'로 처음 한 번 직접 로그인하고 "이어서 재개"라고 답해 주세요. 로그인을 마치면 창은 자동으로 닫힙니다.` }]);
   }
@@ -696,8 +702,9 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       const reviewers = cached || plan.review?.by === 'chief' || !plan.review?.by ? [] : org.roster.filter((a) => a.active !== false
         && (plan.review.by === 'codex' || plan.review.by === a.id)
         && org.departments.some((d) => d.id === a.department && d.active !== false && d.engine === 'codex' && codexRole(d) === 'review'));
-      if (!cached && plan.review?.by && plan.review.by !== 'chief' && !reviewers.length
-          && !(plan.review.by === 'codex' && run.engine === 'codex')) return ask([{ phase: 'plan', question: '요청한 전문 검토 직원이 근무 중이 아닙니다. 비서실장 검토로 진행할지 알려 주세요.' }]);
+      // 지정한 검토 직원이 없으면 묻지 않고 비서실장이 검토한다(대표가 답할 수 있는 건 어차피 이것뿐이다). 보고서에 밝힌다
+      const reviewerMissing = !cached && plan.review?.by && plan.review.by !== 'chief' && !reviewers.length
+          && !(plan.review.by === 'codex' && run.engine === 'codex');
       const evidence = cached ? [...cached.evidence] : [];
       for (const reviewer of reviewers) {
         const text = await execute({ phase: 'reviewer', agentId: reviewer.id, readOnly: true,
@@ -717,6 +724,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         evidence.length ? '검증실이 이미 확인한 항목은 다시 검토하지 말고 그 결론을 반영하세요. 당신은 대표 요청 충족·전달 가능성, 그리고 검증실이 다루지 않은 부분을 확인합니다.' : '',
         context(), plan.stages.some((s) => /\.html?$/i.test(s.output)) ? HTML_BRIEF : '',
         `외부 작업 형식 검사: ${JSON.stringify(prepared.errors)}. 메일 문안은 수신자·출처·본문이 대표 지시와 맞는지 확인하세요. 아직 실제 전송 전이므로 보고서에서 발송·게시 완료로 쓰지 마세요. 실행기가 실제 결과를 별도로 붙입니다.`,
+        reviewerMissing ? '계획에 지정한 전문 검토 직원이 근무 중이 아니어서 비서실장이 대신 검토합니다. 이 사실을 보고서의 확인 필요에 적으세요.' : '',
         `outputs/${task}/review-notes.md가 있으면 추가 검증 근거를 읽고 산출물·이미지와 대조하세요.`,
         sources ? `출처 자동 확인(접속 여부·페이지 제목만 확인, 본문 수치 미확인): 확인 ${sources.checked}건, 열리지 않음 ${JSON.stringify(sources.broken)}, 제목 불일치 ${JSON.stringify(sources.mismatched)}, 차단·시간 초과로 확인 불가 ${sources.unknown.length}건. 이미 한 번 고칠 기회를 준 항목이면 다시 반려하지 말고 보고서의 확인 필요에 적으세요.` : '',
         budgetLeft(),
@@ -768,6 +776,16 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           if (wasSent(job)) { publications.push(state.mailSent[mailKey(job)]); continue; }
           if (state.webDecision === 'declined' && needsConfirm({ publication })) { publications.push(`- ${publication.action === 'web' ? '웹사이트 작업' : `${publication.service} ${publication.action}`} ${publication.target}: 대표 결정으로 실행하지 않음`); continue; }
           if (!outbound) return ask([{ phase: 'plan', question: '외부 작업을 위해 계정 연결을 먼저 완료해 주세요.' }]);
+          // 글·댓글을 연달아 올리면 계정 보호 조치를 부를 수 있어 간격을 둔다(대기 시간은 예산에 세지 않는다)
+          if (['post', 'comment'].includes(publication.action) && state.lastPostAt) {
+            const gapMs = loadSettings(root).postGapSeconds * 1000 - (Date.now() - state.lastPostAt);
+            if (gapMs > 0) {
+              emit('flow.notice', { summary: `계정 보호를 위해 다음 글·댓글까지 ${Math.ceil(gapMs / 1000)}초 기다립니다.` });
+              const started = Date.now();
+              try { await wait(gapMs, signal); } finally { loginWaitMs += Date.now() - started; }
+              checkStop();
+            }
+          }
           const instance = `${run.id}-publish-${publication.id || publications.length}`;
           const engine = org.departments.find((d) => d.id === org.roster.find((a) => a.id === publication.agent)?.department)?.engine || 'claude';
           emit('agent.start', { engine, agent: publication.agent, instance, summary: '검토된 원문의 브라우저 업무를 시작합니다.' });
@@ -798,13 +816,14 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
                   '이메일·글·댓글 작성 외의 삭제·결제·계정 변경은 하지 않습니다. 결과가 불확실한 전송을 다시 누르지 마세요.',
                 ].filter(Boolean).join('\n\n') });
                 const result = stageResult(text);
-                if (result.status === 'needs_decision') throw new Error(result.question || '외부 작업에 필요한 계정·권한을 확인해 주세요.');
+                if (['needs_decision', 'replan'].includes(result.status)) throw new Error(result.question || result.reason || '외부 작업에 필요한 계정·권한을 확인해 주세요.');
                 return text;
               } });
             publications.push(web ? `- 웹사이트 작업 ${publication.target}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : '직원 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}${result.evidence ? ` · 증거 evidence/${result.evidence}` : ''}${result.summary ? `\n  - 확인 내용: ${redactContext(result.summary)}` : ''}`
               : `- ${publication.service} ${publication.action}${isMail(job) ? ` (${mailLine(job)})` : ''}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : '브라우저 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}`);
             if (isMail(job)) { state.mailSent[mailKey(job)] = publications.at(-1); persist(); }
             if (publication.action === 'post') posted++;
+            if (['post', 'comment'].includes(publication.action)) { state.lastPostAt = Date.now(); persist(); }
             emit('agent.stop', { engine, agent: publication.agent, instance, summary: '실제 외부 작업 결과를 확인했습니다.' });
           } catch (error) {
             checkStop();

@@ -111,6 +111,7 @@ test('claude 실행 인자: 부서 권한·도구·--agent, prompt 는 stdin', a
   assert.equal(calls[0].opts.env.OFFICE_ORGMAP_INJECTED, process.env.OFFICE_ORGMAP_INJECTED, '직원 실행에는 붙이지 않는다');
   assert.equal(calls[1].opts.env.OFFICE_CHIEF_RUN, '1', '비서실장 실행은 chief-guard가 업무 등록 전에도 판정하게 알린다');
   assert.equal(calls[0].opts.env.OFFICE_CHIEF_RUN, process.env.OFFICE_CHIEF_RUN, '직원 실행에는 붙이지 않는다');
+  for (const call of calls) assert.equal(call.opts.env.OFFICE_AI_RUN, '1', '대시보드가 실행한 AI는 터미널 지시 넣기(office-ask)를 쓰지 못하게 표시한다');
   assert.equal(runner.list()[1].target, 'chief');
   assert.throws(() => runner.start({ prompt: 'x', model: 'gpt-4' }), (e) => e.status === 400);
 

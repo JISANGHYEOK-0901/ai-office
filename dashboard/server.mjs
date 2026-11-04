@@ -21,6 +21,7 @@ import { collectFinalOutputs, customOutputDirectory, finalOutputs, finalOutputSe
 import { WORKSPACE_SOURCE_LABEL, WorkspaceError, kstDate, legacyItems, programRoot, resolveWorkspace, saveLocalWorkspace } from '../lib/paths.mjs';
 import { ensureWorkspace, isCompatRoot } from '../lib/workspace.mjs';
 import { acquireServerLock } from '../lib/server-lock.mjs';
+import { writeDashboardAccess } from '../lib/dashboard-access.mjs';
 import { appendEvent, readEvents, redact } from '../lib/events.mjs';
 import { previewAgentFile } from '../lib/sync.mjs';
 import { isOffplanCall } from '../lib/flow.mjs';
@@ -1544,6 +1545,12 @@ export async function startServer({
   const url = `http://${hostWithPort(displayHost, actualPort)}/`;
   // 원격 바인딩에서 브라우저로 열 주소(일회 키 → 쿠키 교환)
   const accessUrl = remote ? `${url}?key=${token}` : url;
+  // 터미널 AI의 지시 넣기(scripts/office-ask.mjs)용 접속 정보. 로컬 실행에서만 남기고 close에서 지운다
+  let releaseAccess = null;
+  if (!remote && !demo) {
+    try { releaseAccess = writeDashboardAccess(root, { url, token }); }
+    catch (err) { warn('터미널 지시 넣기용 접속 정보를 남기지 못했습니다', err); }
+  }
 
   async function close() {
     toolProbeController.abort();
@@ -1570,6 +1577,7 @@ export async function startServer({
     server.closeAllConnections?.();
     await new Promise((r) => server.close(() => r()));
     releaseLock?.();
+    releaseAccess?.();
   }
 
   return { server, url, accessUrl, remote, token, port: actualPort, root, workspaceSource, compat, legacyPending, schedules, close };

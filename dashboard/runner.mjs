@@ -514,7 +514,8 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
 
     let child;
     try {
-      child = spawnCli(spec.cmd, spec.args, { cwd: root, env: spec.env ? { ...env, ...spec.env } : env, spawnImpl });
+      // OFFICE_AI_RUN: 대시보드가 실행한 AI(비서실장·직원·검증실)는 터미널 지시 넣기(office-ask)로 새 지시를 만들지 못한다
+      child = spawnCli(spec.cmd, spec.args, { cwd: root, env: { ...env, ...(spec.env || {}), OFFICE_AI_RUN: '1' }, spawnImpl });
     } catch (err) {
       finish(run, { status: 'failed', summary: `실행하지 못했습니다: ${err.message}` });
       return;

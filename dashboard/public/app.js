@@ -2114,6 +2114,7 @@ export function chiefResultMessage(result) {
     return n ? `진행 중이던 업무 ${n}건을 일시정지하고 업무 폴더마다 정리 노트(pause-note.md)를 남겼어요. 서버를 꺼도 되고, 다음에 "이어서 해줘"라고 쓰면 다시 시작합니다.`
       : '지금 진행 중인 업무가 없어 일시정지할 것이 없어요.';
   }
+  if (result.followUp) return '진행 중인 업무에 전달했어요. 다음 단계부터 반영됩니다.';
   if (result.taskClosed) return '업무를 끝냈어요. 지금까지 만든 파일은 업무 폴더에 남아 있습니다. 내역 초기화로 목록에서 지울 수 있어요.';
   if (result.historyCleared) return `내역을 지웠어요(업무 ${result.removedTasks ?? 0}건, 실행 ${result.removedRuns ?? 0}건). 최종 산출물·계정·발송 증표와 진행 중인 업무는 그대로입니다.${result.keptWaiting ? ` 답변을 기다리는 업무 ${result.keptWaiting}건은 남겼어요. 그 대화에서 "이 업무 끝내줘"라고 하면 지울 수 있습니다.` : ''}`;
   if (result.resumeRequested) {

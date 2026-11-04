@@ -7,7 +7,8 @@
         "task",
         "pause",
         "resume",
-        "clear_history"
+        "clear_history",
+        "follow_up"
       ]
     },
     "kindEvidence": {
@@ -88,6 +89,9 @@
     },
     "quickAgent": {
       "type": "string"
+    },
+    "followUpRun": {
+      "type": "string"
     }
   },
   "required": [
@@ -108,7 +112,8 @@
     "outputDir",
     "outputDirEvidence",
     "quick",
-    "quickAgent"
+    "quickAgent",
+    "followUpRun"
   ],
   "additionalProperties": false
 }

@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
-import { createBrowserSessions } from '../lib/browser-session.mjs';
+import { createBrowserSessions, requiresLogin } from '../lib/browser-session.mjs';
 import { createBrowserWork } from '../lib/browser-work.mjs';
 import { createConnectionStore } from '../lib/connections.mjs';
 import { verifyBrowserWork } from '../scripts/browser-fixture-checks.mjs';
@@ -46,4 +46,17 @@ test('실제 브라우저: 로그인 창을 먼저 열고 대표가 로그인하
   assert.equal(result.status, 'connected');
   assert.equal(store.list().find((c) => c.id === result.id).status, 'connected');
   assert.equal(contexts[0].pages().length, 0, '로그인을 마치면 창이 저절로 닫힌다');
+});
+
+test('실제 브라우저: 비밀번호 칸이 없어도 로그인 링크가 보이면 로그아웃으로 판정한다', async (t) => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  const shown = (html) => page.setContent(`<!doctype html><body>${html}</body>`).then(() => requiresLogin(page));
+  assert.equal(await shown('<a href="https://nid.naver.com/nidlogin.login">로그인</a><p>지금 가입하고 댓글에 참여해보세요!</p>'), true);
+  assert.equal(await shown('<a href="https://accounts.kakao.com/login/?continue=x">로그인</a>'), true);
+  assert.equal(await shown('<a href="https://nid.naver.com/nidlogin.logout">로그아웃</a><textarea></textarea>'), false, '로그인 상태 화면');
+  assert.equal(await shown('<a style="display:none" href="https://nid.naver.com/nidlogin.login">로그인</a><a href="https://nid.naver.com/nidlogin.logout">로그아웃</a>'), false, '숨겨진 로그인 링크는 보지 않는다');
+  assert.equal(await shown('<input type="password">'), true);
+  assert.equal(await shown('<a href="https://example.com/nidlogin.login">글 속 링크</a>'), false);
 });

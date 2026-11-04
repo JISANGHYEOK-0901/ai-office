@@ -171,7 +171,8 @@ test/                     node:test
 
 - `org/company.json`의 `chief:{engine, model, effort}`는 비서실장 설정이다. 기본은 codex·`gpt-6.1-sol`·`max`다.
 - 단계별 비서실장 모델(`resolveControlChief`):
-  - 검토·진행 점검: 회사 설정의 비서실장 모델.
+  - 최종 검토: 회사 설정의 비서실장 모델.
+  - 진행 점검: Claude Sonnet/medium. Claude를 쓸 수 없으면 Codex medium(더 낮게 설정했으면 그 값).
   - 계획·재배정 등 조율: Claude가 설치·로그인돼 있고 모드가 codex가 아니면 Claude `opus`/`high`. 아니면 Codex 설정. 로그인 상태를 아직 모르면 "확인 중" 오류로 다시 지시하게 한다.
 - `company.json`의 `mode`: `auto`(기본) | `claude` | `codex` | `mixed`. auto면 설치·로그인 점검으로 claude/codex/mixed/none을 정한다(`/api/state.mode`).
 - 새 실무 부서는 사용 가능한 Claude가 기본이다. 검토 설정만으로 실무 부서를 Codex로 만들지 않는다.
@@ -231,7 +232,8 @@ test/                     node:test
 
 ### 회의
 
-- 담당이 정해지지 않았고 관련 근무중 부서가 둘 이상이면 `needsMeeting:true`와 `meetingAgents`(근무중 실행 직원 2~4명)를 낸다.
+- 계획은 대표가 요청한 범위와 결과물만 담는다. 자료 수집·뉴스 찾기는 요청한 건수만 실무 직원 한 명의 한 단계로 끝내고, HTML·보고서·재검증 단계는 대표가 요청했거나 외부 제출·재무·법률 자료일 때만 넣는다.
+- 한 부서가 끝낼 수 있는 일은 담당이 없어도 회의 없이 배정한다. 여러 부서가 함께 해야 하고 분담을 정하기 어려울 때만 `needsMeeting:true`와 `meetingAgents`(근무중 실행 직원 2~4명)를 낸다.
 - 참석자에게 읽기 전용으로 범위·산출물·분담·가정을 받고 meeting.md에 모은 뒤 계획을 다시 받는다. 이벤트는 `meeting.start`/`meeting.end`.
 
 ### 단계 실행과 직원 지시
@@ -509,7 +511,7 @@ AI 판단이 넓어져도 모든 경로가 같은 규칙을 거친다. 규칙 �
   - 연결 업무가 tasks.json에 없거나 done이면 제한하지 않는다.
 - 조직도 주입: SessionStart 훅이 비서실장 수칙 요약과 `buildOrgMap`을 additionalContext로 넣는다(9,500자에서 자름). 직원 세션은 넣지 않는다.
 - `.claude/settings.json`의 `permissions.allow`는 office.mjs의 task·flow·meeting·plan 하위 명령과 codex-review.mjs만 Bash·PowerShell 두 형식으로 둔다.
-- 비서실장 수칙: 담당이 지시문에 있으면 그대로 따르고, 없고 관련 부서가 둘 이상이면 `[회의]` 호출로 2~4명을 모은다. 반려는 `[반려]` 호출로 전달한다. 모든 단계·검토·deliver가 끝나기 전에 최종 답변으로 끝내지 않는다.
+- 비서실장 수칙: 담당이 지시문에 있으면 그대로 따르고, 한 부서가 끝낼 수 있는 일은 회의 없이 배정한다. 여러 부서가 함께 해야 하고 분담을 정하기 어려울 때만 `[회의]` 호출로 2~4명을 모은다. 반려는 `[반려]` 호출로 전달한다. 모든 단계·검토·deliver가 끝나기 전에 최종 답변으로 끝내지 않는다.
 
 ### Codex 검토 실행기
 

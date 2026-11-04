@@ -516,6 +516,15 @@ test('일반 웹사이트 업무: 위임이 없으면 실행 전에 묶어서 �
   assert.match(f.runner.result(second.id).text, /웹사이트 작업[\s\S]*직원 확인 완료[\s\S]*evidence\/upload-1\.png[\s\S]*확인 내용: 공개 주소 확인/);
 });
 
+test('계획과 직원 지시는 요청 범위만 처리하도록 안내한다', async (t) => {
+  const f = fixture(t);
+  await f.final(f.runner.start({ prompt: '자료 10건 수집해 줘' }));
+  const plan = f.calls.find((c) => c.kind === 'plan').input;
+  assert.match(plan, /대표가 요청한 범위와 결과물만 계획/);
+  assert.match(plan, /한 부서가 끝낼 수 있는 일은 회의 없이/);
+  assert.match(f.calls.find((c) => c.kind === 'a').input, /완료 기준을 채우면 바로 끝내세요/);
+});
+
 test('외부 작업 판별이 빠져도 계획이 실행 지시로 보면 작업 전에 묻고, 답장으로만 허용한다', async (t) => {
   const calls = [];
   const outbound = { connections: () => [], async deliver(args) { calls.push(args); return { status: 'confirmed', summary: '완료' }; } };

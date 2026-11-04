@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkSources, extractSources, isPrivateAddress, sourceProblemReason, titleMatches } from '../lib/source-check.mjs';
+import { checkSources, extractSources, isPrivateAddress, isPublicWebUrl, sourceProblemReason, titleMatches } from '../lib/source-check.mjs';
 
 const page = (title, { status = 200, type = 'text/html', location = null } = {}) => new Response(status >= 300 && status < 400 ? null : `<html><head><title>${title}</title></head></html>`,
   { status, headers: { 'content-type': type, ...(location ? { location } : {}) } });
@@ -25,6 +25,11 @@ test('제목 대조: 사이트 이름·기호를 빼고 비교하며 짧거나 �
 test('내부 주소 판별', () => {
   for (const ip of ['10.0.0.1', '127.0.0.1', '192.168.0.5', '172.20.1.1', '169.254.1.1', '100.64.0.1', '::1', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1', '0.0.0.0']) assert.equal(isPrivateAddress(ip), true, ip);
   for (const ip of ['8.8.8.8', '172.32.0.1', '2606:4700::1']) assert.equal(isPrivateAddress(ip), false, ip);
+});
+
+test('공개 웹 주소 판별', () => {
+  for (const url of ['https://www.youtube.com/shorts/x', 'http://example.com/', 'https://8.8.8.8/']) assert.equal(isPublicWebUrl(url), true, url);
+  for (const url of ['http://localhost:3000/', 'http://127.0.0.1/', 'http://10.0.0.1/', 'http://[::1]/', 'file:///etc/passwd', 'http://erp/', 'http://erp.corp/', 'http://a.local/', 'https://user:pw@example.com/', 'javascript:alert(1)', '']) assert.equal(isPublicWebUrl(url), false, url);
 });
 
 test('출처 확인: 열림·깨짐·제목 불일치·차단·DNS 실패를 구분한다', async () => {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -125,4 +125,28 @@ test('웹사이트 업로드·등록 지시와 위임 표현을 판별한다', (
   for (const text of ['ERP에서 조건에 맞는 상담사를 찾아 리스트로 정리해 줘\n\n[저장 위치] 이 작업의 산출물은 이 폴더에 저장하세요: outputs/x/', 'HTML 페이지 만들어줘. 저장해줘', 'ERP에서 신규 등록 상담사 찾아줘'])
     assert.deepEqual(externalActionPolicy([text]).actions, [], text);
   assert.deepEqual(externalActionPolicy(['관리자 페이지에 공지 등록해 줘']).actions, ['web']);
+});
+
+test('requestLogin: 없는 연결을 만들어 창을 열고 로그인 완료·창 닫힘·시간 초과를 구분한다', async (t) => {
+  const { createBrowserWork } = await import('../lib/browser-work.mjs');
+  const temp = mkdtempSync(join(tmpdir(), 'office-login-request-')), root = join(temp, 'workspace'); mkdirSync(root);
+  t.after(() => rmSync(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const store = createConnectionStore({ root, base: join(temp, 'private') });
+  let onOpen = () => {};
+  const sessions = { open: async (id) => { store.update(id, { status: 'connecting' }); onOpen(id); }, close: async () => {} };
+  const work = createBrowserWork({ root, store, sessions });
+  onOpen = (id) => setTimeout(() => store.update(id, { status: 'connected', manualLoginAt: 'x' }), 5);
+  const done = await work.requestLogin({ provider: 'naver', pollMs: 1 });
+  assert.equal(done.status, 'connected');
+  assert.equal(store.list().length, 1);
+  assert.equal(store.list()[0].provider, 'naver');
+  onOpen = (id) => setTimeout(() => store.update(id, { status: 'disconnected' }), 5);
+  assert.equal((await work.requestLogin({ provider: 'naver', pollMs: 1 })).status, 'closed');
+  assert.equal(store.list().length, 1, '있는 연결을 다시 쓴다');
+  onOpen = () => {};
+  assert.equal((await work.requestLogin({ provider: 'naver', pollMs: 1, timeoutMs: 10 })).status, 'timeout');
+  const web = await work.requestLogin({ target: 'https://erp.example.com/a', pollMs: 1, timeoutMs: 10 });
+  assert.equal(store.list().find((c) => c.id === web.id).provider, 'web');
+  const stop = new AbortController(); stop.abort();
+  await assert.rejects(work.requestLogin({ provider: 'naver', pollMs: 1, signal: stop.signal }));
 });

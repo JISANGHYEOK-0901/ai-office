@@ -1,4 +1,14 @@
 import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { chromium } from 'playwright';
+import { createBrowserSessions } from '../lib/browser-session.mjs';
+import { createBrowserWork } from '../lib/browser-work.mjs';
+import { createConnectionStore } from '../lib/connections.mjs';
 import { verifyBrowserWork } from '../scripts/browser-fixture-checks.mjs';
 import { verifyLogin } from '../scripts/login-fixture-checks.mjs';
 import { verifyWebWork } from '../scripts/web-fixture-checks.mjs';
@@ -9,3 +19,31 @@ test('실제 Playwright 브라우저: 일반 웹사이트 입력·파일 첨부�
 test('실제 Playwright 브라우저: 메일 서명 유지와 보낸메일함 발송 확인', async () => { await verifyMailEditor(); });
 test('실제 Playwright 브라우저: 카페 글쓰기 제목·게시판 선택·영상 링크 카드', async () => { await verifyCafeEditor(); });
 test('실제 Playwright 브라우저: 메일 지정 파일 첨부와 첨부 전 발송 거부', async () => { await verifyMailAttachment(); });
+
+test('실제 브라우저: 로그인 창을 먼저 열고 대표가 로그인하면 창을 닫고 연결 완료로 이어 간다', async (t) => {
+  const temp = mkdtempSync(join(tmpdir(), 'office-login-window-')), root = join(temp, 'workspace'); mkdirSync(root);
+  let authenticated = false;
+  const site = createServer((req, res) => {
+    if (req.url.startsWith('/account')) authenticated = true;
+    res.setHeader('content-type', 'text/html; charset=utf-8');
+    res.end(authenticated ? '<h1>내 정보</h1>' : '<form action="/account"><input type="password" name="p"><button>로그인</button></form>');
+  });
+  await new Promise((resolve) => site.listen(0, '127.0.0.1', resolve));
+  const contexts = [];
+  const browser = { launchPersistentContext: async (profile, options) => { const c = await chromium.launchPersistentContext(profile, { ...options, channel: undefined, headless: true }); contexts.push(c); return c; } };
+  const store = createConnectionStore({ root, base: join(temp, 'private') });
+  const sessions = createBrowserSessions({ store, browser, channel: null });
+  t.after(async () => { await sessions.close(); await new Promise((resolve) => site.close(resolve)); await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); });
+  const work = createBrowserWork({ root, store, sessions });
+  const waiting = work.requestLogin({ target: `http://localhost:${site.address().port}/`, pollMs: 50, timeoutMs: 30000 });
+  while (!contexts[0]?.pages()[0]?.url().startsWith('http')) await new Promise((resolve) => setTimeout(resolve, 50));
+  const page = contexts[0].pages()[0];
+  await page.locator('input[type=password]').waitFor();
+  await page.locator('#ai-office-login-banner').waitFor({ state: 'attached' });
+  await page.locator('input[type=password]').fill('fixture');
+  await page.locator('button').click();
+  const result = await waiting;
+  assert.equal(result.status, 'connected');
+  assert.equal(store.list().find((c) => c.id === result.id).status, 'connected');
+  assert.equal(contexts[0].pages().length, 0, '로그인을 마치면 창이 저절로 닫힌다');
+});

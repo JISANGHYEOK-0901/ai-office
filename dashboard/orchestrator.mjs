@@ -20,7 +20,7 @@ import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 import { checkSources, sourceProblemReason } from '../lib/source-check.mjs';
 import { QUICK_GUIDE, quickPlan, quickReport } from '../lib/quick.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';
-import { CONNECTION_PROVIDERS, serviceProvider } from '../lib/connections.mjs';
+import { CONNECTION_PROVIDERS, allowedServiceUrl, serviceProvider } from '../lib/connections.mjs';
 
 const ACTION_LABEL = { mail: '메일 발송', post: '글 게시', comment: '댓글 등록', web: '웹사이트 작업' };
 
@@ -71,14 +71,18 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     state.budget = { calls: 0, activeMs: 0, limitCalls: calls, limitMs: minutes * 60000, stepCalls: calls, stepMs: minutes * 60000 };
   } else state.budget = { ...saved.budget };
   const sessionStart = Date.now(), activeBase = state.budget.activeMs;
-  const activeMs = () => activeBase + (Date.now() - sessionStart);
+  let loginWaitMs = 0; // 대표가 로그인하는 시간은 답장 대기처럼 세지 않는다
+  const activeMs = () => activeBase + (Date.now() - sessionStart) - loginWaitMs;
   const execute = (args) => { state.budget.calls++; return runAI(args); };
   // 최초 지시의 외부 작업·위임 판별(지시창에서 AI가 근거와 함께 판단한 값)은 업무 내내 유지한다
   if (!saved.originalRequest && intent) state.intent = intent;
   let answer = null;
   if (saved.originalRequest && !resume) {
     // 대표 답장의 뜻은 AI가 판별한다(실패하면 규칙). 일반 웹사이트 작업 확인 답장도 같은 판별을 쓴다
-    answer = await judgeAnswer(prompt, saved.pending || [], { judge });
+    // 계정 답장은 다음 동작이 정해져 있어(로그인 창 다시 열기·거절) AI 판별을 기다리지 않는다
+    const accountOnly = saved.pending?.length && saved.pending.every((q) => q.phase === 'account');
+    answer = await judgeAnswer(prompt, saved.pending || [], { judge: accountOnly ? null : judge });
+    if (accountOnly && answer.decision === 'decline') { state.accountDeclined = true; state.webDecision = 'declined'; }
     if (saved.pending?.some((q) => q.phase === 'web-confirm')) state.webDecision = answer.decision === 'decline' ? 'declined'
       : answer.decision === 'approve' || answer.delegated ? 'approved' : state.webDecision;
     // 남은 메일 확인 답장: "진행"이면 다음 20통을 허용하고, "하지 마"면 남은 메일은 보내지 않고 보고한다
@@ -217,7 +221,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       '대표가 메일에 파일을 첨부하라고 했으면 그 메일의 attachments에 대표가 쓴 파일 이름이나 경로를 글자 그대로 적으세요(예: ["제휴제안서.pdf"]). 파일을 직접 찾거나 열지 마세요. 실행기가 작업 공간(보관함 포함)·다운로드·문서·데스크톱에서 찾아 모든 수신자 메일에 같은 파일로 붙이고, 못 찾거나 같은 이름이 여러 개면 대표에게 묻습니다. 첨부 지시가 없거나 메일이 아니면 attachments는 []입니다.',
       'web은 연결 계정의 일반 웹사이트(관리자 화면 등)에서 하는 작업입니다. service "web", connection에 연결된 일반 웹사이트 계정 id, target에 시작 화면 주소, instructions에 직원이 그 사이트에서 할 일(대표 지시 그대로 구체적으로), files에 첨부할 단계 id(예: 업로드할 HTML 산출물)를 씁니다. subject·content는 빈 문자열, recipients는 []입니다. 연결된 일반 웹사이트 계정이 없으면 connection을 빈 문자열로 두세요.',
       '글·댓글 하나를 올리는 것처럼 단순한 게시 업무는 조사·작성·게시를 같은 직원 한 명에게 맡기세요(단계마다 직원을 바꾸지 않음). 여러 부서의 전문성이 필요한 업무만 나눕니다.',
-      '실제 외부 작업은 산출물 작성과 비서실장 검토를 마친 뒤 실행기가 브라우저로 진행합니다. 로그인 정보는 요청하거나 파일에 적지 마세요. 계정이 없으면 connection은 빈 문자열로 두고 자료 준비를 먼저 진행합니다. 연결 계정이 여러 개면 사용할 계정을 확인하세요.',
+      '실제 외부 작업은 산출물 작성과 비서실장 검토를 마친 뒤 실행기가 브라우저로 진행합니다. 로그인 정보는 요청하거나 파일에 적지 마세요. 계정이 없으면 connection은 빈 문자열로 두세요. 실행기가 로그인 창을 띄운 뒤 계획을 다시 요청합니다. 연결 계정이 있고 로그인해야 읽을 수 있는 글을 조회하는 단계라면 그 단계의 stage.connection과 stage.target을 반드시 채우세요. 연결 계정이 여러 개면 사용할 계정을 확인하세요.',
       `제휴업체 조사 후 주소를 알아내는 메일 업무는 조사 단계 다음에 개인별 발송 문안 JSON 단계를 두세요. {messages:[{recipients:["회사 메일"],subject:"제목",body:"양식을 채운 본문"}],skipped:["연락처 미확인 업체·이유"]}를 작성하고 publication.content에 그 단계 id, recipients에는 []를 씁니다. 검토 후 실행기가 문안별로 발송합니다. 대량 발송을 막기 위해 메일은 한 번에 ${MAX_MAILS_PER_RUN}통까지만 보내고 남은 메일은 대표에게 다시 확인받아 이어 보내므로, messages에는 확인한 대상을 모두 적으세요. 주소·출처를 확인하지 못한 업체에는 보내지 않습니다.`,
       '여러 게시글은 검토할 본문 JSON 단계에 {posts:[{subject,body,target}],skipped:[사유]}를 작성하고 publication.content에 그 단계 id를 지정하세요. 실행기가 글마다 별도로 게시합니다. 올릴 게시판이 앞 단계(사이트 조회 등)에서 정해지면 그 게시판 주소(대표가 준 주소와 같은 사이트)를 target에 넣게 하세요. 비우면 publication.target에 올립니다. 유튜브 링크의 영상 ID는 작업 공간 공통 이력과 대조해 재게시를 차단합니다.',
       `대표가 허용한 외부 작업: ${JSON.stringify(allowedActions())}. 초안만 요청한 업무를 외부에 게시하지 마세요.`,
@@ -241,6 +245,40 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     if (!wanted.length) return null;
     return ask([{ phase: 'action-confirm', actions: wanted, question: `이 지시는 ${wanted.map((action) => ACTION_LABEL[action]).join('·')} 실행까지 맡기신 것으로 보이지만 확정하지 못했습니다. 실제로 실행할까요? "진행"이면 필요한 계정부터 확인하고, "하지 마"면 초안까지만 만듭니다.` }]);
   };
+  // 계정이 필요하면 대표에게 안내만 하지 않고 로그인 창을 먼저 띄운다. 끝나면 답장 없이 이어 간다.
+  // 대표가 없는 예약·상시 업무는 창을 열지 않고 안내만 남긴다
+  const canOpenLogin = () => Boolean(outbound?.requestLogin) && !unattended;
+  const loginProblem = async ({ name, ...login }) => {
+    emit('flow.notice', { summary: `${name} 로그인 창을 열었습니다. 창에서 직접 로그인하면 자동으로 이어 갑니다.` });
+    const started = Date.now();
+    let result;
+    try { result = await outbound.requestLogin({ ...login, signal }); }
+    catch (err) {
+      checkStop();
+      return { question: `${name} 로그인 창을 열지 못했습니다: ${redactContext(err.message)} 답장을 보내면 다시 시도합니다. 이 작업을 하지 않으려면 "하지 마"라고 답해 주세요.` };
+    } finally { loginWaitMs += Date.now() - started; persist(); }
+    checkStop();
+    if (result.status === 'connected') return { id: result.id };
+    return { question: result.status === 'timeout'
+      ? `5분 안에 ${name} 로그인이 끝나지 않았습니다. 창은 열어 두었습니다. 답장을 보내면 다시 기다립니다. 이 작업을 하지 않으려면 "하지 마"라고 답해 주세요.`
+      : `로그인 창이 닫혀 ${name} 로그인을 마치지 못했습니다. 답장을 보내면 창을 다시 엽니다. 이 작업을 하지 않으려면 "하지 마"라고 답해 주세요.` };
+  };
+  const isUsable = (c) => Boolean(c) && (c.status === 'connected' || c.hasCredentials === true && c.firstLoginDone === true);
+  // 지시의 링크로 서비스를 알 수 있으면 계획 전에 로그인을 끝낸다. 계획이 연결 계정을 알아야 조회 단계에 브라우저를 붙인다
+  if (canOpenLogin() && !state.accountDeclined && !saved.plan) {
+    const urls = String(state.originalRequest).match(/https?:\/\/[^\s<>"']+/g) || [];
+    const external = allowedActions().filter((action) => ['mail', 'post', 'comment'].includes(action));
+    const providers = external.length ? [...new Set(urls.flatMap((url) => {
+      const provider = Object.keys(CONNECTION_PROVIDERS).find((id) => allowedServiceUrl(id, url));
+      return provider ? [provider] : [];
+    }))] : [];
+    for (const provider of providers) {
+      const candidates = (outbound.connections?.() || []).filter((c) => c.provider === provider);
+      if (candidates.length > 1 || isUsable(candidates[0])) continue;
+      const outcome = await loginProblem({ name: CONNECTION_PROVIDERS[provider].name, provider, connection: candidates[0]?.id || '' });
+      if (outcome.question) return ask([{ phase: 'account', question: outcome.question }]);
+    }
+  }
   checkStop();
   let response;
   let plan;
@@ -337,26 +375,37 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
   {
     const list = outbound?.connections?.() || [];
     // 첫 로그인은 대표가 직접 한다: 연결됨이거나, 직접 로그인한 적이 있고 다시 로그인할 정보가 있을 때만 바로 쓸 수 있다
-    const usable = (c) => Boolean(c) && (c.status === 'connected' || c.hasCredentials === true && c.firstLoginDone === true);
+    const usable = isUsable;
     const needs = [];
-    let replan = false;
+    const logins = new Map();
+    let replan = false, choice = false;
     for (const p of plan.publications || []) {
-      if (!allowedActions().includes(p.action)) continue;
+      if (!allowedActions().includes(p.action) || state.accountDeclined) continue;
       if (p.action === 'web') {
         const chosen = list.find((c) => c.id === p.connection);
-        if (!usable(chosen)) { needs.push(`${p.target} 웹사이트 작업용 계정`); replan ||= !chosen; }
+        if (!usable(chosen)) { needs.push(`${p.target} 웹사이트 작업용 계정`); replan ||= !chosen; logins.set(chosen?.id || p.target, { name: `${p.target} 사이트`, connection: chosen?.id || '', target: p.target }); }
         continue;
       }
       const provider = serviceProvider(p.service), name = CONNECTION_PROVIDERS[provider]?.name || p.service;
       const candidates = list.filter((c) => c.provider === provider);
       const chosen = p.connection ? list.find((c) => c.id === p.connection) : candidates.length === 1 ? candidates[0] : null;
-      if (!chosen && candidates.length > 1) needs.push(`${name} 계정 ${candidates.length}개 중 사용할 계정(답장에 계정 이름을 적어 주세요)`);
-      else if (!usable(chosen)) needs.push(`${name} 계정`);
+      if (!chosen && candidates.length > 1) { needs.push(`${name} 계정 ${candidates.length}개 중 사용할 계정(답장에 계정 이름을 적어 주세요)`); choice = true; }
+      else if (!usable(chosen)) { needs.push(`${name} 계정`); replan ||= !chosen; logins.set(provider, { name, provider, connection: chosen?.id || '' }); }
     }
     for (const stage of plan.stages) {
       if (typeof stage.connection !== 'string' || !stage.connection.trim()) continue;
       const chosen = list.find((c) => c.id === stage.connection);
-      if (!usable(chosen)) { needs.push(`${stage.target} 조회용 계정`); replan ||= !chosen; }
+      if (!usable(chosen)) { needs.push(`${stage.target} 조회용 계정`); replan ||= !chosen; logins.set(chosen?.id || stage.target, { name: `${stage.target} 사이트`, connection: chosen?.id || '', target: stage.target }); }
+    }
+    if (needs.length && !choice && canOpenLogin()) {
+      for (const login of logins.values()) {
+        const outcome = await loginProblem(login);
+        if (outcome.question) return ask([{ phase: 'account', question: outcome.question }]);
+      }
+      // 이 계획은 계정 없이 세워 조회 단계에 브라우저가 없다. 연결 계정을 알려 주고 계획을 한 번 다시 세운다
+      state.pending = [{ phase: 'account', replan: true, question: '계정 연결을 마쳐 계획을 다시 세웁니다.' }];
+      persist();
+      return orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel, resume: true, onDecision, outbound, intent, judge, home, sourceCheck });
     }
     if (needs.length) return ask([{ phase: 'account', replan, question: `이 업무에는 다음 계정이 필요합니다: ${[...new Set(needs)].join(', ')}. 보관함/계정.env에 사이트 주소·아이디·비밀번호를 적거나 상단 '계정 연결'에서 계정을 추가한 뒤, '로그인 창 열기'로 처음 한 번 직접 로그인하고 "이어서 재개"라고 답해 주세요. 로그인을 마치면 창은 자동으로 닫힙니다.` }]);
   }

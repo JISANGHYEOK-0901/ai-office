@@ -158,3 +158,63 @@ test('실제 브라우저: 같은 계정의 작업은 한 창·한 탭에서 이
   assert.equal(launched, 2);
   assert.ok(seen.at(-1).url.endsWith('/four'));
 });
+
+test('실제 브라우저: 메일 본문은 화면이 다른 칸을 바꿔도 실패로 보지 않고, 중복 입력과 빈 본문 발송을 막는다', async (t) => {
+  const temp = mkdtempSync(join(tmpdir(), 'office-mail-fill-')), root = join(temp, 'workspace'); mkdirSync(root);
+  const sent = [];
+  const COMPOSE = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>메일 쓰기</title></head><body>
+<input id="to" type="text" aria-label="받는사람"><input id="subject" type="text" aria-label="제목">
+<input id="draft" type="hidden" value="0"><textarea id="note" aria-label="임시 메모" style="display:none"></textarea>
+<div id="body" contenteditable="true" role="textbox" aria-label="본문 편집기" aria-multiline="true" style="min-height:100px"><p>서명: 운영팀</p></div>
+<button id="send" type="button">보내기</button>
+<script>
+// 실제 메일 화면처럼 편집 중에 임시 저장 값이 스스로 바뀐다
+document.getElementById('body').addEventListener('input',()=>{document.getElementById('draft').value=String(Date.now());});
+document.getElementById('body').addEventListener('paste',(e)=>{e.preventDefault();const p=document.createElement('p');p.textContent=e.clipboardData.getData('text/plain');document.getElementById('body').prepend(p);document.getElementById('draft').value=String(Date.now());});
+document.getElementById('send').onclick=async()=>{await fetch('/send',{method:'POST',body:document.getElementById('body').innerText});location.href='/done';};
+</script></body></html>`;
+  const site = createServer(async (req, res) => {
+    if (req.url === '/send') { let b = ''; for await (const c of req) b += c; sent.push(b); res.end('ok'); return; }
+    res.setHeader('content-type', 'text/html; charset=utf-8');
+    res.end(req.url === '/done' ? '<h1>메일을 보냈습니다</h1>' : COMPOSE);
+  });
+  await new Promise((resolve) => site.listen(0, '127.0.0.1', resolve));
+  const origin = `http://localhost:${site.address().port}`;
+  const browser = await chromium.launch();
+  const store = createConnectionStore({ root, base: join(temp, 'private') });
+  const account = store.create({ provider: 'naverworks', label: '메일' }); store.update(account.id, { status: 'connected' });
+  const sessions = { async withSession(_id, target, _signal, action) {
+    const context = await browser.newContext(); await context.newPage(); await context.pages()[0].goto(target);
+    try { return await action(context); } finally { await context.close(); }
+  }, close: async () => {} };
+  const work = createBrowserWork({ root, store, sessions, providersForTests: (_provider, url) => new URL(url).origin === origin });
+  t.after(async () => { await work.close(); await browser.close(); await new Promise((resolve) => site.close(resolve)); await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); });
+  const body = '안녕하세요 제휴 문의드립니다.';
+  await work.deliver({ scope: 'mail-fill', allowedActions: ['mail'], instructionKey: 'k', signal: new AbortController().signal, body,
+    publication: { id: 'm1', action: 'mail', service: 'naverworks_mail', connection: account.id, target: `${origin}/compose`, recipients: ['a@example.com'], subject: '제휴 문의' },
+    execute: async ({ url, token }) => {
+      const raw = async (name, args = {}) => (await (await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name, arguments: args }) })).json());
+      const call = async (name, args) => { const d = await raw(name, args); if (d.error) throw new Error(`${name}: ${d.error}`); return d.result; };
+      const refs = async () => (await call('browser_snapshot')).frames.flatMap((f) => f.controls);
+      const ref = async (pattern) => (await refs()).find((c) => pattern.test(c.label))?.ref;
+      await call('browser_fill_content', { ref: await ref(/받는사람/), field: 'recipients' });
+      await call('browser_fill_content', { ref: await ref(/^제목/), field: 'subject' });
+      // 화면이 임시 저장 칸을 바꿔도 본문 입력은 성공이다
+      assert.match((await call('browser_fill_content', { ref: await ref(/본문 편집기/), field: 'body' })).kept, /입력 확인됨/);
+      // 다시 넣어도 중복되지 않는다
+      assert.match((await call('browser_fill_content', { ref: await ref(/본문 편집기/), field: 'body' })).note, /이미 입력/);
+      // 새 작성 화면에서는 입력 기록을 믿지 않는다: 보내기를 막고, 다시 넣을 수 있다
+      await call('browser_navigate', { url: `${origin}/compose?new=1` });
+      const emptySend = await raw('browser_submit', { ref: await ref(/보내기/) });
+      assert.match(emptySend.error, /먼저 입력/, '빈 본문으로 보내지 않는다');
+      await call('browser_fill_content', { ref: await ref(/받는사람/), field: 'recipients' });
+      await call('browser_fill_content', { ref: await ref(/^제목/), field: 'subject' });
+      assert.match((await call('browser_fill_content', { ref: await ref(/본문 편집기/), field: 'body' })).kept, /입력 확인됨/);
+      await call('browser_submit', { ref: await ref(/보내기/) });
+      await call('browser_finish');
+      return 'done';
+    } }).catch((err) => { if (!sent.length) throw err; });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].split(body).length - 1, 1, '본문은 정확히 한 번');
+  assert.match(sent[0], /서명: 운영팀/);
+});

@@ -229,8 +229,8 @@ try {
   assert.deepEqual([await page.locator('#budgetCalls').inputValue(), await page.locator('#budgetMinutes').inputValue()], ['40', '60']);
   await page.locator('#budgetCalls').fill('50');
   await page.locator('#budgetMinutes').fill('90');
-  // 글·댓글 간격: 기본 120초를 보여 주고, 바꾼 값을 저장한다
-  assert.equal(await page.locator('#postGapSeconds').inputValue(), '120');
+  // 글·댓글 간격: 기본 30초를 보여 주고, 바꾼 값을 저장한다
+  assert.equal(await page.locator('#postGapSeconds').inputValue(), '30');
   await page.locator('#postGapSeconds').fill('300');
   await page.locator('#companySubmit').click();
   await page.waitForFunction(() => !document.querySelector('#companyDialog').open);

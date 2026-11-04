@@ -78,6 +78,7 @@ async function main(argv) {
     if (!prompt) throw new Error(USAGE);
     const result = await client.ask(prompt);
     if (result.scheduled || result.schedule) return console.log(`예약으로 등록했습니다. 대시보드 '예약'에서 확인하세요.\n${JSON.stringify(result.schedule || result, null, 2)}`);
+    if (result.followUp) return console.log(`진행 중인 업무에 추가 지시를 전달했습니다. 실행 id: ${result.id}`);
     if (result.historyCleared) return console.log(`끝난 업무와 실행 내역을 지웠습니다. 최종 산출물·계정과 진행 중인 업무는 그대로 있습니다.${result.keptWaiting ? ` 답변을 기다리는 업무 ${result.keptWaiting}건은 남겼습니다.` : ''}`);
     if (result.pauseRequested || result.resumeRequested) return console.log(`${result.pauseRequested ? '진행 중인 업무를 일시정지했습니다' : '멈춘 업무를 이어서 시작했습니다'}.\n${JSON.stringify(result, null, 2)}`);
     return console.log(`비서실장에게 지시했습니다. 실행 id: ${result.id}\n진행 확인: node scripts/office-ask.mjs wait ${result.id}\n대시보드: ${access.url}`);

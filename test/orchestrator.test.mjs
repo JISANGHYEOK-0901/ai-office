@@ -692,6 +692,25 @@ test('글·댓글 사이에 설정한 간격을 둔다', async (t) => {
   assert.equal(loadSettings(root).postGapSeconds, 90);
 });
 
+test('진행 중에 받은 추가 지시는 새 업무 없이 다음 단계부터 반영하고, 끝난 업무에는 넘기지 않는다', async (t) => {
+  let run, active = [], accepted = null;
+  const f = fixture(t, { progress: () => {
+    active = f.runner.activeOrchestrations().map((r) => r.id);
+    accepted = f.runner.addNote(run.id, '아 참고로 영상이 보이게 해 줘');
+    return { action: 'continue', reason: '계획대로', question: '', revisedPlan: null };
+  } });
+  run = f.runner.start({ prompt: '두 단계 업무를 실행해 줘' });
+  assert.equal(f.runner.addNote('없는-id', 'x'), false);
+  assert.equal((await f.final(run)).status, 'done');
+  assert.deepEqual(active, [run.id]);
+  assert.equal(accepted, true);
+  assert.doesNotMatch(f.calls.find((c) => c.kind === 'a').input, /영상이 보이게/);
+  assert.match(f.calls.find((c) => c.kind === 'b').input, /아 참고로 영상이 보이게 해 줘/, '다음 단계부터 반영한다');
+  assert.match(f.calls.find((c) => c.kind === 'review').input, /아 참고로 영상이 보이게 해 줘/, '최종 검토도 본다');
+  assert.equal(loadTasks(f.root).length, 1, '새 업무를 만들지 않는다');
+  assert.equal(f.runner.addNote(run.id, '늦은 말'), false, '끝난 업무에는 넘기지 않는다');
+});
+
 test('계획과 직원 지시는 요청 범위만 처리하도록 안내한다', async (t) => {
   const f = fixture(t);
   await f.final(f.runner.start({ prompt: '자료 10건 수집해 줘' }));

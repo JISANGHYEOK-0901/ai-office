@@ -619,7 +619,7 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
     const pending = new Set();
     let resolveDone;
     const donePromise = new Promise((resolve) => { resolveDone = resolve; });
-    const entry = { controller, children, donePromise, done: false };
+    const entry = { controller, children, donePromise, done: false, notes: [] };
     live.set(run.id, entry);
     Object.assign(run, { status: 'running', startedAt: new Date().toISOString() });
     changed(run);
@@ -695,7 +695,7 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
                 display: `지속 감시 새 자료 보고: ${path.split('/').at(-1)}` });
             } });
         } else text = await orchestrate({ root, run, prompt: spec.input, execute, signal: controller.signal, intent: spec.intent || null, judge,
-          maxParallel: maxConcurrent, resume: spec.resumeOrchestration, onDecision: () => { spec.needsDecision = true; }, outbound });
+          maxParallel: maxConcurrent, resume: spec.resumeOrchestration, onDecision: () => { spec.needsDecision = true; }, outbound, notes: entry.notes });
       } catch (err) {
         status = controller.signal.aborted ? 'stopped' : 'failed';
         text = controller.signal.aborted ? '사용자가 업무 진행을 중지했습니다. 이어서 재개할 수 있습니다.' : redact(err.message);
@@ -947,5 +947,13 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
     return { runIds: selected.removed.map((run) => run.id), taskIds: selected.taskIds };
   }
 
-  return { start, stop, stopAll, pause, resumeAll, list, startReview, reply, result, latestForTask, clearNeedsReply, restoreContinuous, clearHistory };
+  // 진행 중인 업무에 대표의 추가 지시를 넘긴다(다음 AI 호출부터 반영). 끝났으면 false
+  function addNote(runId, text) {
+    const entry = live.get(runId);
+    if (!entry?.notes || !runs.find((r) => r.id === runId && r.status === 'running')) return false;
+    entry.notes.push(String(text));
+    return true;
+  }
+  const activeOrchestrations = () => runs.filter((r) => r.orchestration && !r.phase && r.status === 'running' && !r.continuous).map((r) => ({ id: r.id, request: String(r.request || '').slice(0, 160) }));
+  return { addNote, activeOrchestrations, start, stop, stopAll, pause, resumeAll, list, startReview, reply, result, latestForTask, clearNeedsReply, restoreContinuous, clearHistory };
 }

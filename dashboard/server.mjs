@@ -812,7 +812,7 @@ export async function startServer({
     if (model !== null && typeof model !== 'string') throw new HttpError(400, 'model은 문자열이어야 합니다.');
     // 의도는 비서실장(AI)이 판별하고, 권한이 되는 판단은 대표 원문 근거가 있을 때만 쓴다(실패하면 규칙 판별)
     await toolProbe;
-    const intent = await judgeCommand(prompt, { judge, now: scheduleNow(), staff: quickCandidates(loadOrg(root)) });
+    const intent = await judgeCommand(prompt, { judge, now: scheduleNow(), staff: quickCandidates(loadOrg(root)), active: runner.activeOrchestrations() });
     // "하던 작업 멈추고 정리해 둬"/"이어서 해줘"는 새 업무가 아니라 일시정지·일괄 재개다
     if (intent.kind === 'pause') {
       const result = runner.pause();
@@ -823,6 +823,11 @@ export async function startServer({
       const result = runner.resumeAll();
       scheduleBroadcast();
       return { resumeRequested: true, ...result };
+    }
+    // 진행 중인 업무에 덧붙이는 말은 새 업무를 만들지 않고 그 업무에 전달한다. 그새 끝났으면 새 업무로 처리한다
+    if (intent.kind === 'follow_up' && runner.addNote(intent.followUpRun, prompt)) {
+      scheduleBroadcast();
+      return { followUp: true, id: intent.followUpRun };
     }
     if (intent.kind === 'clear_history') return { historyCleared: true, ...clearHistory() };
     if (body.schedule !== false) {

@@ -44,6 +44,18 @@ test('대시보드 내역 지우기: 문장 형태와 근거가 맞을 때만 �
   assert.equal((await judgeCommand(said, { judge: ai({ kind: 'clear_history', kindEvidence: '지어낸 근거 문장' }) })).kind, 'task');
 });
 
+test('진행 중인 업무에 덧붙이는 말: 지정한 업무가 실제로 돌 때만 받고, 판별 실패는 업무가 하나일 때만 규칙으로 처리한다', async () => {
+  const active = [{ id: 'run-1', request: '카페 글 올려줘' }];
+  const note = '아 참고로 유튜브 영상이 노출되어야 해';
+  const said = await judgeCommand(note, { active, judge: ai({ kind: 'follow_up', kindEvidence: note, followUpRun: 'run-1' }) });
+  assert.deepEqual([said.kind, said.followUpRun], ['follow_up', 'run-1']);
+  assert.equal((await judgeCommand(note, { active, judge: ai({ kind: 'follow_up', followUpRun: 'run-없음' }) })).kind, 'task', '없는 업무는 받지 않는다');
+  assert.equal((await judgeCommand(note, { active: [], judge: ai({ kind: 'follow_up', followUpRun: 'run-1' }) })).kind, 'task');
+  assert.equal((await judgeCommand(note, { active, judge: async () => null })).kind, 'follow_up');
+  assert.equal((await judgeCommand(note, { active: [...active, { id: 'run-2', request: '다른 일' }], judge: async () => null })).kind, 'task', '어느 업무인지 모르면 새 업무다');
+  assert.equal((await judgeCommand('경쟁사 조사해 줘', { active, judge: async () => null })).kind, 'task');
+});
+
 test('업무 끝내기 문장은 업무를 가리키는 말이 있을 때만 받는다', async () => {
   const { taskCloseIntent, historyClearIntent } = await import('../lib/pause.mjs');
   for (const text of ['이 업무 끝내줘', '업무 종료', '이 작업 취소해줘', '이 일은 그만해', '작업 마무리해 줘']) assert.equal(taskCloseIntent(text), true, text);

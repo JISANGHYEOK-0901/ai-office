@@ -44,7 +44,7 @@ export function checkpointFile(root, rootId) {
   return join(root, '.office', 'orchestrations', `${rootId}.json`);
 }
 
-export async function orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel = 4, resume = false, onDecision = () => {}, outbound = null, intent = null, judge = null, home = homedir(), sourceCheck = checkSources, wait = waitFor }) {
+export async function orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel = 4, resume = false, onDecision = () => {}, outbound = null, intent = null, judge = null, home = homedir(), sourceCheck = checkSources, wait = waitFor, notes = [] }) {
   const task = run.task;
   const taskDir = join(root, 'outputs', ...task.split('/'));
   const file = checkpointFile(root, run.rootId);
@@ -125,7 +125,17 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     state.decisions.push({ questions: saved.pending || [], answer: redactContext(prompt), intent: answer });
     state.pending = [];
   }
-  const context = () => `대표 최초 요청:\n${state.originalRequest}\n\n추가 지시·결정:\n${JSON.stringify(state.decisions)}\n\n${videoBrief}`;
+  // 진행 중에 들어온 대표의 추가 지시를 결정 목록에 넣어 다음 AI 호출부터 반영한다
+  const absorbNotes = () => {
+    while (notes.length) {
+      const note = notes.shift();
+      const judged = externalActionPolicy([note]);
+      state.decisions.push({ questions: [], answer: redactContext(note), followUp: true, intent: { decision: 'other', add: judged.actions, remove: [], delegated: judged.delegated, source: 'rule' } });
+      emit('flow.notice', { summary: `대표의 추가 지시를 반영합니다: ${redact(note).slice(0, 80)}` });
+    }
+  };
+  const context = () => { absorbNotes(); return contextText(); };
+  const contextText = () => `대표 최초 요청:\n${state.originalRequest}\n\n추가 지시·결정:\n${JSON.stringify(state.decisions)}\n\n${videoBrief}`;
   const instructionKey = () => createHash('sha256').update(JSON.stringify([state.originalRequest, state.decisions])).digest('hex');
   // 외부 작업 허용: 판별 결과가 있으면 그것을, 없으면(예전 업무·판별 실패) 문장 규칙을 쓴다. 재발송·결과 확인 문구는 규칙 유지
   const policy = () => {
@@ -418,7 +428,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       // 이 계획은 계정 없이 세워 조회 단계에 브라우저가 없다. 연결 계정을 알려 주고 계획을 한 번 다시 세운다
       state.pending = [{ phase: 'account', replan: true, question: '계정 연결을 마쳐 계획을 다시 세웁니다.' }];
       persist();
-      return orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel, resume: true, onDecision, outbound, intent, judge, home, sourceCheck, wait });
+      return orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel, resume: true, onDecision, outbound, intent, judge, home, sourceCheck, wait, notes });
     }
     if (needs.length) return ask([{ phase: 'account', replan, question: `이 업무에는 다음 계정이 필요합니다: ${[...new Set(needs)].join(', ')}. 보관함/계정.env에 사이트 주소·아이디·비밀번호를 적거나 상단 '계정 연결'에서 계정을 추가한 뒤, '로그인 창 열기'로 처음 한 번 직접 로그인하고 "이어서 재개"라고 답해 주세요. 로그인을 마치면 창은 자동으로 닫힙니다.` }]);
   }

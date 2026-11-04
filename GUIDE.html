@@ -208,6 +208,7 @@
     <li><a href="#ready">준비물</a></li>
     <li><a href="#install">처음 한 번만: 설치하기</a></li>
     <li><a href="#start">서버 켜기</a></li>
+    <li><a href="#how">어디에 무엇을 요청할까</a></li>
     <li><a href="#setup">사용 전 세팅: AI에게 맡기기</a></li>
     <li><a href="#use">대시보드 사용법</a></li>
     <li><a href="#mail">제휴 메일 보내기</a></li>
@@ -421,8 +422,125 @@
   </div>
 </section>
 
+<section class="part" id="how">
+  <h2>5. 어디에 무엇을 요청할까: 처음부터 권장 순서</h2>
+  <p class="sub">AI에게 말하는 곳은 두 군데입니다. <b>프로그램을 다루는 일</b>은 터미널의 AI에게, <b>실제 회사 업무</b>는 대시보드의 비서실장에게 맡깁니다.</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h3 style="margin-top:0">터미널의 AI <span class="only-claude">(Claude)</span><span class="only-codex">(Codex)</span></h3>
+      <p style="margin:4px 0">IntelliJ·VS Code에서 AI Office 폴더를 열고 터미널에서 실행한 AI입니다.</p>
+      <ul>
+        <li>서버 켜기·끄기, 설치 점검, 업데이트</li>
+        <li>부서·직원 세팅, 회사 규칙, 모델 바꾸기</li>
+        <li>화면·기능 고치기, 오류 원인 찾기</li>
+        <li>사용법 질문, <b>비서실장에게 넣을 지시문 만들기</b></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">대시보드의 비서실장</h3>
+      <p style="margin:4px 0">브라우저 대시보드 위쪽 <b>비서실장</b> 입력창입니다.</p>
+      <ul>
+        <li>조사·보고서·엑셀·HTML 만들기</li>
+        <li>카페·블로그 글, 댓글, 제휴 메일 보내기</li>
+        <li>매일·정한 시간 예약 업무, 계속 지켜보기</li>
+        <li>회사 사이트(ERP·관리자 화면) 조회·업로드</li>
+      </ul>
+    </div>
+  </div>
+  <div class="tip"><b>헷갈리면</b>그냥 터미널 AI에게 말하세요. 실제 업무라면 터미널 AI가 직접 하지 않고, 서버와 계정 준비를 확인한 뒤 <b>대시보드에 붙여 넣을 지시문</b>을 만들어 줍니다. 비서실장을 거쳐야 실행 전 확인·메일 20통 제한·검토·결과 기록 같은 안전장치가 함께 동작합니다.</div>
+
+  <div class="card step">
+    <div class="num">1</div>
+    <div>
+      <h3>터미널 AI 실행 → 서버 켜기</h3>
+      <div class="say">AI Office 서버 켜줘</div>
+      <div class="say">처음 설치가 잘 됐는지 점검해줘</div>
+    </div>
+  </div>
+  <div class="card step">
+    <div class="num">2</div>
+    <div>
+      <h3>터미널 AI → 맡길 업무에 맞게 직원 세팅</h3>
+      <div class="say">제휴처 조사하고 제휴 메일 보내는 업무를 맡길 건데 알맞게 부서와 직원 세팅해줘</div>
+      <p style="margin:4px 0 0">자세한 방법은 <a href="#setup">6. 사용 전 세팅</a>을 보세요.</p>
+    </div>
+  </div>
+  <div class="card step">
+    <div class="num">3</div>
+    <div>
+      <h3>대시보드 → 계정 연결 (밖으로 나가는 일이 있을 때)</h3>
+      <p style="margin:4px 0 0">메일·카페 글·댓글·회사 사이트 작업을 시킬 거라면 <span class="btnlike">계정 연결</span>에서 계정을 추가하고 <span class="btnlike">로그인 창 열기</span>로 <b>처음 한 번 직접 로그인</b>합니다. 비밀번호는 AI에게 말하지 않습니다.</p>
+    </div>
+  </div>
+  <div class="card step">
+    <div class="num">4</div>
+    <div>
+      <h3>터미널 AI → 지시문 만들어 달라기 (처음에 추천)</h3>
+      <div class="say">매일 오전 9시에 ○○카페 자유게시판에 글을 올리고 싶어. 지금 기능으로 되는지 보고 대시보드에 넣을 지시문 만들어줘</div>
+      <div class="say">○○ 관련 업체를 찾아서 리스트로 만들고 제휴 메일까지 보내고 싶어. 지시문 만들어줘</div>
+      <p style="margin:4px 0 0">AI가 지금 되는 기능인지, 필요한 준비(계정·주소·파일)가 무엇인지 알려 주고 그대로 붙여 넣을 지시문을 줍니다.</p>
+    </div>
+  </div>
+  <div class="card step">
+    <div class="num">5</div>
+    <div>
+      <h3>대시보드 비서실장 → 업무 지시</h3>
+      <p style="margin:4px 0 0">지시문을 입력창에 붙여 넣고 <span class="btnlike">지시하기</span>. 메일·글처럼 밖으로 나가는 일은 처음엔 <b>“초안만”</b>을 붙여 결과물을 먼저 보고, 괜찮으면 실제 실행을 지시하세요.</p>
+    </div>
+  </div>
+  <div class="card step">
+    <div class="num">6</div>
+    <div>
+      <h3>답하고, 결과 보고, 고치기</h3>
+      <p style="margin:4px 0 0"><b>답변 필요</b>가 뜨면 답장하고, 완료 창에서 결과 파일을 봅니다. 쓰다가 불편한 점은 다시 <b>터미널 AI</b>에게 “○○ 고쳐줘”라고 말합니다.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">기능별 지시 예시 (대시보드 비서실장)</h3>
+    <p style="margin:4px 0"><b>조사·보고서</b></p>
+    <div class="say order">경쟁사 3곳 가격 정책을 조사해서 비교표가 있는 HTML 보고서로 만들어줘. 출처와 기준일도 적어줘</div>
+    <div class="say order">리서치부가 조사하고 문서제작부 최대리가 엑셀로 정리해서 ~/Desktop/조사결과 폴더에 저장해줘</div>
+    <p style="margin:12px 0 4px"><b>카페·블로그 글과 댓글</b> — 네이버 블로그·카페, 다음 카페, 티스토리, 브런치</p>
+    <div class="say order">https://cafe.naver.com/○○ 자유게시판에 ○○ 주제 소개 글 1개 올려줘</div>
+    <div class="say order">(글 주소)에 행사 일정 안내 댓글 달아줘</div>
+    <p style="margin:12px 0 4px"><b>예약</b> — 정한 시간에 자동 실행. 컴퓨터와 서버가 켜져 있어야 합니다</p>
+    <div class="say order">매일 오전 9시에 ○○ 주제 유튜브 숏츠를 찾아 (카페 게시판 주소)에 2~3개씩 소개 글을 올려줘</div>
+    <div class="say order">내일부터 3일간 매일 오후 2시에 업계 뉴스를 요약해서 보고서로 만들어줘</div>
+    <p style="margin:12px 0 4px"><b>계속 지켜보기</b> — 기본 5분마다 확인, 중지할 때까지 또는 정한 시각까지</p>
+    <div class="say order">(사이트 주소)에 새 공지가 올라오면 계속 요약해서 운영팀에 전달해줘. 오늘 18시까지</div>
+    <p style="margin:12px 0 4px"><b>회사 사이트 조회·작업</b> — 일반 웹사이트로 계정 연결</p>
+    <div class="say order">(ERP 링크)에서 30일 넘게 활동 없는 상담사를 찾아 엑셀로 정리해줘</div>
+    <div class="say order">만든 HTML을 (관리자 화면 링크)의 제휴 페이지에 업로드해줘</div>
+    <p style="margin:12px 0 4px"><b>제휴 메일</b> — 자세한 사용법은 <a href="#mail">8. 제휴 메일 보내기</a></p>
+    <div class="say order">○○ 관련 업체 10곳을 찾아 리스트로 만들고, 공개된 제휴 문의 메일로 제휴 제안 메일 보내줘. 제휴제안서.pdf 첨부해서</div>
+    <p style="margin:12px 0 4px"><b>멈추기·이어 하기</b></p>
+    <div class="say order">하던 작업 멈추고 정리해 둬, 다음에 이어서 하자</div>
+    <div class="say order">이어서 해줘</div>
+    <div class="warn"><b>주의</b>메일 주소를 자동으로 긁어모으는 일은 법으로 금지돼 있습니다. “메일을 수집해서”보다 <b>“공개된 제휴 문의 메일로”</b>처럼 지시하세요. 문자(SMS) 발송, 송금·결제·세금 신고·계약·삭제·탈퇴는 하지 않습니다.</div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">좋은 지시문 쓰는 법</h3>
+    <p style="margin:4px 0">필요한 것만 골라 한두 문장으로 씁니다.</p>
+    <ul>
+      <li><b>무엇을·얼마나:</b> 목표와 수량 (업체 10곳, 글 2개)</li>
+      <li><b>어디서·누구에게:</b> 조사 범위, 카페·게시판 주소, 사이트 링크, 받는 곳</li>
+      <li><b>누가 (선택):</b> 담당 부서·직원. 비우면 비서실장이 회의로 정합니다</li>
+      <li><b>어떻게 받을지 (선택):</b> 엑셀·HTML·표, 저장할 폴더 전체 경로</li>
+      <li><b>밖으로 나가는지:</b> 보내기·올리기까지 할지, <b>“초안만”</b>인지. 확인 없이 끝까지 하려면 <b>“끝까지 자동으로”</b></li>
+      <li><b>언제:</b> 지금 / “내일 오전 10시에” / “매일 오전 9시에” / “새 글이 올라오면 계속”</li>
+    </ul>
+    <ul>
+      <li><b>한 지시에 한 가지 목표</b>만 담으면 결과가 정확합니다. 큰 일은 나눠서 지시하세요.</li>
+      <li>비밀번호·카드번호·인증번호는 지시문에 쓰지 않습니다.</li>
+    </ul>
+  </div>
+</section>
+
 <section class="part" id="setup">
-  <h2>5. 사용 전 세팅: AI에게 맡기기</h2>
+  <h2>6. 사용 전 세팅: AI에게 맡기기</h2>
   <p class="sub">부서와 직원을 하나하나 만들지 않아도 됩니다. IntelliJ 터미널의 Claude 또는 Codex에게 내 업무를 설명하면 알맞게 만들어 줍니다.</p>
   <div class="card">
     <h3 style="margin-top:0">이렇게 말해 보세요</h3>
@@ -447,7 +565,7 @@
 </section>
 
 <section class="part" id="use">
-  <h2>6. 대시보드 사용법</h2>
+  <h2>7. 대시보드 사용법</h2>
   <p class="sub">처음에는 회사가 비어 있습니다. 부서와 직원부터 만듭니다.</p>
 
   <div class="card step">
@@ -455,7 +573,7 @@
     <div>
       <h3>부서 만들기</h3>
       <ul>
-        <li><a href="#setup">5. 사용 전 세팅</a>처럼 AI에게 맡겼다면 이 단계와 다음 단계는 건너뛰어도 됩니다. 화면에서 직접 만들고 싶을 때 아래처럼 합니다.</li>
+        <li><a href="#setup">6. 사용 전 세팅</a>처럼 AI에게 맡겼다면 이 단계와 다음 단계는 건너뛰어도 됩니다. 화면에서 직접 만들고 싶을 때 아래처럼 합니다.</li>
         <li>처음 화면의 <span class="btnlike">첫 부서 만들기</span> 카드나 <span class="btnlike">+ 부서 추가</span>를 누릅니다.</li>
         <li>마케팅·리서치·운영·재무처럼 <b>미리 만들어 둔 부서(프리셋)</b>를 고르면 편합니다. <span class="btnlike">인원까지 추가</span>를 누르면 직원도 한 번에 채워집니다.</li>
         <li class="only-codex">Codex만 쓴다면 부서를 만들 때 <b>엔진</b>을 <b>Codex</b>로, 역할을 <b>실행</b>으로 고릅니다.</li>
@@ -485,7 +603,7 @@
         <li>일하는 중에도 비서실장이 결과를 보며 단계를 더하거나 고칩니다. 마지막에 검토해 부족한 부분은 담당에게 다시 맡깁니다.</li>
         <li>결과 파일 저장 위치를 정하고 싶으면 지시에 전체 경로를 적습니다(예: “~/Desktop/상담사 리스트 폴더에 저장해줘”). 적지 않으면 <b>보관함/최종산출물/날짜</b> 폴더에 모입니다.</li>
         <li>메일 발송·카페 글·댓글처럼 밖으로 나가는 일은 올리기 직전에 한 번 <b>“실행할까요?”</b>라고 묻습니다. 확인 없이 끝까지 하려면 지시에 <b>“끝까지 자동으로”</b>를 적어 주세요.</li>
-        <li>메일은 한 번에 <b>20통까지만</b> 보내고, 지시문에 적은 파일을 첨부할 수 있습니다. 자세한 방법은 <a href="#mail">7. 제휴 메일 보내기</a>를 보세요.</li>
+        <li>메일은 한 번에 <b>20통까지만</b> 보내고, 지시문에 적은 파일을 첨부할 수 있습니다. 자세한 방법은 <a href="#mail">8. 제휴 메일 보내기</a>를 보세요.</li>
         <li>입력창 옆의 <b>Codex / Claude</b> 선택은 <b>최종 검토</b>를 누가 할지 정합니다.
           <span class="only-claude">Claude만 쓴다면 <b>Claude</b>로 바꿔 주세요.</span>
           <span class="only-codex">Codex만 쓴다면 그대로 <b>Codex</b>에 둡니다. Claude가 없으면 계획·실무·검토를 모두 Codex가 맡습니다.</span></li>
@@ -521,7 +639,7 @@
 </section>
 
 <section class="part" id="mail">
-  <h2>7. 제휴 메일 보내기: 20통씩, 파일 첨부까지</h2>
+  <h2>8. 제휴 메일 보내기: 20통씩, 파일 첨부까지</h2>
   <p class="sub">조사한 업체·대학에 업체별로 따로 메일을 보내는 업무입니다. 대량 발송을 막으려고 한 번에 20통까지만 보내고, 지시문에 적은 파일을 모든 메일에 붙일 수 있습니다.</p>
 
   <div class="card">
@@ -647,7 +765,7 @@
 </section>
 
 <section class="part" id="custom">
-  <h2>8. 내 마음대로 고쳐 쓰기</h2>
+  <h2>9. 내 마음대로 고쳐 쓰기</h2>
   <p class="sub">AI Office는 쓰면서 내 일에 맞게 계속 바꿔 나가는 프로그램입니다.</p>
   <div class="grid2">
     <div class="card">
@@ -684,7 +802,7 @@
 </section>
 
 <section class="part" id="daily">
-  <h2>9. 매일 쓰는 순서</h2>
+  <h2>10. 매일 쓰는 순서</h2>
   <div class="card">
     <div class="flow">
       <span class="box">IntelliJ 열기</span><span class="arrow">→</span>
@@ -702,7 +820,7 @@
 </section>
 
 <section class="part" id="safe">
-  <h2>10. 꼭 지켜 주세요</h2>
+  <h2>11. 꼭 지켜 주세요</h2>
   <div class="card">
     <ul>
       <li><b>비밀번호·카드번호·인증번호를 AI 대화창이나 업무 지시에 적지 마세요.</b> 바깥 사이트 계정은 <span class="btnlike">계정 연결</span> 창이나 <b>보관함/계정.env</b> 파일에만 둡니다.</li>
@@ -715,7 +833,7 @@
 </section>
 
 <section class="part" id="help">
-  <h2>11. 막혔을 때</h2>
+  <h2>12. 막혔을 때</h2>
   <p class="sub">대부분은 터미널의 AI에게 화면에 보이는 그대로 말하면 해결됩니다.</p>
   <div class="card">
     <details>

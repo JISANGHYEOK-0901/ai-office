@@ -754,7 +754,7 @@ Windows 10 이상(PowerShell·CMD 네이티브)과 macOS 13 이상에서 같은 
 - `npm run doctor`(`scripts/doctor.mjs [--json] [--port N]`):
   - Node 20 이상, claude·codex 설치·버전·로그인 여부, Windows Git Bash(선택), 포트 4777, 작업 공간 경로·출처를 점검한다.
   - 로그인 여부만 표시하고 인증 정보·이메일은 출력하지 않는다. API 키 환경변수가 있으면 이름만 경고한다.
-  - 레포에 예전 데이터가 남아 있으면 `npm run migrate`를 안내한다. 작업 공간과 충돌해 `migrate`가 거부하는 경우에는 대신 `--dry-run` 확인과 프로그램 폴더 밖 보관을 안내한다.
+  - 레포에 예전 데이터가 남아 있으면 `npm run migrate`를 안내한다. 작업 공간과 충돌해 `migrate`가 거부하는 경우에는 대신 `--dry-run` 확인과 프로그램 폴더 밖 보관을 안내한다. 화면 배너와 서버 시작 문구는 이 판단을 doctor에 맡기고 `npm run doctor`를 안내한다.
   - 종료 코드: 필수 항목 실패 1, 그 밖 0, 잘못된 옵션 64.
 - 서버 시작 때 실행 파일 존재만 빠르게 확인하고(`tools.*.installed`), 로그인 상태는 비동기로 조회한다. 없는 도구는 상단 배너로 알린다.
 - `--demo`는 `.office/demo-events.jsonl`과 시뮬레이터로 연출만 보인다. 데모에서는 실행·답장·변경을 보낼 수 없다.

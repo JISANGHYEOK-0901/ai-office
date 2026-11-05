@@ -17,6 +17,7 @@ import {
 import { GENERATED_MANIFEST, buildWorkspaceSettings, ensureWorkspace, shimFile, syncWorkspace, workspaceFiles } from '../lib/workspace.mjs';
 import { decideRepoGuard, shellWriteTarget } from '../lib/chief-guard.mjs';
 import { MigrateError, migrateLegacy, planMigration } from '../lib/migrate.mjs';
+import { runDoctor } from '../lib/doctor.mjs';
 import { SERVER_LOCK, acquireServerLock, runningServer } from '../lib/server-lock.mjs';
 import { createRunner } from '../dashboard/runner.mjs';
 import { workspaceBanners } from '../dashboard/public/app.js';
@@ -520,6 +521,54 @@ test('migrate: 작업 공간에 같은 이름의 파일이 있으면 아무것�
   assert.ok(existsSync(join(program, 'org', 'departments.json')), '원본은 그대로');
   assert.equal(readdirSync(program).some((n) => n.startsWith('.office-migrated-')), false);
   assert.throws(() => migrateLegacy({ program, workspace: join(program, 'inside') }), WorkspaceError);
+});
+
+test('doctor: 작업 공간과 충돌하면 migrate 대신 보관을 안내하고, 충돌이 없으면 migrate를 안내한다', async (t) => {
+  const program = tmp(t, 'office-dprog-');
+  seedLegacy(program);
+  const ws = tmp(t, 'office-dws-');
+  const workspaceFix = async () => (await runDoctor({ env: { AI_OFFICE_WORKSPACE: ws, PATH: '' }, program, port: 0 })).checks.find((c) => c.id === 'workspace');
+
+  let check = await workspaceFix();
+  assert.equal(check.status, 'warn');
+  assert.equal(check.fix.command, 'npm run migrate');
+  assert.doesNotMatch(check.message, /이전할 수 없습니다/);
+
+  // 끊긴 이전이 남긴 같은 복사본은 충돌이 아니다
+  mkdirSync(join(ws, 'org'));
+  writeFileSync(join(ws, 'org', 'company.md'), '회사 규칙\n');
+  check = await workspaceFix();
+  assert.equal(check.fix.command, 'npm run migrate');
+
+  writeFileSync(join(ws, 'org', 'roster.json'), '[]');
+  check = await workspaceFix();
+  assert.equal(check.status, 'warn');
+  assert.equal(check.fix.command, 'npm run migrate -- --dry-run');
+  assert.match(check.message, /같은 이름의 다른 파일이 1개 있어 이전할 수 없습니다/);
+  assert.match(check.fix.note, /프로그램 폴더 밖의 새 폴더로 옮겨 보관/);
+  assert.equal(readFileSync(join(ws, 'org', 'roster.json'), 'utf8'), '[]', 'doctor는 아무것도 바꾸지 않는다');
+  assert.ok(existsSync(join(program, 'org', 'roster.json')));
+
+  // 안내대로 예전 항목을 보관하면 경고가 사라진다
+  for (const rel of ['org', 'outputs', '.office', '.claude']) rmSync(join(program, rel), { recursive: true });
+  check = await workspaceFix();
+  assert.equal(check.status, 'ok');
+  assert.equal(check.fix, undefined);
+});
+
+test('migrate CLI: 작업 공간과 충돌하면 쓰고 있는 작업 공간을 그대로 두고 보관하라고 안내한다', (t) => {
+  const program = copyProgram(t);
+  seedLegacy(program);
+  const ws = tmp(t, 'office-mconflict-');
+  mkdirSync(join(ws, 'org'));
+  writeFileSync(join(ws, 'org', 'roster.json'), '[]');
+  const res = spawnSync(process.execPath, [join(program, 'scripts', 'migrate.mjs'), '--workspace', ws, '--dry-run'], { env: cleanEnv(), encoding: 'utf8' });
+  assert.equal(res.status, 1, res.stdout + res.stderr);
+  assert.match(res.stderr, /org\/roster\.json/);
+  assert.match(res.stderr, /그 파일은 그대로 두고.*폴더 밖의 새 폴더로 옮겨 보관/);
+  assert.doesNotMatch(res.stderr, /작업 공간의 해당 파일을 옮기/);
+  assert.equal(readFileSync(join(ws, 'org', 'roster.json'), 'utf8'), '[]');
+  assert.ok(existsSync(join(program, 'org', 'roster.json')));
 });
 
 test('migrate CLI: 확인 없이는 옮기지 않고(호환 모드 유지), --yes면 이전·경로 기억·작업 공간 생성물을 만든다', (t) => {

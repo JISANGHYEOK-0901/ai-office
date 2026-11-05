@@ -1672,7 +1672,7 @@ async function main() {
   console.log(`AI Office 대시보드${opts.demo ? ' (DEMO)' : ''}: ${handle.accessUrl}`);
   console.log(`작업 공간: ${handle.root} (${WORKSPACE_SOURCE_LABEL[ws.source]})`);
   if (!handle.compat && handle.legacyPending) {
-    console.log('프로그램 폴더에 예전 회사 데이터가 남아 있습니다. 서버를 끄고 npm run migrate로 이 작업 공간에 옮기세요.');
+    console.log('프로그램 폴더에 예전 회사 데이터가 남아 있습니다. npm run doctor로 이전·보관 방법을 확인하세요.');
   }
   if (handle.remote) {
     console.log(`주의: ${opts.host}에 바인딩했습니다. 같은 네트워크의 기기가 이 서버에 닿을 수 있습니다.`);

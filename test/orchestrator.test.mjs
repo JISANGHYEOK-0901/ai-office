@@ -331,7 +331,7 @@ test('잘못된 계획은 1회 수정 요청하고, 계속 틀리면 업무를 �
   assert.equal(loadTasks(f.root)[0].status, 'blocked');
 });
 
-test('검증실 BLOCK은 전달을 막고, 끝없는 반려는 업무 예산이 멈춰 계속할지 묻는다', async (t) => {
+test('검증실 BLOCK은 전달을 막는다', async (t) => {
   {
     const f = fixture(t, { reviewerVerdict: 'BLOCK', reviewBy: 'codex' });
     const run = f.runner.start({ prompt: '검토가 필요한 업무' });
@@ -339,15 +339,19 @@ test('검증실 BLOCK은 전달을 막고, 끝없는 반려는 업무 예산이 
     assert.equal(loadTasks(f.root)[0].status, 'blocked');
     assert.ok(f.counts.review <= 3);
   }
-  const f = fixture(t, { rejects: 100 });
-  saveSettings(f.root, { budget: { calls: 20, minutes: 60 } });
-  const run = f.runner.start({ prompt: '검토가 필요한 업무' });
-  assert.equal((await f.final(run)).needsReply, true);
-  assert.equal(loadTasks(f.root)[0].status, 'blocked');
-  assert.match(f.runner.result(run.id).text, /예산의 \d+%를 썼습니다\(AI 호출 \d+\/20회/);
-  const calls = f.calls.length;
-  assert.ok(calls <= 20, `예산(20회) 안에서 멈춘다: ${calls}회`);
-  assert.ok(f.counts.review >= 3, `고정 2회가 아니라 예산 안에서 반려를 이어 간다: ${f.counts.review}회`);
+});
+
+test('최종 검토 재작업 한도: 외부 작업이 없으면 한 번만 다시 하고, 남은 지적을 숨기지 않고 보고한다', async (t) => {
+  const f = fixture(t, { review: (n) => ({ verdict: 'reject', stages: [{ id: 'a', reason: `지적 ${n}: 3번 날짜가 원문과 다름` }], reason: `반려 ${n}`, report: '# 보고' }) });
+  const run = f.runner.start({ prompt: '자료를 조사해 보고서로 정리해 줘' });
+  await f.final(run);
+  assert.equal(loadTasks(f.root)[0].status, 'done', f.runner.result(run.id).text);
+  assert.deepEqual([f.counts.a, f.counts.review], [2, 2], '수집 재작업은 한 번, 검토는 두 번');
+  const report = f.runner.result(run.id).text;
+  assert.match(report, /재작업 한도로 고치지 못함/);
+  assert.match(report, /지적 2: 3번 날짜가 원문과 다름/);
+  assert.match(f.calls.filter((c) => c.kind === 'review').at(-1).input, /이번에는 반려·보완할 수 없으니/);
+  assert.doesNotMatch(f.calls.filter((c) => c.kind === 'review')[0].input, /이번에는 반려·보완할 수 없으니/);
 });
 
 test('비서실장 설정은 재로딩 후 유지되고 잘못된 제공자·effort를 거부한다', async (t) => {
@@ -591,6 +595,42 @@ test('출처가 어긋나면 담당에게 한 번만 되돌리고, 로그인 사
   const site = await run({ connection: 'erp', target: 'https://erp.example.com' }, 'site');
   assert.equal(site.sourceCalls.length, 0, '내부 자료 주소를 밖으로 열지 않는다');
   assert.equal(site.prompts.length, 1);
+});
+
+test('재작업 줄이기: 깨진 출처는 뒤 단계 전에 되돌리고, 재작업 중에는 진행 점검을 건너뛰며, 뒤 단계는 한 번만 돈다', async (t) => {
+  const { orchestrate } = await import('../dashboard/orchestrator.mjs');
+  const run = async (label, broken) => {
+    const root = mkdtempSync(join(tmpdir(), 'office-rework-'));
+    t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+    mkdirSync(join(root, 'org'));
+    writeFileSync(join(root, 'org', 'departments.json'), JSON.stringify([{ id: 'research', name: '리서치부', engine: 'claude' }]));
+    writeFileSync(join(root, 'org', 'roster.json'), JSON.stringify([{ id: 'research-1', name: '김대리', department: 'research' }]));
+    const task = '2026-11-05/run-rework-' + label;
+    mkdirSync(join(root, 'outputs', ...task.split('/')), { recursive: true });
+    const a = `outputs/${task}/research/research-1-a.md`, b = `outputs/${task}/research/research-1-b.md`;
+    const steps = [], sourceCalls = [];
+    const execute = async ({ phase, prompt }) => {
+      steps.push(phase === 'stage' ? (prompt.includes(a.split('/').pop()) && prompt.includes(`출력: ${a}`) ? 'a' : 'b') : phase);
+      if (phase === 'plan') return JSON.stringify({ plan: { version: 1, task, goal: '자료', deliverables: [b], review: { by: 'chief', criteria: '확인' }, gaps: [], publications: [], stages: [
+        { id: 'a', title: '수집', dept: 'research', agent: 'research-1', inputs: [], dependsOn: [], output: a, done: '수집', connection: '', target: '' },
+        { id: 'b', title: '편집', dept: 'research', agent: 'research-1', inputs: ['a'], dependsOn: ['a'], output: b, done: '편집', connection: '', target: '' }] }, question: '' });
+      if (phase === 'meeting') return '[]';
+      if (phase === 'progress') return JSON.stringify({ action: 'continue', reason: '', question: '', revisedPlan: null });
+      if (phase === 'review') return JSON.stringify({ verdict: 'pass', stage: '', stages: [], reason: '확인', report: '# 보고', question: '', revisedPlan: null });
+      const output = prompt.includes(`출력: ${a}`) ? a : b;
+      mkdirSync(join(root, dirname(output)), { recursive: true });
+      writeFileSync(join(root, output), `내용 ${steps.length} https://a.example/x`);
+      return JSON.stringify({ status: 'done', summary: '작성' });
+    };
+    await orchestrate({ root, run: { id: 'run-rework-' + label, rootId: 'run-rework-' + label, engine: 'claude', task }, prompt: '자료 정리', execute, signal: new AbortController().signal,
+      sourceCheck: async (files) => { sourceCalls.push(files.map((f) => f.stage)); return { checked: 1, broken: broken && sourceCalls.length === 1 ? [{ url: 'https://a.example/x', stage: 'a', status: 404 }] : [], mismatched: [], unknown: [], skipped: 0 }; } });
+    return { steps, sourceCalls };
+  };
+  const bad = await run('bad', true);
+  assert.deepEqual(bad.steps.filter((p) => !['plan', 'meeting'].includes(p)), ['a', 'a', 'b', 'review'], '편집 전에 되돌리고 점검은 건너뛴다');
+  assert.deepEqual(bad.sourceCalls[0], ['a'], '방금 끝난 단계만 먼저 확인한다');
+  const good = await run('good', false);
+  assert.deepEqual(good.steps.filter((p) => !['plan', 'meeting'].includes(p)), ['a', 'progress', 'b', 'review'], '문제가 없으면 기존 흐름 그대로다');
 });
 
 test('빠른 조회: 계획·검토 없이 직원 한 명이 Sonnet/low로 끝내고 생략 사실을 보고한다', async (t) => {

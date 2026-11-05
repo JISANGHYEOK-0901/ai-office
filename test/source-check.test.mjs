@@ -12,6 +12,8 @@ test('출처 추출: 표·목록·괄호 링크에서 주소만 뽑고 끝 문�
   assert.deepEqual(urls, ['https://a.example/x', 'https://b.example/y', 'https://c.example/z']);
   assert.deepEqual(extractSources('[위키](https://en.wikipedia.org/wiki/Tesla_Roadster_(second_generation)). (https://a.example/y)').map((s) => s.url), ['https://en.wikipedia.org/wiki/Tesla_Roadster_(second_generation)', 'https://a.example/y']);
   assert.match(extractSources('## Tesla reveals Roadster\n\n링크: https://a.example/x')[0].context, /Tesla reveals Roadster/);
+  assert.deepEqual(extractSources('USPTO(https://a.example/p.pdf?x=1)는 막혔고, Google(https://b.example/en)는 404였다').map((s) => s.url), ['https://a.example/p.pdf?x=1', 'https://b.example/en'], '닫는 괄호 뒤 조사는 주소가 아니다');
+  assert.deepEqual(extractSources('https://ko.example/wiki/테슬라').map((s) => s.url), ['https://ko.example/wiki/테슬라']);
 });
 
 test('제목 대조: 사이트 이름·기호를 빼고 비교하며 짧거나 차단 화면이면 판단하지 않는다', () => {

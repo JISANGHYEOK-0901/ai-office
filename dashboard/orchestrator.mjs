@@ -18,10 +18,12 @@ import { mailKey, preparePublications, splitMailBatch } from '../lib/publication
 import { attachmentQuestion, attachmentRef, pickChoices, resolveAttachments } from '../lib/attachments.mjs';
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 import { checkSources, sourceProblemReason } from '../lib/source-check.mjs';
-import { quickGuide, quickPlan, quickReport } from '../lib/quick.mjs';
+import { collectGuide, quickGuide, quickPlan, quickReport } from '../lib/quick.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';
 import { CONNECTION_PROVIDERS, allowedServiceUrl, serviceProvider } from '../lib/connections.mjs';
 
+// 외부 작업·전문 검토가 없는 업무의 최종 검토 재작업 한도
+const MAX_REVIEW_REWORK = 1;
 // 계정 없이 공개 웹을 보는 단계의 예약 값(연결 계정 id가 아니다)
 const PUBLIC_CONNECTION = 'public';
 const waitFor = (ms, signal) => new Promise((resolve, reject) => {
@@ -66,7 +68,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     originalRequest: saved.originalRequest || redactContext(prompt),
     decisions: [...(saved.decisions || [])], completed: { ...(saved.completed || {}) },
     routes: { ...(saved.routes || {}) }, delegated: { ...(saved.delegated || {}) },
-    rejects: saved.delivered ? 0 : saved.rejects || 0,
+    rejects: saved.delivered ? 0 : saved.rejects || 0, reviewRejects: saved.delivered ? 0 : saved.reviewRejects || 0,
     // 진행 점검·계획 수정 횟수는 대표 피드백으로 새로 시작할 때 다시 센다. 수정 이력은 남긴다
     progressChecks: saved.delivered ? 0 : saved.progressChecks || 0, revisionCount: saved.delivered ? 0 : saved.revisionCount || 0,
     revisions: [...(saved.revisions || [])],
@@ -454,7 +456,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     const asked = resolveMailAttachments();
     if (asked) return asked;
   }
-  // 코드로 처리하는 조회 명령. Codex 직원의 셸은 네트워크가 막혀 있어(workspace-write) 쓸 수 없다
+  // 코드로 처리하는 조회 명령(빠른 조회·수집 단계). Codex 직원의 셸은 네트워크가 막혀 있어(workspace-write) 쓸 수 없다
   const quickCommands = (deptId) => {
     const dept = org.departments.find((d) => d.id === deptId);
     if ((dept?.engine || 'claude') !== 'claude' || (Array.isArray(dept?.tools) && dept.tools.length && !dept.tools.includes('Bash'))) return {};
@@ -493,6 +495,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           mailDraft ? '이번 산출물은 메일 문안 JSON입니다. 입력 조사 자료의 회사별 연락처·출처를 확인하고 대표 양식을 채운 messages:[{recipients:[주소],subject,body}]와 skipped:[미확인 업체·이유]를 작성하세요. 실제 메일은 지금 보내지 않습니다.' : '',
           html ? `${HTML_BRIEF}\nHTML 보고서 기본 양식: ${join(programRoot(), 'org/templates/report.html')}. 읽어서 정보 구조·스타일을 참고하고 업무에 맞게 작성하세요. {{REPORT_*}} 빈 항목은 모두 채우거나 불필요한 섹션과 함께 제거하세요. 근거가 없으면 꾸미기 위해 숫자·차트를 만들지 마세요.` : '',
           state.quick ? quickGuide({ today: new Date().toLocaleDateString('sv'), ...quickCommands(stage.dept) }) : '',
+          !state.quick && !site && !mailDraft ? collectGuide({ today: new Date().toLocaleDateString('sv'), ...quickCommands(stage.dept), firstStage: !(stage.dependsOn || []).length && !inputs.length }) : '',
           state.delegated[stage.id] ? '부서 직원의 분담 결과를 입력에서 읽고 취합하세요. 이미 분담했으므로 다시 delegate하지 마세요.' : '',
           issue ? `앞 실행의 산출물 검사 실패: ${issue}. 수정하여 지정된 파일을 작성하세요.` : '',
           '완료 기준을 채우면 바로 끝내세요. 기준에 없는 추가 조사·확인은 하지 않습니다.',
@@ -620,6 +623,25 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     note({ reason: redactContext(String(reason || '')).slice(0, 500),
       added: [...after].filter((id) => !before.has(id)), removed: [...before].filter((id) => !after.has(id)), changed });
   };
+  // 출처 자동 확인(AI 호출 없음). 로그인한 사이트의 조회 결과가 섞인 업무는 내부 주소가 나갈 수 있어 확인하지 않는다
+  const sourceCheckAllowed = () => !plan.stages.some((s) => typeof s.connection === 'string' && s.connection.trim() && s.connection !== PUBLIC_CONNECTION);
+  const sourceFiles = (stages) => stages.filter((s) => /\.(?:md|txt|html?|csv|json)$/i.test(s.output)).flatMap((s) => {
+    try { return [{ stage: s.id, text: readFileSync(safeOutput(s.output), 'utf8') }]; } catch { return []; }
+  });
+  // 어긋난 항목은 담당에게 한 번만 되돌린다. 그 뒤 결과는 검토 근거로만 쓴다
+  const returnSourceProblems = (sources) => {
+    const problems = [...sources.broken, ...sources.mismatched];
+    if (!problems.length || state.sourceRetried || state.quick) return false;
+    state.sourceRetried = true;
+    const targets = plan.stages.filter((s) => problems.some((p) => p.stage === s.id));
+    state.rejects++;
+    state.rejectionReasons = Object.fromEntries(targets.map((s) => [s.id, sourceProblemReason(problems.filter((p) => p.stage === s.id))]));
+    state.rejectionReason = '';
+    clearDependents(new Set(targets.map((s) => s.id)));
+    persist();
+    for (const s of targets) emit('flow.review', { verdict: 'reject', to: s.dept, target: s.agent, stage: s.id, summary: redact('출처 자동 확인에서 어긋난 항목을 되돌렸습니다.') });
+    return true;
+  };
   const progress = async (finished) => {
     if (state.progressChecks >= MAX_PROGRESS_CHECKS) return null;
     state.progressChecks++;
@@ -670,11 +692,18 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         // 남은 단계가 있으면 비서실장이 결과를 보고 다음 행동을 정한다(마지막 묶음 뒤는 최종 검토가 맡음)
         const finished = results.filter((r) => r.result.status === 'done').map((r) => r.stage);
         if (finished.length && !waiting.size && plan.stages.some((s) => !state.completed[s.id])) {
+          // 뒤 단계가 쓸 자료의 깨진 출처는 뒤 단계를 돌리기 전에 고친다(편집이 끝난 뒤 되돌리면 편집을 또 해야 한다)
+          if (!state.sourceRetried && !state.quick && sourceCheckAllowed()) {
+            const sources = await sourceCheck(sourceFiles(finished), { signal });
+            checkStop();
+            if (returnSourceProblems(sources)) continue;
+          }
           // 진행 점검은 보조 판단이다. 응답이 깨지거나 실패하면(중지 요청 제외) 남은 계획대로 진행한다
           const stop = overBudget();
           if (stop) return stop;
           let decision = null;
-          try { decision = await progress(finished); } catch (err) {
+          // 재작업 중에는 고칠 내용이 이미 정해져 있고 최종 검토가 다시 보므로 점검을 건너뛴다
+          if (!state.rejects) try { decision = await progress(finished); } catch (err) {
             checkStop();
             note({ skipped: redactContext(err.message).slice(0, 300) });
           }
@@ -697,28 +726,12 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       emit('flow.review_request', { summary: '단계 산출물 검토를 요청했습니다.' });
       const reviewSignature = createHash('sha256').update(JSON.stringify([plan, state.completed, state.reviewGeneration, state.rejects])).digest('hex');
       const cached = state.approvedReview?.signature === reviewSignature ? state.approvedReview : null;
-      // 출처 자동 확인(AI 호출 없음): 어긋난 항목은 담당에게 한 번만 되돌리고, 그 뒤 결과는 검토 근거로만 쓴다.
-      // 로그인한 사이트의 조회 결과가 섞인 업무는 내부 주소가 나갈 수 있어 확인하지 않는다
       let sources = null;
-      if (!cached && !plan.stages.some((s) => typeof s.connection === 'string' && s.connection.trim() && s.connection !== PUBLIC_CONNECTION)) {
-        const files = plan.stages.filter((s) => /\.(?:md|txt|html?|csv|json)$/i.test(s.output)).flatMap((s) => {
-          try { return [{ stage: s.id, text: readFileSync(safeOutput(s.output), 'utf8') }]; } catch { return []; }
-        });
-        sources = await sourceCheck(files, { signal });
+      if (!cached && sourceCheckAllowed()) {
+        sources = await sourceCheck(sourceFiles(plan.stages), { signal });
         checkStop();
         writeFileAtomic(join(taskDir, 'source-check.json'), JSON.stringify(sources, null, 2) + '\n');
-        const problems = [...sources.broken, ...sources.mismatched];
-        if (problems.length && !state.sourceRetried && !state.quick) {
-          state.sourceRetried = true;
-          const targets = plan.stages.filter((s) => problems.some((p) => p.stage === s.id));
-          state.rejects++;
-          state.rejectionReasons = Object.fromEntries(targets.map((s) => [s.id, sourceProblemReason(problems.filter((p) => p.stage === s.id))]));
-          state.rejectionReason = '';
-          clearDependents(new Set(targets.map((s) => s.id)));
-          persist();
-          for (const s of targets) emit('flow.review', { verdict: 'reject', to: s.dept, target: s.agent, stage: s.id, summary: redact('출처 자동 확인에서 어긋난 항목을 되돌렸습니다.') });
-          continue;
-        }
+        if (returnSourceProblems(sources)) continue;
       }
       const reviewers = cached || plan.review?.by === 'chief' || !plan.review?.by ? [] : org.roster.filter((a) => a.active !== false
         && (plan.review.by === 'codex' || plan.review.by === a.id)
@@ -737,10 +750,13 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         writeFileAtomic(join(taskDir, 'reviews', `${reviewer.id}.md`), text);
         evidence.push({ reviewer: reviewer.id, verdict, text });
       }
+      // 외부 작업·전문 검토가 없는 업무는 최종 검토 재작업을 한 번으로 제한한다. 반복 반려는 한 번에 3~4분씩 든다
+      const lastReview = !cached && state.reviewRejects >= MAX_REVIEW_REWORK && !(plan.publications || []).length && !reviewers.length;
       let review = cached?.review || (state.quick ? { verdict: 'pass', stages: [], reason: '빠른 조회는 최종 검토를 생략합니다.', question: '', report: quickReport({ goal: plan.goal, summary: state.quickSummary, sources }) } : parseObject(await execute({ phase: 'review', prompt: [
         '비서실장으로서 산출물을 읽기 전용으로 검토하세요. JSON만 응답하세요.',
         '{verdict:"pass"|"reject"|"revise"|"block"|"question",stage:"빈 문자열(예전 형식)",stages:[{id:"고칠 단계 id",reason:"그 단계에서 고칠 점"}],reason:"근거",report:"보고서 Markdown",question:"질문 또는 빈 문자열",revisedPlan:null}',
-        `reject: 산출물을 고치면 되는 단계를 stages에 모두 적고 단계마다 구체적인 수정 사항을 쓰세요(한 번에 묶어 반려). revise: 기존 단계로는 채울 수 없는 부족한 부분이 있으면 단계를 추가·변경한 전체 계획을 revisedPlan에 주세요. 완료된 단계는 그대로 두며, 남은 계획 수정 가능 횟수는 ${MAX_PLAN_REVISIONS - state.revisionCount}회입니다. 반려·보완을 할지, 확인 필요로 남기고 통과시킬지는 남은 예산을 보고 정하세요. 반려는 재작업으로 시간이 많이 듭니다. 외부 제출·재무·법률 자료가 아니면 사실 오류, 건수 미달, 깨진 출처처럼 대표 요청을 못 채운 경우에만 반려하고, 표기·형식·추가 근거 보완은 보고서의 확인 필요에 적고 통과시키세요.`,
+        `reject: 산출물을 고치면 되는 단계를 stages에 모두 적고 단계마다 구체적인 수정 사항을 쓰세요(한 번에 묶어 반려). revise: 기존 단계로는 채울 수 없는 부족한 부분이 있으면 단계를 추가·변경한 전체 계획을 revisedPlan에 주세요. 완료된 단계는 그대로 두며, 남은 계획 수정 가능 횟수는 ${MAX_PLAN_REVISIONS - state.revisionCount}회입니다. 반려·보완을 할지, 확인 필요로 남기고 통과시킬지는 남은 예산을 보고 정하세요. 반려는 재작업으로 시간이 많이 듭니다. 외부 제출·재무·법률 자료가 아니면 사실 오류, 건수 미달, 깨진 출처처럼 대표 요청을 못 채운 경우에만 반려하고, 표기·형식·추가 근거 보완은 보고서의 확인 필요에 적고 통과시키세요. 최신 자료 요청에서 최근 며칠 안의 기사 선정·순서 차이와, 산출물에 이미 표시한 단일 출처·독립 출처 부족도 반려하지 말고 확인 필요에 적으세요.`,
+        lastReview ? '이 업무는 이미 재작업을 한 번 했습니다. 이번에는 반려·보완할 수 없으니 verdict를 pass로 하고, 남은 문제는 어떤 항목이 어떻게 틀렸는지 보고서의 확인 필요에 구체적으로 적으세요.' : '',
         `계획: ${JSON.stringify(plan)}`, `검증실 결과: ${JSON.stringify(evidence)}`,
         evidence.length ? '검증실이 이미 확인한 항목은 다시 검토하지 말고 그 결론을 반영하세요. 당신은 대표 요청 충족·전달 가능성, 그리고 검증실이 다루지 않은 부분을 확인합니다.' : '',
         context(), plan.stages.some((s) => /\.html?$/i.test(s.output)) ? HTML_BRIEF : '',
@@ -752,6 +768,10 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         '당신이 최종 검토자입니다. 별도 검증실 부재는 공백이 아니므로 대체 검토 알림을 만들지 마세요. 요청한 전문 검토에 FIX/BLOCK/ERROR가 있거나 산출물이 없으면 pass를 내리지 마세요. 보고서에는 결과·산출물 경로·근거·확인 필요·실제 역량 공백을 포함하세요.',
       ].filter(Boolean).join('\n\n') })));
       checkStop();
+      if (lastReview && ['reject', 'revise'].includes(review.verdict)) {
+        const left = (Array.isArray(review.stages) ? review.stages : []).map((t) => `- ${plan.stages.find((s) => s.id === t?.id)?.title || t?.id}: ${t?.reason}`);
+        review = { ...review, verdict: 'pass', report: `${typeof review.report === 'string' && review.report.trim() ? review.report.trim() : `# ${plan.goal}`}\n\n## 확인 필요(재작업 한도로 고치지 못함)\n\n${[...left, ...(left.length ? [] : [`- ${review.reason || '검토 지적을 확인해 주세요.'}`])].join('\n')}\n` };
+      }
       if (review.verdict === 'pass' && prepared.errors.length) review = { verdict: 'reject', stage: prepared.errors[0].stage, reason: prepared.errors.map((e) => e.reason).join(' ') };
       if (review.verdict === 'question' && review.question?.trim()) return ask([{ phase: 'review', question: review.question }]);
       if (review.verdict === 'pass' && evidence.every((e) => e.verdict === 'PASS')
@@ -877,13 +897,14 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         emit('flow.deliver', { summary: '최종 검토를 마쳐 업무를 완료하고 결과를 전달했습니다.' });
         return report;
       }
-      // 반려·보완 횟수는 고정하지 않고 업무 예산 안에서 비서실장이 정한다(예산 점검이 매 회차 앞에서 멈춤)
+      // 외부 작업·전문 검토가 있는 업무의 반려·보완 횟수는 고정하지 않고 업무 예산 안에서 비서실장이 정한다(예산 점검이 매 회차 앞에서 멈춤)
       const hasTargets = Array.isArray(review.stages) && review.stages.length || review.stage;
       if (review.verdict === 'revise') {
         // 검토에서 부족한 부분을 채울 단계를 추가한다(진행 점검과 같은 안전선: 완료 단계 유지·수정 횟수)
         try {
           applyRevision(review.revisedPlan, review.reason);
           state.rejects++;
+          state.reviewRejects++;
           state.rejectionReasons = {};
           state.rejectionReason = String(review.reason || '검토에서 계획을 보완했습니다.');
           persist();
@@ -900,6 +921,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         .filter((t, i, list) => t.stage && list.findIndex((o) => o.stage === t.stage) === i);
       if (!targets.length) return blocked('반려할 단계가 명확하지 않습니다. ' + (review.reason || ''));
       state.rejects++;
+      state.reviewRejects++;
       state.rejectionReasons = Object.fromEntries(targets.map((t) => [t.stage.id, t.reason]));
       state.rejectionReason = targets.length > 1 ? targets.map((t) => `[${t.stage.title}] ${t.reason}`).join('\n') : targets[0].reason;
       clearDependents(new Set(targets.map((t) => t.stage.id)));

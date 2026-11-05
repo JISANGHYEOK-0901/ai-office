@@ -154,3 +154,17 @@ test('빠른 조회 보고: 원문을 확인하지 못한 구글 뉴스 경유 �
   assert.match(quickReport({ goal: '목표', summary: '요약', sources }), /구글 뉴스 경유 링크 8개는 원문을 코드로 확인할 수 없어/);
   assert.doesNotMatch(quickReport({ goal: '목표', summary: '요약', sources: { ...sources, relayed: 0 } }), /구글 뉴스/);
 });
+
+test('수집 단계 안내: 첫 단계에만 뉴스 명령과 최신 우선 기준을 주고, 셸이 없으면 명령을 주지 않는다', async () => {
+  const { collectGuide } = await import('../lib/quick.mjs');
+  const commands = { newsSearch: 'node "/p/news-search.mjs"', linkCheck: 'node "/p/check-links.mjs"' };
+  const first = collectGuide({ ...commands, today: '2026-11-05', firstStage: true });
+  assert.match(first, /news-search/);
+  assert.match(first, /검증하기 쉽다는 이유로 더 최근 사건을 빼지 마세요/);
+  assert.match(first, /고른 건마다 원문 주소를 찾아 적고 본문을 열어/, '피드 값을 확인된 사실로 쓰면 최종 검토에서 반려된다');
+  assert.match(first, /check-links/);
+  const later = collectGuide({ ...commands, firstStage: false });
+  assert.doesNotMatch(later, /news-search/);
+  assert.match(later, /check-links/);
+  assert.equal(collectGuide({ firstStage: true }), '');
+});

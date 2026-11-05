@@ -19,6 +19,8 @@ import { attachmentQuestion, attachmentRef, pickChoices, resolveAttachments } fr
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 import { checkSources, sourceProblemReason } from '../lib/source-check.mjs';
 import { collectGuide, quickGuide, quickPlan, quickReport } from '../lib/quick.mjs';
+import { officeGuide, officeKind, officeNotices } from '../lib/office-files.mjs';
+import { findSoffice } from '../lib/doc-preview.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';
 import { CONNECTION_PROVIDERS, allowedServiceUrl, serviceProvider } from '../lib/connections.mjs';
 
@@ -321,6 +323,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
   // 빠른 조회는 전달할 문서를 만들지 않으므로 필수 전달 부서를 거치지 않는다
   if (fastPlan && validatePlan(fastPlan, { root, org, taskId: task, fileExists: existsSync, skipRequiredHandoffs: true }).ok) {
     state.quick = true;
+    updateTask(root, task, (t) => { t.quick = true; });
     response = { plan: fastPlan, rerunStages: [] };
     plan = fastPlan;
   } else
@@ -456,6 +459,11 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     const asked = resolveMailAttachments();
     if (asked) return asked;
   }
+  // 셸로 스크립트를 돌릴 수 있는 부서인지(Codex 셸은 네트워크만 막혀 있어 로컬 스크립트는 돈다)
+  const canRunScripts = (deptId) => {
+    const dept = org.departments.find((d) => d.id === deptId);
+    return (dept?.engine || 'claude') !== 'claude' || !Array.isArray(dept?.tools) || !dept.tools.length || dept.tools.includes('Bash');
+  };
   // 코드로 처리하는 조회 명령(빠른 조회·수집 단계). Codex 직원의 셸은 네트워크가 막혀 있어(workspace-write) 쓸 수 없다
   const quickCommands = (deptId) => {
     const dept = org.departments.find((d) => d.id === deptId);
@@ -493,6 +501,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           publicWeb ? `공개 웹 조회: 로그인 없는 브라우저(office_browser 도구)로 ${stage.target}에서 시작해 화면을 읽으세요. WebSearch·WebFetch도 함께 쓸 수 있습니다. 읽기 전용이라 입력·등록은 하지 않습니다. 유튜브 숏츠의 조회수는 /shorts/영상ID 화면에 글자로 나오지 않으니 /watch?v=영상ID로 열어 읽으세요. 결과는 출력 파일에 직접 작성하세요. 영상 내용처럼 글자로 확인할 수 없는 항목은 미확인으로 적으세요.` : '',
           site && !publicWeb ? `사이트 조회: 연결 계정 브라우저(office_browser 도구)로 ${stage.target}에서 시작해 필요한 자료를 조회하세요. 읽기 전용이라 저장·등록·수정·삭제는 하지 않습니다. 대표 요청의 의도에 맞는 메뉴·탭·필터를 사이트를 둘러보며 스스로 찾아 쓰고(대표가 범위를 정했으면 그 범위의 자료만 엽니다. 예: 특정 회원의 글이면 작성자 검색·필터를 먼저 쓰고 공지·다른 게시판은 열지 않음), 목록은 browser_text의 offset으로 끝까지 읽으세요. 결과는 출력 파일에 직접 작성하고, 대표가 요구한 항목(연락처 등)은 빠뜨리지 마세요. 조건에 맞는 항목이 없으면 그 사실과 확인한 화면·조건을 출력 파일에 적으세요. 이 단계에서는 연결 사이트 밖(웹 검색·다른 사이트)은 볼 수 없습니다. 그런 자료는 다른 단계가 맡으니 사이트 안 자료만 정리하고, 사이트 밖 자료가 없다는 이유로 대표에게 묻지 마세요.` : '',
           mailDraft ? '이번 산출물은 메일 문안 JSON입니다. 입력 조사 자료의 회사별 연락처·출처를 확인하고 대표 양식을 채운 messages:[{recipients:[주소],subject,body}]와 skipped:[미확인 업체·이유]를 작성하세요. 실제 메일은 지금 보내지 않습니다.' : '',
+          canRunScripts(stage.dept) ? officeGuide({ output: stage.output, program: programRoot() }) : '',
           html ? `${HTML_BRIEF}\nHTML 보고서 기본 양식: ${join(programRoot(), 'org/templates/report.html')}. 읽어서 정보 구조·스타일을 참고하고 업무에 맞게 작성하세요. {{REPORT_*}} 빈 항목은 모두 채우거나 불필요한 섹션과 함께 제거하세요. 근거가 없으면 꾸미기 위해 숫자·차트를 만들지 마세요.` : '',
           state.quick ? quickGuide({ today: new Date().toLocaleDateString('sv'), ...quickCommands(stage.dept) }) : '',
           !state.quick && !site && !mailDraft ? collectGuide({ today: new Date().toLocaleDateString('sv'), ...quickCommands(stage.dept), firstStage: !(stage.dependsOn || []).length && !inputs.length }) : '',
@@ -527,6 +536,10 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       if (state.quick) state.quickSummary = redactContext(String(result.summary || ''));
       const hash = fingerprint(stage);
       if (hash) {
+        // 파일은 열리지만 고칠 점이 있으면 한 번 다시 시키고, 그래도 남으면 최종 검토에 알린다
+        const notices = officeKind(stage.output) ? officeNotices(safeOutput(stage.output), { previewTool: canRunScripts(stage.dept) && Boolean(findSoffice()) }) : [];
+        if (notices.length && attempt === 0) { issue = notices.join(' '); continue; }
+        state.outputNotes = { ...(state.outputNotes || {}), [stage.id]: notices };
         state.completed[stage.id] = hash;
         persist();
         emit('agent.stop', { engine, agent: stage.agent, instance: `${run.id}-${stage.id}`, summary: redact(result.summary || text), files: [relative(root, safeOutput(stage.output)).replace(/\\/g, '/')] });
@@ -763,6 +776,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         `외부 작업 형식 검사: ${JSON.stringify(prepared.errors)}. 메일 문안은 수신자·출처·본문이 대표 지시와 맞는지 확인하세요. 아직 실제 전송 전이므로 보고서에서 발송·게시 완료로 쓰지 마세요. 실행기가 실제 결과를 별도로 붙입니다.`,
         reviewerMissing ? '계획에 지정한 전문 검토 직원이 근무 중이 아니어서 비서실장이 대신 검토합니다. 이 사실을 보고서의 확인 필요에 적으세요.' : '',
         `outputs/${task}/review-notes.md가 있으면 추가 검증 근거를 읽고 산출물·이미지와 대조하세요.`,
+        Object.values(state.outputNotes || {}).some((n) => n.length) ? `문서 파일 자동 검사에서 남은 문제(보고서의 확인 필요에 적으세요): ${JSON.stringify(state.outputNotes)}` : '',
         sources ? `출처 자동 확인(접속 여부·페이지 제목만 확인, 본문 수치 미확인): 확인 ${sources.checked}건, 열리지 않음 ${JSON.stringify(sources.broken)}, 제목 불일치 ${JSON.stringify(sources.mismatched)}, 차단·시간 초과로 확인 불가 ${sources.unknown.length}건. 이미 한 번 고칠 기회를 준 항목이면 다시 반려하지 말고 보고서의 확인 필요에 적으세요.` : '',
         budgetLeft(),
         '당신이 최종 검토자입니다. 별도 검증실 부재는 공백이 아니므로 대체 검토 알림을 만들지 마세요. 요청한 전문 검토에 FIX/BLOCK/ERROR가 있거나 산출물이 없으면 pass를 내리지 마세요. 보고서에는 결과·산출물 경로·근거·확인 필요·실제 역량 공백을 포함하세요.',

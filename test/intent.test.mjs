@@ -168,3 +168,11 @@ test('수집 단계 안내: 첫 단계에만 뉴스 명령과 최신 우선 기�
   assert.match(later, /check-links/);
   assert.equal(collectGuide({ firstStage: true }), '');
 });
+
+test('문서 제작 지시는 빠른 경로로 가지 않고, 키워드·패스워드는 걸리지 않는다', async () => {
+  const judge = ai({ quick: true, quickAgent: 'research-1' });
+  for (const text of ['테슬라 소개 파워포인트 만들어줘', '회사 소개 PPT 찾아줘', '슬라이드 5장 자료', '안내문 워드로 줘', 'a.docx 고쳐줘', 'b.xlsx 정리해줘']) {
+    assert.equal((await judgeCommand(text, { judge })).quick, false, text);
+  }
+  for (const text of ['테슬라 키워드 뉴스 찾아줘', '패스워드 관리 자료 찾아줘']) assert.equal((await judgeCommand(text, { judge })).quick, true, text);
+});

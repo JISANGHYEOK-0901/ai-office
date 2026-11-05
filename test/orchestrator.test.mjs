@@ -649,6 +649,7 @@ test('빠른 조회: 계획·검토 없이 직원 한 명이 Sonnet/low로 끝�
   const report = f.runner.result(run.id).text;
   assert.match(report, /최종 검토를 거치지 않았습니다/);
   assert.equal(loadTasks(f.root)[0].status, 'done');
+  assert.equal(loadTasks(f.root)[0].quick, true, '완료 창이 최종 검토 문구를 다르게 쓴다');
 });
 
 test('빠른 조회 직원이 없거나 계획을 만들 수 없으면 전체 흐름으로 간다', async (t) => {

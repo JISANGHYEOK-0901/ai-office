@@ -176,3 +176,18 @@ test('문서 제작 지시는 빠른 경로로 가지 않고, 키워드·패스�
   }
   for (const text of ['테슬라 키워드 뉴스 찾아줘', '패스워드 관리 자료 찾아줘']) assert.equal((await judgeCommand(text, { judge })).quick, true, text);
 });
+
+test('간단한 문서 수정: 파일 하나의 작은 수정만 빠른 경로로 보내고 나머지는 전체 절차로 간다', async () => {
+  const judge = (file = '매출표.xlsx', fields = {}) => ai({ quickEdit: true, quickEditFile: file, quickAgent: 'ops-1', ...fields });
+  const ok = await judgeCommand('보관함/매출표.xlsx에 합계 행 추가해서 저장해줘', { judge: judge('보관함/매출표.xlsx') });
+  assert.deepEqual([ok.quickEdit, ok.quickEditFile, ok.quickAgent, ok.quick], [true, '보관함/매출표.xlsx', 'ops-1', false]);
+  for (const text of ['매출표.xlsx 검증해서 고쳐줘', '매출표.xlsx 전체 다듬어줘', '매출표.xlsx 내용 요약해줘', '매출표.xlsx 번역해줘', '매출표.xlsx 보고 새로 만들어줘']) {
+    assert.equal((await judgeCommand(text, { judge: judge() })).quickEdit, false, text);
+  }
+  assert.equal((await judgeCommand('매출표.xlsx와 공지.docx 고쳐줘', { judge: judge() })).quickEdit, false, '파일 두 개');
+  assert.equal((await judgeCommand('공지 제목 바꿔줘', { judge: judge('공지.docx') })).quickEdit, false, '원문에 없는 파일');
+  assert.equal((await judgeCommand('매출표.xlsx 고쳐서 메일로 보내줘', { judge: judge('매출표.xlsx', { externalActions: [{ action: 'mail', evidence: '메일로 보내줘' }] }) })).quickEdit, false);
+  assert.equal((await judgeCommand('매출표.xlsx 고쳐줘', { judge: ai({ quickEdit: false }) })).quickEdit, false);
+  assert.equal((await judgeCommand('매출표.xlsx 고쳐줘', { judge: async () => null })).quickEdit, undefined, '판별 실패');
+  assert.match((await import('../lib/intent.mjs')).commandPrompt('자료', new Date(), []), /quickEditFile/);
+});

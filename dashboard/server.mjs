@@ -843,7 +843,7 @@ export async function startServer({
     // 지시에 적은 저장 위치는 업무를 시작하기 전에 검사한다(끝난 뒤에 저장 실패로 알게 되지 않게)
     if (intent.outputDir) { try { customOutputDirectory(root, intent.outputDir); } catch (err) { throw new HttpError(400, `저장 위치를 쓸 수 없습니다: ${err.message}`); } }
     const run = await callRunner(() => runner.start({ prompt, model, engine: body.engine || null, effort: body.effort || null,
-      continuous, intent: { actions: intent.actions, delegated: intent.delegated, outputDir: intent.outputDir || null, source: intent.source, quick: intent.quick === true, quickAgent: intent.quickAgent || '' } }), '작업을 시작하지 못했습니다.');
+      continuous, intent: { actions: intent.actions, delegated: intent.delegated, outputDir: intent.outputDir || null, source: intent.source, quick: intent.quick === true, quickEdit: intent.quickEdit === true, quickEditFile: intent.quickEditFile || '', quickAgent: intent.quickAgent || '' } }), '작업을 시작하지 못했습니다.');
     scheduleBroadcast();
     return run;
   }

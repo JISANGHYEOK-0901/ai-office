@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, utimesSync, mkdirSync, writeFileSync
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { formulasWithoutValue, officeGuide, officeIssues, officeKind, officeNotices, previewDirectory } from '../lib/office-files.mjs';
+import { documentDiff, formulasWithoutValue, officeGuide, officeIssues, officeKind, officeNotices, previewDirectory } from '../lib/office-files.mjs';
 import { findSoffice, renderDocument } from '../lib/doc-preview.mjs';
 import { outputIssues } from '../lib/work-result.mjs';
 
@@ -132,4 +132,29 @@ test('화면 확인 명령: 도구가 없으면 알리고, 변환 실패와 성�
   assert.equal(made.status, 'ok');
   assert.equal(made.images.length, 1);
   assert.match(made.message, /첫 페이지만/);
+});
+
+test('문서 대조: 바뀐 글자·값만 찾고, 크게 지워지면 표시한다', async (t) => {
+  const d = dir(t);
+  const word = async (lines) => docx.Packer.toBuffer(new docx.Document({ sections: [{ children: lines.map((l) => new docx.Paragraph(l)) }] }));
+  const before = await word(['2026년 공지', '점검 안내입니다.', '메일을 쓸 수 없습니다.']);
+  const small = documentDiff(before, await word(['2027년 공지', '점검 안내입니다.', '메일을 쓸 수 없습니다.', '담당자: [확인 필요]']), 'Word');
+  assert.deepEqual([small.removed, small.added, small.large], [['2026년 공지'], ['2027년 공지', '담당자: [확인 필요]'], false]);
+  const many = Array.from({ length: 10 }, (_, i) => `문단 ${i}`);
+  assert.equal(documentDiff(await word(many), await word(many.slice(0, 2)), 'Word').large, true);
+
+  await makeXlsx(join(d, 'a.xlsx'));
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.readFile(join(d, 'a.xlsx'));
+  const ws = book.worksheets[0];
+  ws.getCell('B2').value = 10;
+  ws.getCell('A5').value = '평균';
+  await book.xlsx.writeFile(join(d, 'b.xlsx'));
+  const cells = documentDiff(readFileSync(join(d, 'a.xlsx')), readFileSync(join(d, 'b.xlsx')), 'Excel');
+  assert.deepEqual(cells.removed, ['B2: 1']);
+  assert.deepEqual(cells.added.sort(), ['A5: 평균', 'B2: 10']);
+
+  const deck = async (titles) => { const p = new PptxGenJS(); for (const x of titles) p.addSlide().addText(x, { x: 1, y: 1, w: 5, h: 1 }); return Buffer.from(await p.write({ outputType: 'nodebuffer' })); };
+  const slides = documentDiff(await deck(['표지', '일정']), await deck(['표지', '2027 일정', '담당자']), 'PowerPoint');
+  assert.deepEqual([slides.removed, slides.added], [['일정'], ['2027 일정', '담당자']]);
 });

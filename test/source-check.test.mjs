@@ -107,7 +107,10 @@ test('링크 일괄 확인: 입력 순서로 제목·게시일·상태를 주고
   assert.match(output.at(-1), /2개는 확인하지 않았습니다/);
 });
 
-test('링크 일괄 확인: 응답이 멈춰도 받은 데까지로 답하고, 많은 링크는 잘라서 알린다', async () => {
+test('링크 일괄 확인: 응답이 멈춰도 받은 데까지로 답하고, 많은 링크는 잘라서 알린다', async (t) => {
+  // 시간 초과 타이머는 unref라 실제 소켓이 없는 이 시험에서는 따로 이벤트 루프를 붙잡아야 울린다(Node 20·22)
+  const keepAlive = setInterval(() => {}, 5);
+  t.after(() => clearInterval(keepAlive));
   // 실제 fetch처럼 중단 신호가 오면 본문 읽기가 오류로 끝난다
   const { links } = await inspectLinks(['https://a.example/slow'], { lookup: publicDns, timeoutMs: 30, fetchImpl: async (url, { signal }) => {
     const stalled = new ReadableStream({ start(c) {

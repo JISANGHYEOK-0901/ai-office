@@ -676,7 +676,7 @@ test('간단한 문서 수정: 계획·검토 없이 사본을 고치고, 바뀐
   assert.equal(stage.agentId, 'docs-1', '셸을 쓸 수 있는 문서 담당');
   assert.equal(stage.effort, 'low');
   assert.match(stage.prompt, /간단한 문서 수정입니다/);
-  assert.match(stage.prompt, /입력: \[".*source\/매출표\.xlsx"\]/);
+  assert.match(stage.prompt, /입력: \[".*source[\\/]+매출표\.xlsx"\]/);
   assert.match(stage.prompt, /exceljs/);
   assert.deepEqual(readFileSync(join(small.root, '보관함', '매출표.xlsx')), small.original, '원본은 그대로');
   assert.deepEqual(readFileSync(join(small.root, 'outputs', ...small.task.split('/'), 'source', '매출표.xlsx')), small.original, '사본도 그대로');

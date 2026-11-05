@@ -136,3 +136,21 @@ test('근거가 원문과 글자 그대로 맞지 않아도 규칙 판별이 같
   const none = await judgeCommand('보고서만 써 줘', { judge: ai({ externalActions: [{ action: 'mail', evidence: '메일 보내' }], delegated: true, delegatedEvidence: '자동' }) });
   assert.deepEqual([none.actions, none.delegated], [[], false]);
 });
+
+test('빠른 조회 안내: 셸이 없는 직원에게는 쓸 수 없는 명령을 주지 않는다', async () => {
+  const { quickGuide } = await import('../lib/quick.mjs');
+  const plain = quickGuide({ today: '2026-11-05' });
+  assert.doesNotMatch(plain, /news-search|check-links|이 명령/);
+  assert.match(plain, /오늘은 2026-11-05입니다/);
+  assert.match(plain, /미확인으로 적으세요/);
+  const full = quickGuide({ newsSearch: 'node "/p/news-search.mjs"', linkCheck: 'node "/p/check-links.mjs"' });
+  assert.ok(full.indexOf('news-search') < full.indexOf('check-links'), '뉴스 경로를 먼저 안내한다');
+  assert.match(full, /내용을 찾는 요청/, '뉴스가 아닌 조회는 뉴스 명령을 쓰지 않는다');
+});
+
+test('빠른 조회 보고: 원문을 확인하지 못한 구글 뉴스 경유 링크 수를 밝힌다', async () => {
+  const { quickReport } = await import('../lib/quick.mjs');
+  const sources = { checked: 2, broken: [], mismatched: [], unknown: [], relayed: 8 };
+  assert.match(quickReport({ goal: '목표', summary: '요약', sources }), /구글 뉴스 경유 링크 8개는 원문을 코드로 확인할 수 없어/);
+  assert.doesNotMatch(quickReport({ goal: '목표', summary: '요약', sources: { ...sources, relayed: 0 } }), /구글 뉴스/);
+});

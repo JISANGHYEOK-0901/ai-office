@@ -18,7 +18,7 @@ import { mailKey, preparePublications, splitMailBatch } from '../lib/publication
 import { attachmentQuestion, attachmentRef, pickChoices, resolveAttachments } from '../lib/attachments.mjs';
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 import { checkSources, sourceProblemReason } from '../lib/source-check.mjs';
-import { QUICK_GUIDE, quickPlan, quickReport } from '../lib/quick.mjs';
+import { quickGuide, quickPlan, quickReport } from '../lib/quick.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';
 import { CONNECTION_PROVIDERS, allowedServiceUrl, serviceProvider } from '../lib/connections.mjs';
 
@@ -454,6 +454,13 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     const asked = resolveMailAttachments();
     if (asked) return asked;
   }
+  // 코드로 처리하는 조회 명령. Codex 직원의 셸은 네트워크가 막혀 있어(workspace-write) 쓸 수 없다
+  const quickCommands = (deptId) => {
+    const dept = org.departments.find((d) => d.id === deptId);
+    if ((dept?.engine || 'claude') !== 'claude' || (Array.isArray(dept?.tools) && dept.tools.length && !dept.tools.includes('Bash'))) return {};
+    const command = (script) => `node "${join(programRoot(), 'scripts', script)}"`;
+    return { newsSearch: command('news-search.mjs'), linkCheck: command('check-links.mjs') };
+  };
   const executeStage = async (stage, reason = '') => {
     const desc = `${reason ? '[반려] ' : ''}${stage.title}`;
     const engine = org.departments.find((d) => d.id === stage.dept)?.engine || 'claude';
@@ -485,7 +492,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           site && !publicWeb ? `사이트 조회: 연결 계정 브라우저(office_browser 도구)로 ${stage.target}에서 시작해 필요한 자료를 조회하세요. 읽기 전용이라 저장·등록·수정·삭제는 하지 않습니다. 대표 요청의 의도에 맞는 메뉴·탭·필터를 사이트를 둘러보며 스스로 찾아 쓰고(대표가 범위를 정했으면 그 범위의 자료만 엽니다. 예: 특정 회원의 글이면 작성자 검색·필터를 먼저 쓰고 공지·다른 게시판은 열지 않음), 목록은 browser_text의 offset으로 끝까지 읽으세요. 결과는 출력 파일에 직접 작성하고, 대표가 요구한 항목(연락처 등)은 빠뜨리지 마세요. 조건에 맞는 항목이 없으면 그 사실과 확인한 화면·조건을 출력 파일에 적으세요. 이 단계에서는 연결 사이트 밖(웹 검색·다른 사이트)은 볼 수 없습니다. 그런 자료는 다른 단계가 맡으니 사이트 안 자료만 정리하고, 사이트 밖 자료가 없다는 이유로 대표에게 묻지 마세요.` : '',
           mailDraft ? '이번 산출물은 메일 문안 JSON입니다. 입력 조사 자료의 회사별 연락처·출처를 확인하고 대표 양식을 채운 messages:[{recipients:[주소],subject,body}]와 skipped:[미확인 업체·이유]를 작성하세요. 실제 메일은 지금 보내지 않습니다.' : '',
           html ? `${HTML_BRIEF}\nHTML 보고서 기본 양식: ${join(programRoot(), 'org/templates/report.html')}. 읽어서 정보 구조·스타일을 참고하고 업무에 맞게 작성하세요. {{REPORT_*}} 빈 항목은 모두 채우거나 불필요한 섹션과 함께 제거하세요. 근거가 없으면 꾸미기 위해 숫자·차트를 만들지 마세요.` : '',
-          state.quick ? QUICK_GUIDE : '',
+          state.quick ? quickGuide({ today: new Date().toLocaleDateString('sv'), ...quickCommands(stage.dept) }) : '',
           state.delegated[stage.id] ? '부서 직원의 분담 결과를 입력에서 읽고 취합하세요. 이미 분담했으므로 다시 delegate하지 마세요.' : '',
           issue ? `앞 실행의 산출물 검사 실패: ${issue}. 수정하여 지정된 파일을 작성하세요.` : '',
           '완료 기준을 채우면 바로 끝내세요. 기준에 없는 추가 조사·확인은 하지 않습니다.',

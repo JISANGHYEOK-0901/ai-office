@@ -603,6 +603,9 @@ test('빠른 조회: 계획·검토 없이 직원 한 명이 Sonnet/low로 끝�
   assert.deepEqual([stage.args[stage.args.indexOf('--agent') + 1], stage.args[stage.args.indexOf('--model') + 1], stage.args[stage.args.indexOf('--effort') + 1]], ['research-1', 'sonnet', 'low']);
   assert.match(stage.input, /빠른 조회입니다/);
   assert.match(stage.input, /같은 사건은 1건으로/);
+  assert.match(stage.input, /오늘은 \d{4}-\d{2}-\d{2}입니다/);
+  assert.match(stage.input, /scripts[\\/]news-search\.mjs/, '뉴스 후보는 코드로 받는다');
+  assert.match(stage.input, /scripts[\\/]check-links\.mjs/, '다른 자료는 링크를 코드로 확인한다');
   const report = f.runner.result(run.id).text;
   assert.match(report, /최종 검토를 거치지 않았습니다/);
   assert.equal(loadTasks(f.root)[0].status, 'done');

@@ -799,6 +799,64 @@ test('글·댓글 사이에 설정한 간격을 둔다', async (t) => {
   assert.equal(loadSettings(root).postGapSeconds, 90);
 });
 
+test('여러 글의 댓글은 실행 전 확인에 대상 글을 보여 주고 글마다 따로 등록한다', async (t) => {
+  const { orchestrate } = await import('../dashboard/orchestrator.mjs');
+  for (const delegated of [false, true]) {
+    const root = mkdtempSync(join(tmpdir(), 'office-comments-'));
+    t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+    mkdirSync(join(root, 'org'));
+    writeFileSync(join(root, 'org', 'departments.json'), JSON.stringify([{ id: 'biz', name: '제휴', engine: 'claude' }]));
+    writeFileSync(join(root, 'org', 'roster.json'), JSON.stringify([{ id: 'biz-1', name: '김대리', department: 'biz' }]));
+    saveSettings(root, { postGapSeconds: 0 });
+    const task = '2026-11-05/run-comments';
+    mkdirSync(join(root, 'outputs', ...task.split('/')), { recursive: true });
+    const output = `outputs/${task}/biz/biz-1-a.json`;
+    const article = (n) => `https://m.cafe.naver.com/ca-fe/web/cafes/1/articles/${n}`;
+    const plan = { version: 1, task, goal: '댓글', deliverables: [], review: { by: 'chief', criteria: '확인' }, gaps: [],
+      publications: [{ id: 'c', action: 'comment', service: 'naver_cafe', connection: 'n1', agent: 'biz-1', target: 'https://cafe.naver.com/f-e/cafes/1/menus/44', recipients: [], subject: '', content: 'a', instructions: '', files: [], attachments: [] }],
+      stages: [{ id: 'a', title: '문안', dept: 'biz', agent: 'biz-1', inputs: [], output, done: '작성', dependsOn: [], connection: '', target: '' }] };
+    const comments = [{ target: article(1), body: '첫 댓글', subject: '첫 글', author: '회원A' }, { target: article(2), body: '둘째 댓글', subject: '둘째 글', author: '회원B' }];
+    const delivered = [], prompts = [];
+    const execute = async ({ phase, prompt }) => {
+      if (phase === 'plan') return JSON.stringify({ plan, question: '', needsMeeting: false, requestedActions: [] });
+      if (phase === 'review') return JSON.stringify({ verdict: 'pass', stages: [], reason: '', report: '# 결과\n\n확인했습니다.', question: '' });
+      if (phase === 'publish') { prompts.push(prompt); return JSON.stringify({ status: 'done', summary: '등록' }); }
+      mkdirSync(join(root, dirname(output)), { recursive: true }); writeFileSync(join(root, output), JSON.stringify({ comments, skipped: [] }));
+      return JSON.stringify({ status: 'done', summary: '작성' });
+    };
+    const outbound = { connections: () => [{ id: 'n1', label: '네이버', provider: 'naver', status: 'connected' }],
+      async deliver(args) { delivered.push([args.publication.target, args.body, args.publication.subject]); await args.execute({ url: '', token: '', permissionsFile: '' }); return { status: 'confirmed', resultUrl: args.publication.target }; } };
+    const text = await orchestrate({ root, run: { id: 'run-comments', rootId: 'run-comments', engine: 'claude', task }, prompt: delegated ? '글마다 댓글 달아줘. 끝까지 자동으로' : '글마다 댓글 달아줘', intent: { actions: ['comment'], delegated, source: 'ai' }, execute, signal: new AbortController().signal, outbound,
+      sourceCheck: async () => ({ checked: 0, broken: [], mismatched: [], unknown: [], skipped: 0 }), wait: async () => {} });
+    if (!delegated) {
+      assert.equal(delivered.length, 0, '확인 전에는 등록하지 않는다');
+      assert.match(text, /1\. 댓글 \[네이버\] https:\/\/m\.cafe\.naver\.com\/ca-fe\/web\/cafes\/1\/articles\/1 · 대상 글: 첫 글 \(작성자 회원A\) — 첫 댓글/);
+      assert.match(text, /2\. 댓글 \[네이버\] https:\/\/m\.cafe\.naver\.com\/ca-fe\/web\/cafes\/1\/articles\/2 · 대상 글: 둘째 글 \(작성자 회원B\) — 둘째 댓글/);
+      continue;
+    }
+    assert.deepEqual(delivered, [[article(1), '첫 댓글', ''], [article(2), '둘째 댓글', '']]);
+    assert.match(prompts[0], /"대상글제목":"첫 글","대상글작성자":"회원A"/);
+    assert.match(prompts[0], /다르면 등록하지 말고 needs_decision/);
+    assert.doesNotMatch(prompts[0], /둘째 댓글/, '이번 한 건만 알려 준다');
+  }
+});
+
+test('실행 전 확인에 문안을 고치라고 답하면 올리지 않고 해당 단계를 다시 쓴 뒤 다시 확인받는다', async (t) => {
+  let deliveries = 0;
+  const f = fixture(t, { publication: true, feedback: true, outbound: { connections: () => [{ id: 'naver-1', label: '네이버', provider: 'naver', status: 'connected' }],
+    async deliver() { deliveries++; return { status: 'confirmed', resultUrl: 'https://blog.naver.com/fixture/1' }; } } });
+  const first = f.runner.start({ prompt: '자료를 정리하고 블로그에 게시해 줘' });
+  assert.equal((await f.final(first)).needsReply, true);
+  const before = f.counts.b;
+  const second = f.runner.reply(first.id, { prompt: '문안 수정해 줘' });
+  assert.equal((await f.final(second)).needsReply, true);
+  assert.equal(deliveries, 0, '고치라는 답은 승인이 아니다');
+  assert.equal(f.counts.b, before + 1, '해당 단계를 다시 쓴다');
+  assert.match(f.runner.result(second.id).text, /외부 작업을 실행할까요/);
+  await f.final(f.runner.reply(second.id, { prompt: '진행' }));
+  assert.equal(deliveries, 1);
+});
+
 test('진행 중에 받은 추가 지시는 새 업무 없이 다음 단계부터 반영하고, 끝난 업무에는 넘기지 않는다', async (t) => {
   let run, active = [], accepted = null;
   const f = fixture(t, { progress: () => {

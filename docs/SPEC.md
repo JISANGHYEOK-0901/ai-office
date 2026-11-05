@@ -411,6 +411,7 @@ test/                     node:test
     - 못 찾거나 같은 이름이 여러 개거나 차단되면 `phase: attachment`로 묻는다. 후보는 경로·크기·수정일과 번호로 보여 주고, 답장의 "N번"(여럿이면 "이름은 N번")이나 전체 경로로 확정한다. 확정한 파일은 체크포인트(`attachmentChoices`)에 남긴다.
     - 계획 직후(조사·작성 전)와 검토 통과 후 발송 전에 확인한다. 실행 전 확인 목록에 `(첨부: 파일명)`을 보여 준다.
   - 여러 게시글: `{posts:[{subject, body, target}], skipped:[사유]}`. 글마다 따로 게시한다. `posts[].target`은 같은 사이트(https, 같은 origin)의 게시판 주소일 때만 쓰고, 아니면 `publication.target`에 올린다.
+  - 여러 글의 댓글: `{comments:[{target, body, subject, author}], skipped:[사유]}`(`comments` 대신 `posts`로 적어도 받는다). 글마다 댓글 1건씩 따로 등록한다. `target`은 필수이고 `publication.target`과 같은 사이트여야 한다(https, 모바일 주소 `m.`은 같은 사이트로 본다). 빠졌거나 다른 사이트이거나 같은 글이 두 번 나오면 형식 오류다. `subject`·`author`는 대상 글의 제목·작성자로, 실행 전 확인 목록에 보여 주고 직원이 화면과 대조한다. 형식이 다른 JSON은 원문 그대로 댓글로 올리지 않고 형식 오류로 돌린다. 평문 본문은 지금처럼 `publication.target`에 댓글 1건으로 올린다.
 - web: `{service:'web', connection, target, instructions, files:[단계 id]}`. subject·content는 빈 문자열, recipients는 `[]`. 지침 4000자 이하, 첨부 20개 이하(계획 단계 산출물만).
 - 단순 게시 업무(글·댓글 하나)는 조사·작성·게시를 같은 직원 한 명에게 맡긴다.
 - 형식 검사(`preparePublications`): 본문이 있는지, 메일 수신자 형식, 문안 500개 이하, 게시 후보가 없으면 skipped 사유. 오류는 검토 반려로 처리한다.

@@ -111,6 +111,8 @@ test('질문에 대한 답장을 승인·거절·수정으로 판별하고 근�
   assert.equal((await judgeAnswer('그렇게 하세요', [{ question: '실행할까요?' }], { judge: say({ decision: 'approve', decisionEvidence: '그렇게 하세요' }) })).decision, 'approve');
   assert.equal((await judgeAnswer('이번엔 올리지 말자', [], { judge: say({ decision: 'decline', decisionEvidence: '올리지 말자' }) })).decision, 'decline');
   assert.equal((await judgeAnswer('좋아요', [], { judge: say({ decision: 'decline', decisionEvidence: '취소합니다' }) })).decision, 'other');
+  // AI 판별이 실패해도 고치라는 답을 승인으로 읽지 않는다(문장에 "해 줘"·"네"가 있어도)
+  for (const text of ['본문 수정해 줘', '문안 다시 써 줘', '제목을 바꿔 주세요. 말투는 네요체로']) assert.equal((await judgeAnswer(text, [], { judge: async () => null })).decision, 'modify', text);
   const rule = await judgeAnswer('진행해', [], { judge: async () => null });
   assert.deepEqual([rule.decision, rule.source], ['approve', 'rule']);
 });

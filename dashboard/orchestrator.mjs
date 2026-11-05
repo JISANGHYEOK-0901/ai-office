@@ -1,7 +1,7 @@
 // Codex 비서실장은 계획·검토만 한다. 배정·재시도·반려 한도·인계는 프로그램이 진행한다.
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { loadOrg, writeFileAtomic } from '../lib/org.mjs';
 import { buildOrgMap } from '../lib/orgmap.mjs';
@@ -15,11 +15,11 @@ import { stageResult, outputIssues, HTML_BRIEF } from '../lib/work-result.mjs';
 import { programRoot } from '../lib/paths.mjs';
 import { BUDGET_WARN_RATIO, MAX_MAILS_PER_RUN, MAX_PLAN_REVISIONS, MAX_PROGRESS_CHECKS, externalActionPolicy, isDraftOnly } from '../lib/guardrails.mjs';
 import { mailKey, preparePublications, splitMailBatch } from '../lib/publications.mjs';
-import { attachmentQuestion, attachmentRef, pickChoices, resolveAttachments } from '../lib/attachments.mjs';
+import { attachmentQuestion, attachmentRef, blockedReason, pickChoices, resolveAttachments } from '../lib/attachments.mjs';
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 import { checkSources, sourceProblemReason } from '../lib/source-check.mjs';
-import { collectGuide, quickGuide, quickPlan, quickReport } from '../lib/quick.mjs';
-import { officeGuide, officeKind, officeNotices } from '../lib/office-files.mjs';
+import { QUICK_EDIT_GUIDE, collectGuide, quickEditPlan, quickGuide, quickPlan, quickReport } from '../lib/quick.mjs';
+import { documentDiff, officeGuide, officeKind, officeNotices } from '../lib/office-files.mjs';
 import { findSoffice } from '../lib/doc-preview.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';
 import { CONNECTION_PROVIDERS, allowedServiceUrl, serviceProvider } from '../lib/connections.mjs';
@@ -319,10 +319,25 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
   // 외부 작업 확인 뒤에는 바뀐 허용 범위로 계획을 다시 세운다
   const actionReplan = answering && saved.pending?.some((q) => q.phase === 'action-confirm');
   // 단순 조회 빠른 경로: 계획 호출 없이 직원 한 명에게 바로 맡긴다. 계획을 만들 수 없으면 기존 흐름으로 간다
-  const fastPlan = !saved.originalRequest && intent?.quick === true && !allowedActions().length ? quickPlan({ org, task, request: state.originalRequest, agentId: intent.quickAgent }) : null;
+  // 간단한 문서 수정: 찾은 파일을 업무 폴더로 복사해 그 사본만 고치게 한다(원본은 직원이 건드릴 일이 없다). 못 찾으면 기존 흐름으로 간다
+  // "보관함/표.xlsx"처럼 작업 공간 기준 경로면 그 파일을 쓰고, 아니면 첨부와 같은 규칙으로 찾는다(계정 파일·숨김 폴더 제외)
+  const findEditSource = (file) => {
+    const inRoot = resolve(root, file);
+    if (!isAbsolute(file) && !file.startsWith('~') && insideRel(root, inRoot) && existsSync(inRoot)) return blockedReason(inRoot, { root, home }) ? null : { path: realpathSync(inRoot) };
+    return resolveAttachments([file], { text: state.originalRequest, root, home }).files[0] || null;
+  };
+  const editSource = !saved.originalRequest && intent?.quickEdit === true && !allowedActions().length ? findEditSource(intent.quickEditFile) : null;
+  const editInput = editSource ? `outputs/${task}/source/${basename(editSource.path)}` : '';
+  const fastPlan = editSource ? quickEditPlan({ org, task, request: state.originalRequest, agentId: intent.quickAgent, sourceName: basename(editSource.path), input: editInput })
+    : !saved.originalRequest && intent?.quick === true && !allowedActions().length ? quickPlan({ org, task, request: state.originalRequest, agentId: intent.quickAgent }) : null;
+  if (editSource && fastPlan) {
+    mkdirSync(dirname(join(root, editInput)), { recursive: true });
+    copyFileSync(editSource.path, join(root, editInput));
+  }
   // 빠른 조회는 전달할 문서를 만들지 않으므로 필수 전달 부서를 거치지 않는다
   if (fastPlan && validatePlan(fastPlan, { root, org, taskId: task, fileExists: existsSync, skipRequiredHandoffs: true }).ok) {
     state.quick = true;
+    if (editSource) state.quickEdit = { input: editInput, output: fastPlan.stages[0].output, name: basename(editSource.path) };
     updateTask(root, task, (t) => { t.quick = true; });
     response = { plan: fastPlan, rerunStages: [] };
     plan = fastPlan;
@@ -503,7 +518,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           mailDraft ? '이번 산출물은 메일 문안 JSON입니다. 입력 조사 자료의 회사별 연락처·출처를 확인하고 대표 양식을 채운 messages:[{recipients:[주소],subject,body}]와 skipped:[미확인 업체·이유]를 작성하세요. 실제 메일은 지금 보내지 않습니다.' : '',
           canRunScripts(stage.dept) ? officeGuide({ output: stage.output, program: programRoot() }) : '',
           html ? `${HTML_BRIEF}\nHTML 보고서 기본 양식: ${join(programRoot(), 'org/templates/report.html')}. 읽어서 정보 구조·스타일을 참고하고 업무에 맞게 작성하세요. {{REPORT_*}} 빈 항목은 모두 채우거나 불필요한 섹션과 함께 제거하세요. 근거가 없으면 꾸미기 위해 숫자·차트를 만들지 마세요.` : '',
-          state.quick ? quickGuide({ today: new Date().toLocaleDateString('sv'), ...quickCommands(stage.dept) }) : '',
+          state.quickEdit ? QUICK_EDIT_GUIDE : state.quick ? quickGuide({ today: new Date().toLocaleDateString('sv'), ...quickCommands(stage.dept) }) : '',
           !state.quick && !site && !mailDraft ? collectGuide({ today: new Date().toLocaleDateString('sv'), ...quickCommands(stage.dept), firstStage: !(stage.dependsOn || []).length && !inputs.length }) : '',
           state.delegated[stage.id] ? '부서 직원의 분담 결과를 입력에서 읽고 취합하세요. 이미 분담했으므로 다시 delegate하지 마세요.' : '',
           issue ? `앞 실행의 산출물 검사 실패: ${issue}. 수정하여 지정된 파일을 작성하세요.` : '',
@@ -765,7 +780,15 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       }
       // 외부 작업·전문 검토가 없는 업무는 최종 검토 재작업을 한 번으로 제한한다. 반복 반려는 한 번에 3~4분씩 든다
       const lastReview = !cached && state.reviewRejects >= MAX_REVIEW_REWORK && !(plan.publications || []).length && !reviewers.length;
-      let review = cached?.review || (state.quick ? { verdict: 'pass', stages: [], reason: '빠른 조회는 최종 검토를 생략합니다.', question: '', report: quickReport({ goal: plan.goal, summary: state.quickSummary, sources }) } : parseObject(await execute({ phase: 'review', prompt: [
+      // 간단한 수정이라 했는데 원본이 크게 사라졌으면 빠른 경로를 풀고 최종 검토를 받는다
+      const editDiff = !cached && state.quick && state.quickEdit ? documentDiff(readFileSync(join(root, state.quickEdit.input)), readFileSync(join(root, state.quickEdit.output)), officeKind(state.quickEdit.output)) : null;
+      if (editDiff?.large) {
+        state.quick = false;
+        updateTask(root, task, (t) => { t.quick = false; });
+        persist();
+        emit('flow.notice', { summary: `지시보다 많이 바뀐 것 같아 최종 검토를 받습니다(삭제 ${editDiff.removed.length}곳).` });
+      }
+      let review = cached?.review || (state.quick ? { verdict: 'pass', stages: [], reason: state.quickEdit ? '간단한 수정은 최종 검토를 생략합니다.' : '빠른 조회는 최종 검토를 생략합니다.', question: '', report: quickReport({ goal: plan.goal, summary: state.quickSummary, sources, edit: editDiff }) } : parseObject(await execute({ phase: 'review', prompt: [
         '비서실장으로서 산출물을 읽기 전용으로 검토하세요. JSON만 응답하세요.',
         '{verdict:"pass"|"reject"|"revise"|"block"|"question",stage:"빈 문자열(예전 형식)",stages:[{id:"고칠 단계 id",reason:"그 단계에서 고칠 점"}],reason:"근거",report:"보고서 Markdown",question:"질문 또는 빈 문자열",revisedPlan:null}',
         `reject: 산출물을 고치면 되는 단계를 stages에 모두 적고 단계마다 구체적인 수정 사항을 쓰세요(한 번에 묶어 반려). revise: 기존 단계로는 채울 수 없는 부족한 부분이 있으면 단계를 추가·변경한 전체 계획을 revisedPlan에 주세요. 완료된 단계는 그대로 두며, 남은 계획 수정 가능 횟수는 ${MAX_PLAN_REVISIONS - state.revisionCount}회입니다. 반려·보완을 할지, 확인 필요로 남기고 통과시킬지는 남은 예산을 보고 정하세요. 반려는 재작업으로 시간이 많이 듭니다. 외부 제출·재무·법률 자료가 아니면 사실 오류, 건수 미달, 깨진 출처처럼 대표 요청을 못 채운 경우에만 반려하고, 표기·형식·추가 근거 보완은 보고서의 확인 필요에 적고 통과시키세요. 최신 자료 요청에서 최근 며칠 안의 기사 선정·순서 차이와, 산출물에 이미 표시한 단일 출처·독립 출처 부족도 반려하지 말고 확인 필요에 적으세요.`,

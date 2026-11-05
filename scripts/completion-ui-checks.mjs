@@ -88,7 +88,7 @@ export async function verifyCompletionUi({ browser, directory }) {
     writeFileSync(join(root, '.office/tasks.json'), JSON.stringify(tasks));
     await modal.getByRole('heading', { name: '업무 완료 · 새로 완료한 작업' }).waitFor();
     await modal.locator('#completionReport').getByText('검토를 마친 작업입니다.', { exact: false }).waitFor();
-    await modal.locator('#completionSub').getByText('빠른 조회로 끝냈습니다. 최종 검토는 거치지 않았습니다.').waitFor();
+    await modal.locator('#completionSub').getByText('빠른 경로로 끝냈습니다. 최종 검토는 거치지 않았습니다.').waitFor();
     await modal.getByRole('button', { name: '닫기', exact: true }).click();
     await waitState((state) => state.tasks.find((task) => task.id === next)?.resultSeenAt);
     checks.push({ name: '새 업무의 최종 완료가 도착하면 완료 모달 자동 표시', interaction: 'click', passed: true });

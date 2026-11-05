@@ -633,6 +633,69 @@ test('재작업 줄이기: 깨진 출처는 뒤 단계 전에 되돌리고, 재�
   assert.deepEqual(good.steps.filter((p) => !['plan', 'meeting'].includes(p)), ['a', 'progress', 'b', 'review'], '문제가 없으면 기존 흐름 그대로다');
 });
 
+test('간단한 문서 수정: 계획·검토 없이 사본을 고치고, 바뀐 곳을 보고하며, 크게 바뀌면 검토를 받고, 못 찾으면 전체 절차로 간다', async (t) => {
+  const { orchestrate } = await import('../dashboard/orchestrator.mjs');
+  const { createRequire } = await import('node:module');
+  const ExcelJS = createRequire(import.meta.url)('exceljs');
+  const write = async (file, rows) => { const b = new ExcelJS.Workbook(); const w = b.addWorksheet('매출'); for (const r of rows) w.addRow(r); await b.xlsx.writeFile(file); };
+  const rows = Array.from({ length: 8 }, (_, i) => [`${i + 1}월`, i + 1]);
+  const run = async (label, request, edited) => {
+    const root = mkdtempSync(join(tmpdir(), 'office-edit-'));
+    t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+    mkdirSync(join(root, 'org')); mkdirSync(join(root, '보관함'));
+    writeFileSync(join(root, 'org', 'departments.json'), JSON.stringify([{ id: 'docs', name: '문서제작부', engine: 'claude' }, { id: 'web', name: '조사부', engine: 'claude', tools: ['WebSearch'] }]));
+    writeFileSync(join(root, 'org', 'roster.json'), JSON.stringify([{ id: 'web-1', name: '조사', department: 'web' }, { id: 'docs-1', name: '문서', department: 'docs' }]));
+    await write(join(root, '보관함', '매출표.xlsx'), rows);
+    mkdirSync(join(root, '.숨김')); await write(join(root, '.숨김', '표.xlsx'), rows);
+    const original = readFileSync(join(root, '보관함', '매출표.xlsx'));
+    const task = '2026-11-05/run-edit-' + label;
+    mkdirSync(join(root, 'outputs', ...task.split('/')), { recursive: true });
+    const phases = [], prompts = [];
+    const execute = async ({ phase, prompt, agentId, effort }) => {
+      phases.push(phase); prompts.push({ phase, prompt, agentId, effort });
+      if (phase === 'plan') return JSON.stringify({ plan: null, question: '계획 질문' });
+      if (phase === 'review') return JSON.stringify({ verdict: 'pass', stage: '', stages: [], reason: '확인', report: '# 검토 보고', question: '', revisedPlan: null });
+      const output = prompt.match(/출력: (\S+)/)[1];
+      mkdirSync(join(root, dirname(output)), { recursive: true });
+      await write(join(root, output), edited);
+      return JSON.stringify({ status: 'done', summary: '합계 행을 추가했습니다.' });
+    };
+    const report = await orchestrate({ root, run: { id: 'run-edit-' + label, rootId: 'run-edit-' + label, engine: 'claude', task }, prompt: request, execute, signal: new AbortController().signal, home: root,
+      intent: { actions: [], delegated: false, source: 'ai', quickEdit: true, quickEditFile: request.match(/\S+?\.xlsx/)[0], quickAgent: '' } });
+    return { report, phases, prompts, root, task, original };
+  };
+  // 화면 확인 도구 유무가 PC마다 달라 없는 것으로 고정한다
+  const savedSoffice = process.env.SOFFICE_BIN;
+  process.env.SOFFICE_BIN = join(tmpdir(), '없는-soffice');
+  t.after(() => { if (savedSoffice === undefined) delete process.env.SOFFICE_BIN; else process.env.SOFFICE_BIN = savedSoffice; });
+  const small = await run('small', '매출표.xlsx에 합계 행 추가해줘', [...rows, ['합계', 36]]);
+  const relative = await run('relative', '보관함/매출표.xlsx에 합계 행 추가해줘', [...rows, ['합계', 36]]);
+  assert.deepEqual(relative.phases, ['stage'], '작업 공간 기준 경로도 찾는다');
+  assert.deepEqual(small.phases, ['stage'], '계획·진행 점검·최종 검토 없음');
+  const stage = small.prompts[0];
+  assert.equal(stage.agentId, 'docs-1', '셸을 쓸 수 있는 문서 담당');
+  assert.equal(stage.effort, 'low');
+  assert.match(stage.prompt, /간단한 문서 수정입니다/);
+  assert.match(stage.prompt, /입력: \[".*source\/매출표\.xlsx"\]/);
+  assert.match(stage.prompt, /exceljs/);
+  assert.deepEqual(readFileSync(join(small.root, '보관함', '매출표.xlsx')), small.original, '원본은 그대로');
+  assert.deepEqual(readFileSync(join(small.root, 'outputs', ...small.task.split('/'), 'source', '매출표.xlsx')), small.original, '사본도 그대로');
+  assert.match(small.report, /간단한 수정 결과입니다/);
+  assert.match(small.report, /추가 2곳, 삭제 0곳/);
+  assert.match(small.report, /추가: A9: 합계/);
+  assert.doesNotMatch(small.report, /출처 자동 확인/);
+
+  const wiped = await run('wiped', '매출표.xlsx에 합계 행 추가해줘', [['합계', 36]]);
+  assert.deepEqual(wiped.phases, ['stage', 'review'], '크게 지워지면 최종 검토를 받는다');
+  assert.match(wiped.report, /검토 보고/);
+
+  const missing = await run('missing', '없는파일.xlsx 고쳐줘', rows);
+  assert.equal(missing.phases[0], 'plan', '파일을 못 찾으면 전체 절차');
+  assert.doesNotMatch(missing.prompts[0].prompt, /간단한 문서 수정입니다/);
+  const hidden = await run('hidden', '.숨김/표.xlsx 고쳐줘', rows);
+  assert.equal(hidden.phases[0], 'plan', '숨김 폴더 파일은 빠른 경로로 읽지 않는다');
+});
+
 test('빠른 조회: 계획·검토 없이 직원 한 명이 Sonnet/low로 끝내고 생략 사실을 보고한다', async (t) => {
   const f = fixture(t, { allClaude: true, handoffRequired: true });
   const run = f.runner.start({ prompt: '미국 중간선거 최신 자료 10건 수집해줘', intent: { actions: [], delegated: false, source: 'ai', quick: true, quickAgent: 'research-1' } });

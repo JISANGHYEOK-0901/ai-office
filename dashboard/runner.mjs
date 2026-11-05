@@ -346,7 +346,8 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
     // 지시창에서 판별한 외부 작업·위임(근거 확인됨). 없으면 오케스트레이터가 규칙으로 판별한다
     if (intent && Array.isArray(intent.actions)) spec.intent = { actions: intent.actions.filter((a) => typeof a === 'string'), delegated: intent.delegated === true,
       ...(typeof intent.outputDir === 'string' && intent.outputDir ? { outputDir: intent.outputDir } : {}), source: intent.source,
-      ...(intent.quick === true ? { quick: true, quickAgent: typeof intent.quickAgent === 'string' ? intent.quickAgent : '' } : {}) };
+      ...(intent.quick === true ? { quick: true, quickAgent: typeof intent.quickAgent === 'string' ? intent.quickAgent : '' } : {}),
+      ...(intent.quickEdit === true && typeof intent.quickEditFile === 'string' ? { quickEdit: true, quickEditFile: intent.quickEditFile, quickAgent: typeof intent.quickAgent === 'string' ? intent.quickAgent : '' } : {}) };
     return addRun(spec, agentId || 'chief', typeof display === 'string' && display ? display : prompt, { id, task: taskId, monitorId, deliveryKey, schedule });
   }
 

@@ -90,6 +90,12 @@
     "quickAgent": {
       "type": "string"
     },
+    "quickEdit": {
+      "type": "boolean"
+    },
+    "quickEditFile": {
+      "type": "string"
+    },
     "followUpRun": {
       "type": "string"
     }
@@ -113,6 +119,8 @@
     "outputDirEvidence",
     "quick",
     "quickAgent",
+    "quickEdit",
+    "quickEditFile",
     "followUpRun"
   ],
   "additionalProperties": false

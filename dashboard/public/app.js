@@ -3190,7 +3190,7 @@ function renderCompletion() {
   if (!state || !$('completionDialog').open) return;
   const task = outputTask(state.taskId), files = ui.out.files.get(state.taskId);
   $('completionTitle').textContent = `업무 완료 · ${task.title || task.id}`;
-  $('completionSub').textContent = '비서실장의 최종 검토를 마쳤습니다.';
+  $('completionSub').textContent = task.quick ? '빠른 조회로 끝냈습니다. 최종 검토는 거치지 않았습니다.' : '비서실장의 최종 검토를 마쳤습니다.';
   const sig = JSON.stringify([state.taskId, !!files?.loading, files?.error, files?.data?.final?.updated]);
   if (state.sig === sig) return;
   state.sig = sig;

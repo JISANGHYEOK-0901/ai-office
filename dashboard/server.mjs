@@ -1136,6 +1136,7 @@ export async function startServer({
           slug,
           title: t?.title ?? slug,
           status: t?.status ?? null,
+          quick: t?.quick === true,
           hasReport: files.some((f) => f.rel === 'report.md'),
           hasMeeting: files.some((f) => f.rel === 'meeting.md'),
           hasPlan: files.some((f) => f.rel === 'plan.json'),

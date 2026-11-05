@@ -60,6 +60,7 @@ export async function verifyCompletionUi({ browser, directory }) {
     await page.locator('[data-act="attn"][data-attn^="complete|"]').first().click();
     const modal = page.locator('#completionDialog');
     await modal.locator('#completionReport').getByText('검토를 마친 작업입니다.', { exact: false }).waitFor();
+    await modal.locator('#completionSub').getByText('비서실장의 최종 검토를 마쳤습니다.').waitFor();
     assert.equal(await modal.getByRole('button', { name: /^(승인|반려)$/ }).count(), 0);
     assert.equal(await modal.getByText('intermediate.json').count(), 0);
     assert.equal(await modal.getByText('plan.json').count(), 0);
@@ -83,10 +84,11 @@ export async function verifyCompletionUi({ browser, directory }) {
     await page.setViewportSize({ width: 1366, height: 900 });
     const next = '2026-10-30/next-completion'; createOutput(next, '새로 완료한 작업');
     const tasks = JSON.parse(readFileSync(join(root, '.office/tasks.json')));
-    tasks.push({ id: next, title: '새로 완료한 작업', status: 'done', completedAt: new Date().toISOString() });
+    tasks.push({ id: next, title: '새로 완료한 작업', status: 'done', quick: true, completedAt: new Date().toISOString() });
     writeFileSync(join(root, '.office/tasks.json'), JSON.stringify(tasks));
     await modal.getByRole('heading', { name: '업무 완료 · 새로 완료한 작업' }).waitFor();
     await modal.locator('#completionReport').getByText('검토를 마친 작업입니다.', { exact: false }).waitFor();
+    await modal.locator('#completionSub').getByText('빠른 조회로 끝냈습니다. 최종 검토는 거치지 않았습니다.').waitFor();
     await modal.getByRole('button', { name: '닫기', exact: true }).click();
     await waitState((state) => state.tasks.find((task) => task.id === next)?.resultSeenAt);
     checks.push({ name: '새 업무의 최종 완료가 도착하면 완료 모달 자동 표시', interaction: 'click', passed: true });

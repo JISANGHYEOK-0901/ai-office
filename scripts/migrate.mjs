@@ -71,7 +71,8 @@ async function main() {
   if (plan.copied.length) console.log(`이어서 진행: 작업 공간에 같은 복사본이 이미 있는 파일 ${plan.copied.length}개는 건너뜁니다(이전이 중간에 끊긴 흔적).`);
   if (plan.conflicts.length) {
     console.error(`작업 공간에 같은 이름의 파일이 있어 이전할 수 없습니다(${plan.conflicts.length}개): ${plan.conflicts.slice(0, 10).join(', ')}`);
-    console.error('작업 공간의 해당 파일을 옮기거나 --workspace로 비어 있는 다른 경로를 지정하세요.');
+    console.error('쓰고 있는 작업 공간이면 그 파일은 그대로 두고, 대시보드 서버를 끈 뒤 프로그램 폴더의 위 항목을 폴더 밖의 새 폴더로 옮겨 보관하세요.');
+    console.error('예전 데이터를 계속 쓰려면 --workspace로 비어 있는 다른 경로를 지정하세요.');
     return 1;
   }
   console.log('방식: 복사 → 검증(파일 수·크기) → 작업 공간 경로 기억 → 원본은 프로그램 폴더의 .office-migrated-<날짜>/로 보관합니다. 자동으로 지우지 않습니다.');

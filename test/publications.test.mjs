@@ -19,6 +19,25 @@ test('영상 없는 문안은 반려하고 후보 부족 사유가 있으면 0�
   const empty = preparePublications(postPlan, () => JSON.stringify({ posts: [], skipped: ['주제에 맞는 새 영상 없음'] }));
   assert.equal(empty.jobs.length, 0); assert.equal(empty.errors.length, 0); assert.equal(empty.skipped[0], '주제에 맞는 새 영상 없음');
 });
+test('영상이 아닌 글(kind:"info")은 영상 링크 검사에서 빼고, 영상 예약에서는 지시한 수까지만 받는다', () => {
+  const video = (id) => ({ subject: id, body: `확인한 요약 https://youtu.be/${id}` });
+  const info = (n) => ({ subject: `애견 카페 ${n}`, body: `공식 안내에서 확인한 정보 ${n}`, kind: 'info' });
+  const read = (posts) => () => JSON.stringify({ posts, skipped: [] });
+  const mixed = preparePublications(postPlan, read([video('ZyXwVuTsR_2'), info(1), info(2), video('MnOpQrStU_3'), video('VwXyZaBcD_4')]),
+    { videoPolicy: { uniqueYoutube: true, minPosts: 1, maxPosts: 2, infoPosts: 1 } });
+  assert.deepEqual(mixed.errors, []);
+  assert.deepEqual(mixed.jobs.map((j) => [j.publication.subject, j.publication.kind]), [['ZyXwVuTsR_2', undefined], ['애견 카페 1', 'info'], ['MnOpQrStU_3', undefined]]);
+  assert.equal(mixed.skipped.length, 2);
+  assert.match(mixed.skipped.join('\n'), /영상이 아닌 글 최대 1개/);
+  // 영상 예약에 개수 지시가 없으면 제외하고, 표시 없이 링크만 빠진 글은 지금처럼 반려한다
+  const videoOnly = preparePublications(postPlan, read([info(1), { subject: '링크 빠짐', body: '요약만 있음' }]), { videoPolicy: { uniqueYoutube: true, maxPosts: 3 } });
+  assert.equal(videoOnly.jobs.length, 0); assert.match(videoOnly.skipped[0], /개수가 없어/); assert.match(videoOnly.errors[0].reason, /kind/);
+  // 링크가 있으면 표시와 상관없이 영상 글이고, 영상 예약이 아니면 영상이 아닌 글은 그대로 올린다
+  const linked = preparePublications(postPlan, read([{ ...video('ZyXwVuTsR_2'), kind: 'info' }]), { excludedVideos: ['ZyXwVuTsR_2'], videoPolicy: { uniqueYoutube: true, infoPosts: 3 } });
+  assert.equal(linked.jobs.length, 0); assert.match(linked.skipped[0], /중복/);
+  const oneOff = preparePublications(postPlan, read([info(1), info(2), info(3)]));
+  assert.deepEqual(oneOff.jobs.map((j) => j.publication.kind), ['info', 'info', 'info']);
+});
 import { sentMailReceipt } from '../lib/browser-work.mjs';
 
 test('보낸 메일 상세는 실제 시도·계정·수신자 전부·제목·본문 전체가 맞을 때만 증표로 인정한다', () => {

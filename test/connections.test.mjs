@@ -181,4 +181,11 @@ test('글 본문 나누기: 유튜브·네이버 지도 링크만 따로 떼고 
   for (const other of ['https://cafe.naver.com/petdilab', 'https://blog.naver.com/a/1', 'https://map.naver.com.evil.example/a', 'https://mynaver.me/a']) {
     assert.equal(bodySegments(`참고 ${other}`).filter((s) => s.card).length, 0, other);
   }
+  // 장소 카드 링크(API로는 카드가 생기지 않아 브라우저로 올릴 글)만 따로 가린다. 유튜브·일반 링크는 아니다
+  const { hasPlaceCardLink } = await import('../lib/browser-work.mjs');
+  assert.equal(hasPlaceCardLink('장소\n\nhttps://map.naver.com/p/entry/place/1'), true);
+  assert.equal(hasPlaceCardLink('영상\n\nhttps://youtu.be/AbCdEfGhI_1 그리고 https://naver.me/AbCd1234'), true);
+  assert.equal(hasPlaceCardLink(`영상\n\n${y}`), false);
+  assert.equal(hasPlaceCardLink('참고 https://cafe.naver.com/petdilab'), false);
+  assert.equal(hasPlaceCardLink(''), false);
 });

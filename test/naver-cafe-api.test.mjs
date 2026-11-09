@@ -143,6 +143,31 @@ test('게시 경로: API가 연결된 카페 글은 브라우저 없이 올리�
   await assert.rejects(work.deliver({ ...base, allowedActions: ['comment'], scope: 's4', publication: { ...publication('d'), action: 'comment', target: 'https://cafe.naver.com/f-e/cafes/1/articles/3' }, body: '댓글' }), /browser-path/);
 });
 
+test('게시 경로: 장소(네이버 지도) 링크가 있는 글은 API가 연결돼 있어도 장소 카드를 만들 수 있게 브라우저로 올린다', async (t) => {
+  const { root, store } = workspace(t);
+  const conn = store.create({ provider: 'naver', label: '업무' });
+  store.update(conn.id, { status: 'connected', manualLoginAt: 'x' });
+  let browserUsed = 0;
+  const sessions = { withSession: async () => { browserUsed++; throw new Error('browser-path'); }, close: async () => {} };
+  const posts = [];
+  const cafeApi = { connected: () => true, status: () => ({ configured: true, connected: true }), post: async (id, input) => { posts.push(input); return { articleId: posts.length, articleUrl: `https://cafe.naver.com/petdilab/${posts.length}` }; } };
+  const work = createBrowserWork({ root, store, sessions, cafeApi });
+  const base = { allowedActions: ['post'], instructionKey: 'k', signal: new AbortController().signal, execute: async () => 'x' };
+  const publication = (id) => ({ id, action: 'post', service: 'naver_cafe', target: 'https://cafe.naver.com/f-e/cafes/1/menus/24', subject: `제목 ${id}`, connection: conn.id });
+
+  for (const [id, place] of [['p1', 'https://map.naver.com/p/entry/place/1502417487'], ['p2', 'https://naver.me/AbCd1234'], ['p3', 'https://m.place.naver.com/place/1234567/home']]) {
+    await assert.rejects(work.deliver({ ...base, scope: `place-${id}`, publication: { ...publication(id), kind: 'info' }, body: `이런 곳 좋아보여요~\n상호: 가상 펜션\n\n${place}` }), /browser-path/, place);
+  }
+  assert.equal(browserUsed, 3);
+  assert.equal(posts.length, 0, '장소 글은 API로 올리지 않는다');
+
+  // 유튜브 영상 글과 링크 없는 글은 API 그대로(영상 재생기는 API도 붙인다)
+  assert.equal((await work.deliver({ ...base, scope: 'video', publication: publication('v'), body: '귀여운 영상이에요\n\nhttps://www.youtube.com/shorts/AbCdEfGhI_1' })).method, 'api');
+  assert.equal((await work.deliver({ ...base, scope: 'plain', publication: publication('t'), body: '그냥 글이에요. 참고 https://cafe.naver.com/petdilab' })).method, 'api');
+  assert.equal(posts.length, 2);
+  assert.equal(browserUsed, 3);
+});
+
 test('서버: 공식 API 연결 시작은 네이버 계정에만, 콜백은 한 번 쓰는 state가 없으면 실패 화면을 보여 준다', async (t) => {
   const { startServer } = await import('../dashboard/server.mjs');
   const temp = mkdtempSync(join(tmpdir(), 'office-cafe-api-server-')), root = join(temp, 'workspace');

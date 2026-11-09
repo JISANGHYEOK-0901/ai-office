@@ -31,7 +31,7 @@ test('조회 단계 읽기 전용: 이름이 쓰기 동작 그 자체인 버튼�
 });
 
 test('외부 작업 허용·위임은 대표 원문에서만 나오고, 금지 문장은 허용을 지운다', () => {
-  assert.deepEqual(externalActionPolicy(['카페에 글 올려줘. 끝까지 자동으로']), { actions: ['post'], delegated: true, allowResend: false, retryUncertain: false, confirmExisting: false });
+  assert.deepEqual(externalActionPolicy(['카페에 글 올려줘. 끝까지 자동으로']), { actions: ['post'], delegated: true, allowResend: false, retryUncertain: false, confirmExisting: false, viaBrowser: false });
   assert.deepEqual(externalActionPolicy(['메일 초안만 써줘']).actions, []);
   assert.deepEqual(externalActionPolicy(['메일로 보내줘', '발송은 하지 마']).actions, []);
   assert.equal(externalActionPolicy(['메일로 보내줘']).delegated, false);

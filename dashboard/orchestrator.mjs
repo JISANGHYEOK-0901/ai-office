@@ -305,7 +305,9 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     }))] : [];
     for (const provider of providers) {
       const candidates = (outbound.connections?.() || []).filter((c) => c.provider === provider);
-      if (candidates.length > 1 || isUsable(candidates[0])) continue;
+      // 카페 글쓰기만 하는 지시는 공식 API가 연결된 네이버 계정이면 브라우저 로그인 없이 올린다
+      const cafeOnly = provider === 'naver' && external.every((action) => action === 'post') && urls.filter((url) => allowedServiceUrl('naver', url)).every((url) => /^https:\/\/(?:m\.)?cafe\.naver\.com\//.test(url));
+      if (candidates.length > 1 || isUsable(candidates[0]) || cafeOnly && candidates[0]?.naverApi?.connected) continue;
       const outcome = await loginProblem({ name: CONNECTION_PROVIDERS[provider].name, provider, connection: candidates[0]?.id || '' });
       if (outcome.question) return ask([{ phase: 'account', question: outcome.question }]);
     }
@@ -439,7 +441,8 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       const candidates = list.filter((c) => c.provider === provider);
       const chosen = p.connection ? list.find((c) => c.id === p.connection) : candidates.length === 1 ? candidates[0] : null;
       if (!chosen && candidates.length > 1) { needs.push(`${name} 계정 ${candidates.length}개 중 사용할 계정(답장에 계정 이름을 적어 주세요)`); choice = true; }
-      else if (!usable(chosen)) { needs.push(`${name} 계정`); replan ||= !chosen; logins.set(provider, { name, provider, connection: chosen?.id || '' }); }
+      // 카페 글은 공식 API가 연결된 계정이면 브라우저 로그인 없이 올릴 수 있다
+      else if (!usable(chosen) && !(p.action === 'post' && p.service === 'naver_cafe' && chosen?.naverApi?.connected)) { needs.push(`${name} 계정`); replan ||= !chosen; logins.set(provider, { name, provider, connection: chosen?.id || '' }); }
     }
     for (const stage of plan.stages) {
       if (typeof stage.connection !== 'string' || !stage.connection.trim() || stage.connection === PUBLIC_CONNECTION) continue;
@@ -873,7 +876,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           }
           const instance = `${run.id}-publish-${publication.id || publications.length}`;
           const engine = org.departments.find((d) => d.id === org.roster.find((a) => a.id === publication.agent)?.department)?.engine || 'claude';
-          emit('agent.start', { engine, agent: publication.agent, instance, summary: '검토된 원문의 브라우저 업무를 시작합니다.' });
+          emit('agent.start', { engine, agent: publication.agent, instance, summary: '검토된 원문의 외부 작업을 시작합니다.' });
           try {
             const web = publication.action === 'web';
             const attachments = isMail(job) ? mailFiles(publication) : files.map((f) => ({ name: basename(f), path: safeOutput(f) }));
@@ -906,7 +909,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
                 return text;
               } });
             publications.push(web ? `- 웹사이트 작업 ${publication.target}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : '직원 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}${result.evidence ? ` · 증거 evidence/${result.evidence}` : ''}${result.summary ? `\n  - 확인 내용: ${redactContext(result.summary)}` : ''}`
-              : `- ${publication.service} ${publication.action}${isMail(job) ? ` (${mailLine(job)})` : ''}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : '브라우저 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}`);
+              : `- ${publication.service} ${publication.action}${isMail(job) ? ` (${mailLine(job)})` : ''}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : result.method === 'api' ? '공식 API 게시 완료' : '브라우저 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}`);
             if (isMail(job)) { state.mailSent[mailKey(job)] = publications.at(-1); persist(); }
             if (publication.action === 'post') { if (publication.kind === 'info') infoPosted++; else posted++; }
             if (['post', 'comment'].includes(publication.action)) { state.lastPostAt = Date.now(); persist(); }
@@ -916,7 +919,8 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
             if (error.code === 'VIDEO_DUPLICATE') { prepared.skipped.push(error.message); emit('agent.stop', { engine, agent: publication.agent, instance, summary: '중복 또는 오늘 게시 한도에 따라 제외했습니다.' }); continue; }
             // 게시 중 로그인이 풀리면(직원 창이 로그인 창으로 바뀜) 시작 때처럼 로그인을 기다렸다가 같은 작업을 답장 없이 다시 시작한다(작업마다 한 번).
             // 등록을 누른 뒤 끊겼다면 다시 시작해도 불확실 기록 때문에 멈추므로 중복 게시가 생기지 않는다
-            const lost = canOpenLogin() && !relogged.has(index) && (outbound.connections?.() || []).find((c) => c.status === 'needs_login'
+            // 공식 API 실패는 브라우저 로그인과 무관하므로 로그인 창을 열거나 자동으로 다시 시도하지 않는다
+            const lost = error.code !== 'NAVER_API' && canOpenLogin() && !relogged.has(index) && (outbound.connections?.() || []).find((c) => c.status === 'needs_login'
               && (publication.connection ? c.id === publication.connection : c.provider === serviceProvider(publication.service)));
             if (lost) {
               relogged.add(index);

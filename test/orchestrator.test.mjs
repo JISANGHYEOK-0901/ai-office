@@ -82,7 +82,9 @@ function fixture(t, options = {}) {
           stages: [stage('a', 'marketing', 'research-1', []), stage('b', 'dev', 'dev-1', ['a'])],
           review: { by: options.reviewBy || 'chief', criteria: '근거와 산출물을 확인한다' }, gaps: [] };
         if (options.workspaceInput) plan.stages[0].inputs = ['.office/simulation-inputs/market.json'];
-        if (options.publication) plan.publications = [{ id: 'publish', action: 'post', service: 'naver_blog', connection: '', agent: 'dev-1', target: 'https://blog.naver.com/fixture', recipients: [], subject: '자료', content: 'b' }];
+        if (options.publication) plan.publications = [options.publication === 'cafe'
+          ? { id: 'publish', action: 'post', service: 'naver_cafe', connection: '', agent: 'dev-1', target: 'https://cafe.naver.com/f-e/cafes/1/menus/2', recipients: [], subject: '자료', content: 'b' }
+          : { id: 'publish', action: 'post', service: 'naver_blog', connection: '', agent: 'dev-1', target: 'https://blog.naver.com/fixture', recipients: [], subject: '자료', content: 'b' }];
         if (options.siteStage) Object.assign(plan.stages[0], { connection: 'erp-1', target: 'https://erp.example.com/erp' });
         if (options.webPublication) plan.publications = [{ id: 'upload', action: 'web', service: 'web', connection: 'erp-1', agent: 'dev-1', target: 'https://erp.example.com/erp/proposal-pages', recipients: [], subject: '', content: '', instructions: '업체 ai-office-test를 추가하고 HTML을 업로드한다', files: ['b'] }];
         if (options.independent) plan.stages.push(stage('c', 'dev', 'dev-1', []));
@@ -1052,6 +1054,30 @@ test('게시 중 로그인이 풀리면 로그인 창을 열고, 로그인하면
   const denied = h.runner.start({ prompt: 'https://blog.naver.com/fixture 블로그에 글 게시해 줘. 끝까지 자동으로' });
   assert.equal((await h.final(denied)).needsReply, true);
   assert.equal(opened.length, 0);
+});
+
+test('카페 공식 API: 시작 전 로그인 창을 열지 않고, 실패는 자동 재시도 없이 묻고, "브라우저로 진행"이면 브라우저로 다시 보낸다', async (t) => {
+  // 브라우저 로그인은 풀려 있어도(needs_login) 공식 API가 연결돼 있으면 카페 글은 API로 올린다
+  const accounts = [{ id: 'n1', label: '네이버', provider: 'naver', status: 'needs_login', naverApi: { configured: true, connected: true } }];
+  const opened = [], delivered = [];
+  const outbound = { connections: () => accounts,
+    requestLogin: async (args) => { opened.push(args); return { status: 'connected', id: 'n1' }; },
+    async deliver(args) {
+      delivered.push(args);
+      if (!args.viaBrowser) throw Object.assign(new Error('공식 API가 글쓰기를 거부했습니다(HTTP 403, 코드 999). 브라우저(Playwright)로 대신 올리려면 “브라우저로 진행”이라고 답해 주세요.'), { code: 'NAVER_API', kind: 'request' });
+      return { status: 'confirmed', resultUrl: 'https://cafe.naver.com/a/1' };
+    } };
+  const f = fixture(t, { publication: 'cafe', outbound });
+  const first = f.runner.start({ prompt: 'https://cafe.naver.com/f-e/cafes/1/menus/2 카페에 글 게시해 줘. 끝까지 자동으로' });
+  assert.equal((await f.final(first)).needsReply, true);
+  assert.equal(opened.length, 0, '시작 전·실패 뒤 모두 로그인 창을 열지 않는다');
+  assert.equal(delivered.length, 1, 'API 실패를 자동으로 다시 보내거나 브라우저로 바꾸지 않는다');
+  assert.equal(delivered[0].viaBrowser, false);
+  assert.match(f.runner.result(first.id).text, /브라우저로 진행/);
+  const second = await f.final(f.runner.reply(first.id, { prompt: '브라우저로 진행' }));
+  assert.equal(second.needsReply, false);
+  assert.equal(delivered.length, 2);
+  assert.equal(delivered[1].viaBrowser, true, '대표가 고른 경우에만 브라우저로 보낸다');
 });
 
 test('필요한 계정이 없으면 작업 전에 묻고, 등록 뒤 이어서 진행한다(웹사이트 계정은 계획을 다시 세운다)', async (t) => {

@@ -25,3 +25,14 @@ test('직원 응답의 질문·이관은 완료 보고와 구분한다', () => {
   assert.equal(stageResult('개발부로 전달해 주세요.').status, 'reroute');
   assert.equal(stageResult('파일 작성 완료. 확인 필요: 없음').status, 'done');
 });
+
+test('설명 문장 앞뒤에 붙은 JSON 블록도 제어 신호로 읽는다(실제 게시 직원 응답 형태)', () => {
+  // 2026-11-09 카페 게시 직원 응답: 설명 → ```json 블록 → 목록. 예전에는 일반 텍스트로 읽어 done이 됐고 질문이 사라졌다
+  const reply = 'needs_decision 상태로 보고합니다. 글은 게시하지 못했습니다.\n\n```json\n{\n  "status": "needs_decision",\n  "question": "연결 계정 로그인이 필요합니다(CONNECTION_REQUIRED)."\n}\n```\n\n- 제목과 본문은 입력하지 않았습니다.\n- browser_submit도 누르지 않았습니다.';
+  assert.deepEqual(stageResult(reply), { status: 'needs_decision', question: '연결 계정 로그인이 필요합니다(CONNECTION_REQUIRED).' });
+  // 코드 블록 없이 끝에 붙은 JSON, 여러 블록이면 마지막 블록
+  assert.equal(stageResult('작성했습니다.\n{"status":"done","summary":"글 10건"}').summary, '글 10건');
+  assert.equal(stageResult('예시:\n```json\n{"status":"done"}\n```\n최종:\n```json\n{"status":"needs_decision","question":"게시판을 골라 주세요."}\n```').status, 'needs_decision');
+  // 상태가 없는 JSON 블록은 제어 신호가 아니다
+  assert.equal(stageResult('결과 파일:\n```json\n{"posts":[]}\n```\n작성 완료').status, 'done');
+});

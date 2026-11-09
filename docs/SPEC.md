@@ -298,7 +298,7 @@ test/                     node:test
   2. `## 목표·대표 요청`: 업무 id, 대표 최초 요청, 추가 지시·결정.
   3. `## 입력·출력·완료 기준`: 입력, 출력, 완료 기준, 반려 사유.
   4. `## 이 단계 안내`: 해당할 때만. 사이트 조회, 메일 문안 JSON, HTML 양식(`org/templates/report.html`), 팀장 취합, 앞 실행 검사 실패.
-  5. `## 응답 형식`: 마지막 응답 JSON `status = done | needs_decision | reroute | delegate`와 summary/question/department/agent/reason/assignments(`schemas/stage.json`).
+  5. `## 응답 형식`: 마지막 응답 JSON `status = done | needs_decision | reroute | delegate`와 summary/question/department/agent/reason/assignments(`schemas/stage.json`). 응답 전체가 JSON이 아니어도 설명 문장 앞뒤의 JSON 블록(```json … ``` 또는 `{"status": …}`, 여럿이면 마지막)을 읽는다(`stageResult`).
   6. `## 안전선`: 출력 파일만 쓰기, 외부 작업은 이 단계에서 하지 않음, 비밀값 금지.
 - HTML 품질 안내는 HTML 산출물 단계와 HTML 산출물이 있는 검토에만 붙인다.
 - 직원 도구는 부서 설정의 도구를 그대로 쓴다. 계정 브라우저는 사이트 조회·외부 작업 단계에만 붙는다.
@@ -385,6 +385,7 @@ test/                     node:test
 - `firstLoginDone`(직접 로그인 기록이 있거나 이미 connected·needs_login이던 계정)일 때만 만료 시 저장 정보·계정 파일로 자동 재로그인한다. 재로그인 입력은 인증 화면(일반 웹사이트는 허용 도메인 안의 비밀번호 화면)에서만 한다.
 - 직접 로그인 전의 계정은 업무에서 "처음 한 번은 계정 연결에서 로그인 창을 열어 직접 로그인해 주세요"로 멈춘다.
 - 업무 중 로그인이 풀려 직원 창을 넘겨받을 때도 같은 안내와 감시를 붙인다.
+- 외부 작업(글·댓글·메일) 중 연결 계정이 `needs_login`이 되면 실행기가 그 로그인 창을 기다렸다가(`requestLogin`, 업무 시작 전 계정 확인과 같음) 로그인을 마치면 같은 작업을 답장 없이 다시 시작한다. 작업마다 한 번이고, 다시 풀리거나 창을 닫으면 `phase: publish`로 묻는다. 예약·상시 업무는 창을 열지 않는다. 등록을 누른 뒤 끊긴 작업은 다시 시작해도 불확실 기록 때문에 멈춘다.
 - 전송을 시도한 뒤에는 자동으로 이동·재로그인하지 않는다. CAPTCHA·추가 인증은 대표 결정으로 남긴다. 탐지 우회는 하지 않는다.
 
 ### 사이트 조회 단계
@@ -458,7 +459,7 @@ test/                     node:test
 
 - 실제 결과 증표를 `.office/publications/`에 저장한다. 증표 없이 완료로 처리하지 않는다.
 - 같은 대화·계정·대상·내용이 이미 confirmed면 다시 실행하지 않는다. post 증표 키에는 publication id를 넣어 같은 게시판에 서로 다른 글을 올릴 수 있다.
-- 결과가 불확실하면(`committing`·`uncertain`) 재전송하지 않는다. "미발송 확인, 재발송" 같은 대표 지시가 있어야 다시 시도한다. 확인된 대상의 수정본은 재발송·재게시 지시가 필요하다.
+- 결과가 불확실하면(`committing`·`uncertain`) 재전송하지 않는다. "미발송 확인, 재발송" 같은 대표 지시가 있어야 다시 시도한다. 대표가 "게시 완료 확인했어", "글은 올라가 있어", "올라간 내용 확인은 했어"처럼 실제 반영을 확인했다고 답하면 같은 내용의 기록만 `confirmedBy: user`로 닫는다("안·못 올라왔어", "올라왔는지 봐줘"는 확인이 아님). 확인된 대상의 수정본은 재발송·재게시 지시가 필요하다.
 - web 작업의 `browser_finish`는 summary와 completed가 필요하다. 결과 화면 전체 캡처를 업무 폴더 `evidence/`에 저장한다.
   - completed=true: `{status:'confirmed', confirmedBy:'staff-report', resultUrl, summary, evidence}`.
   - completed=false: `status:'incomplete'`. 완료로 닫지 않고 대표 확인을 요청한다. 대표가 이어서 지시하면 다시 시도한다.

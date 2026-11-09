@@ -853,7 +853,9 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         }
         // 웹사이트 작업 추정은 넓은 문장 판별이라, 계획에 외부 작업이 없으면 비서실장 계획을 따른다(메일·게시는 확인)
         if (allowedActions().some((action) => action !== 'web') && !(plan.publications || []).length) return ask([{ phase: 'plan', question: '요청하신 외부 작업의 대상·계정·본문을 계획에서 확인하지 못했습니다. 계정 연결과 대상 주소를 확인해 주세요.' }]);
-        for (const job of batch.run) {
+        const relogged = new Set();
+        for (let index = 0; index < batch.run.length; index++) {
+          const job = batch.run[index];
           const { publication, body, files = [] } = job;
           // 이미 보낸 메일은 다시 보내지 않고 앞서 확인한 결과만 보고한다
           if (wasSent(job)) { publications.push(state.mailSent[mailKey(job)]); continue; }
@@ -912,6 +914,17 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           } catch (error) {
             checkStop();
             if (error.code === 'VIDEO_DUPLICATE') { prepared.skipped.push(error.message); emit('agent.stop', { engine, agent: publication.agent, instance, summary: '중복 또는 오늘 게시 한도에 따라 제외했습니다.' }); continue; }
+            // 게시 중 로그인이 풀리면(직원 창이 로그인 창으로 바뀜) 시작 때처럼 로그인을 기다렸다가 같은 작업을 답장 없이 다시 시작한다(작업마다 한 번).
+            // 등록을 누른 뒤 끊겼다면 다시 시작해도 불확실 기록 때문에 멈추므로 중복 게시가 생기지 않는다
+            const lost = canOpenLogin() && !relogged.has(index) && (outbound.connections?.() || []).find((c) => c.status === 'needs_login'
+              && (publication.connection ? c.id === publication.connection : c.provider === serviceProvider(publication.service)));
+            if (lost) {
+              relogged.add(index);
+              emit('agent.pause', { engine, agent: publication.agent, instance, summary: '로그인이 풀려 로그인 창을 열었습니다. 로그인을 마치면 이 작업부터 다시 시작합니다.' });
+              const outcome = await loginProblem({ name: CONNECTION_PROVIDERS[lost.provider]?.name || lost.label || '연결 계정', provider: lost.provider, connection: lost.id });
+              if (!outcome.question) { index--; continue; }
+              return ask([{ phase: 'publish', question: outcome.question }]);
+            }
             emit('agent.pause', { engine, agent: publication.agent, instance, summary: redactContext(error.message) });
             return ask([{ phase: 'publish', question: `외부 작업을 이어가기 위한 확인이 필요합니다. ${redactContext(error.message)}` }]);
           }

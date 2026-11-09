@@ -1017,6 +1017,43 @@ test('로그인 창: 링크가 있으면 계획 전에 열고, 로그인하면 �
   assert.match(d.runner.result(stop.id).text, /대표 결정으로 실행하지 않음/);
 });
 
+test('게시 중 로그인이 풀리면 로그인 창을 열고, 로그인하면 답장 없이 같은 글부터 다시 시작한다(작업마다 한 번)', async (t) => {
+  let accounts = [{ id: 'n1', label: '네이버', provider: 'naver', status: 'connected' }];
+  const opened = [], delivered = [];
+  let failures = 1;
+  const outbound = { connections: () => accounts,
+    requestLogin: async (args) => { opened.push(args); accounts = [{ ...accounts[0], status: 'connected' }]; return { status: 'connected', id: 'n1' }; },
+    async deliver(args) {
+      delivered.push(args);
+      // 실제 실행기처럼: 직원 도구가 로그아웃을 만나면 계정이 needs_login이 되고 오류가 올라온다
+      if (failures-- > 0) { accounts = [{ ...accounts[0], status: 'needs_login' }]; throw Object.assign(new Error('로그인이 만료됐거나 추가 인증이 필요합니다.'), { code: 'CONNECTION_REQUIRED' }); }
+      return { status: 'confirmed', resultUrl: 'https://blog.naver.com/x/1' };
+    } };
+  const f = fixture(t, { publication: true, outbound });
+  const done = await f.final(f.runner.start({ prompt: 'https://blog.naver.com/fixture 블로그에 글 게시해 줘. 끝까지 자동으로' }));
+  assert.equal(done.needsReply, false, '로그인하면 질문 없이 이어 간다');
+  assert.deepEqual(opened.map((o) => [o.provider, o.connection]), [['naver', 'n1']]);
+  assert.equal(delivered.length, 2, '같은 글을 한 번 더 시작한다');
+  assert.equal(delivered[0].publication.id, delivered[1].publication.id);
+  assert.equal(loadTasks(f.root)[0].status, 'done');
+
+  // 로그인한 뒤에도 또 풀리면 반복하지 않고 대표에게 묻는다
+  accounts = [{ id: 'n1', label: '네이버', provider: 'naver', status: 'connected' }]; opened.length = 0; delivered.length = 0; failures = 2;
+  const g = fixture(t, { publication: true, outbound });
+  const again = g.runner.start({ prompt: 'https://blog.naver.com/fixture 블로그에 글 게시해 줘. 끝까지 자동으로' });
+  assert.equal((await g.final(again)).needsReply, true);
+  assert.equal(opened.length, 1);
+  assert.equal(delivered.length, 2);
+  assert.match(g.runner.result(again.id).text, /로그인이 만료됐거나/);
+
+  // 로그인 문제가 아닌 실패는 로그인 창 없이 바로 묻는다
+  accounts = [{ id: 'n1', label: '네이버', provider: 'naver', status: 'connected' }]; opened.length = 0;
+  const h = fixture(t, { publication: true, outbound: { ...outbound, async deliver() { throw new Error('게시판 쓰기 권한이 없습니다.'); } } });
+  const denied = h.runner.start({ prompt: 'https://blog.naver.com/fixture 블로그에 글 게시해 줘. 끝까지 자동으로' });
+  assert.equal((await h.final(denied)).needsReply, true);
+  assert.equal(opened.length, 0);
+});
+
 test('필요한 계정이 없으면 작업 전에 묻고, 등록 뒤 이어서 진행한다(웹사이트 계정은 계획을 다시 세운다)', async (t) => {
   let accounts = [];
   const delivered = [];

@@ -50,10 +50,10 @@ test('사용자가 지시한 작업만 허용하고 이후 금지·재발송·�
   assert.equal(externalActionPolicy(['발송됐음 확인']).confirmExisting, true);
   assert.equal(externalActionPolicy(['미발송 확인, 재발송']).confirmExisting, false);
   // 사이트에서 본 결과를 자연스럽게 말한 답도 확인으로 보고, 아직 안 올라갔다는 말과 질문은 확인이 아니다
-  for (const text of ['글은 올라가 있는데 나머지 글 2건은 안올라와있어 2건 마저 올리고 보고해줘', '카페에 잘 올라왔어', '글 게시돼 있어', '다 올라갔네']) {
+  for (const text of ['글은 올라가 있는데 나머지 글 2건은 안올라와있어 2건 마저 올리고 보고해줘', '카페에 잘 올라왔어', '글 게시돼 있어', '다 올라갔네', '올라간 내용 확인은 했어', '게시된 글 확인했어']) {
     assert.equal(externalActionPolicy([text]).confirmExisting, true, text);
   }
-  for (const text of ['아직 안 올라왔어', '글이 안올라가 있어', '못 올라갔어', '글이 올라갔는지 봐줘', '카페에 올라와 있나요?', '미게시 확인, 재게시']) {
+  for (const text of ['아직 안 올라왔어', '글이 안올라가 있어', '못 올라갔어', '글이 올라갔는지 봐줘', '카페에 올라와 있나요?', '미게시 확인, 재게시', '올라간 거 확인해 줘', '안 올라간 거 확인했어']) {
     assert.equal(externalActionPolicy([text]).confirmExisting, false, text);
   }
 });

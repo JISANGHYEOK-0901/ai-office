@@ -459,7 +459,7 @@ test/                     node:test
 
 - 실제 결과 증표를 `.office/publications/`에 저장한다. 증표 없이 완료로 처리하지 않는다.
 - 같은 대화·계정·대상·내용이 이미 confirmed면 다시 실행하지 않는다. post 증표 키에는 publication id를 넣어 같은 게시판에 서로 다른 글을 올릴 수 있다.
-- 결과가 불확실하면(`committing`·`uncertain`) 재전송하지 않는다. "미발송 확인, 재발송" 같은 대표 지시가 있어야 다시 시도한다. 대표가 "게시 완료 확인했어", "글은 올라가 있어", "올라간 내용 확인은 했어"처럼 실제 반영을 확인했다고 답하면 같은 내용의 기록만 `confirmedBy: user`로 닫는다("안·못 올라왔어", "올라왔는지 봐줘"는 확인이 아님). 확인된 대상의 수정본은 재발송·재게시 지시가 필요하다.
+- 결과가 불확실하면(`committing`·`uncertain`) 재전송하지 않는다. "미발송 확인, 재발송" 같은 대표 지시가 있어야 다시 시도한다. 대표가 "게시 완료 확인했어", "글은 올라가 있어", "올라간 내용 확인은 했어"처럼 실제 반영을 확인했다고 답하면 같은 내용의 기록만 `confirmedBy: user`로 닫는다("안·못 올라왔어", "올라왔는지 봐줘", 물음표로 끝나는 "올라왔어?", 뒤에서 부정한 "올라가 있지 않아"는 확인이 아님). 확인된 대상의 수정본은 재발송·재게시 지시가 필요하다.
 - web 작업의 `browser_finish`는 summary와 completed가 필요하다. 결과 화면 전체 캡처를 업무 폴더 `evidence/`에 저장한다.
   - completed=true: `{status:'confirmed', confirmedBy:'staff-report', resultUrl, summary, evidence}`.
   - completed=false: `status:'incomplete'`. 완료로 닫지 않고 대표 확인을 요청한다. 대표가 이어서 지시하면 다시 시도한다.

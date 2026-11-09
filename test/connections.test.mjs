@@ -49,6 +49,9 @@ test('사용자가 지시한 작업만 허용하고 이후 금지·재발송·�
   assert.equal(externalActionPolicy(['미발송 확인, 재발송']).retryUncertain, true);
   assert.equal(externalActionPolicy(['발송됐음 확인']).confirmExisting, true);
   assert.equal(externalActionPolicy(['미발송 확인, 재발송']).confirmExisting, false);
+  // 공식 API 실패 뒤 브라우저(Playwright) 우회를 고른 답만 viaBrowser다
+  for (const text of ['브라우저로 진행', '브라우저로 올려줘', '플레이라이트로 해', 'Playwright로 진행']) assert.equal(externalActionPolicy([text]).viaBrowser, true, text);
+  for (const text of ['진행', '브라우저로 하지 마', '플레이라이트 말고 API로']) assert.equal(externalActionPolicy([text]).viaBrowser, false, text);
   // 사이트에서 본 결과를 자연스럽게 말한 답도 확인으로 보고, 아직 안 올라갔다는 말과 질문은 확인이 아니다
   for (const text of ['글은 올라가 있는데 나머지 글 2건은 안올라와있어 2건 마저 올리고 보고해줘', '카페에 잘 올라왔어', '글 게시돼 있어', '다 올라갔네', '올라간 내용 확인은 했어', '게시된 글 확인했어',
     '올라왔지만 사진이 깨졌어', '올라왔는지 물어봤지? 카페에 올라와 있어']) {

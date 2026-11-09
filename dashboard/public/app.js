@@ -2381,10 +2381,13 @@ async function refreshConnections() {
   const data = await response.json(); if (!response.ok) throw new Error(data.error || '연결 계정을 불러오지 못했습니다.');
   connectionCache = data.connections;
   $('connectionList').innerHTML = data.connections.length ? data.connections.map((c) => `<article class="connection-card">
-    <div><strong>${esc(c.label)}</strong><p class="help">${esc(data.providers.find((p) => p.id === c.provider)?.name || c.provider)}${c.hosts?.length ? ` (${esc(c.hosts.join(', '))})` : ''} · ${esc(CONNECTION_LABEL[c.status] || c.status)}${c.firstLoginDone === false ? ' · 처음 로그인 필요' : ''}${c.source === 'file' ? ' · 보관함/계정.env' : c.hasCredentials ? ' · 자동 로그인 저장됨' : ''}</p></div>
+    <div><strong>${esc(c.label)}</strong><p class="help">${esc(data.providers.find((p) => p.id === c.provider)?.name || c.provider)}${c.hosts?.length ? ` (${esc(c.hosts.join(', '))})` : ''} · ${esc(CONNECTION_LABEL[c.status] || c.status)}${c.firstLoginDone === false ? ' · 처음 로그인 필요' : ''}${c.source === 'file' ? ' · 보관함/계정.env' : c.hasCredentials ? ' · 자동 로그인 저장됨' : ''}${c.naverApi?.connected ? ' · 카페 공식 API 연결됨' : ''}</p>
+    ${c.provider === 'naver' && !data.naverApiConfigured ? '<p class="help">보관함/계정.env에 NAVER_API_CLIENT·NAVER_API_SECRET·NAVER_API_CALLBACK을 넣으면 카페 글을 공식 API로 올릴 수 있습니다.</p>' : ''}</div>
     <div class="connection-actions"><button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="open">${c.status === 'needs_login' ? '재연결' : '로그인 창 열기'}</button>
     ${c.source === 'file' ? '' : `<button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="credentials">${c.hasCredentials ? '로그인 정보 변경' : '자동 로그인 설정'}</button>`}
     ${c.status === 'connecting' ? `<button type="button" class="btn btn-sm btn-primary" data-connection="${esc(c.id)}" data-connection-action="confirm">연결 완료</button>` : ''}
+    ${c.provider === 'naver' && data.naverApiConfigured ? `<button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="naver-api">${c.naverApi?.connected ? '카페 공식 API 다시 연결' : '카페 공식 API 연결'}</button>` : ''}
+    ${c.naverApi?.connected ? `<button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="naver-api-off">공식 API 해제</button>` : ''}
     ${c.source === 'file' ? '' : `<button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="remove">연결 해제</button>`}</div></article>`).join('') : '<p class="help">연결한 계정이 없습니다. 업무에 사용할 계정을 한 번 연결해 주세요.</p>';
 }
 async function connectionAction(action) {
@@ -2402,6 +2405,16 @@ function watchConnections() {
     if (!$('connectionsDialog').open || !connectionCache.some((c) => c.status === 'connecting')) { clearInterval(connectionWatch); connectionWatch = null; return; }
     if (!connectionBusy) refreshConnections().catch(() => {});
   }, 2000);
+}
+// 네이버 동의 창에서 돌아올 때까지(최대 5분) 목록을 갱신해 "공식 API 연결됨"을 보여 준다
+let naverApiWatch = null;
+function watchNaverApi(id) {
+  clearInterval(naverApiWatch);
+  const until = Date.now() + 5 * 60 * 1000;
+  naverApiWatch = setInterval(() => {
+    if (!$('connectionsDialog').open || Date.now() > until || connectionCache.find((c) => c.id === id)?.naverApi?.connected) { clearInterval(naverApiWatch); naverApiWatch = null; return; }
+    if (!connectionBusy) refreshConnections().catch(() => {});
+  }, 3000);
 }
 async function openConnections() {
   $('connectionError').hidden = true;
@@ -3450,6 +3463,20 @@ function init() {
       form.remember.checked = true; form.username.disabled = false; form.password.disabled = false;
       $('connectionSubmit').textContent = '자동 로그인 정보 저장·연결'; $('connectionCancelEdit').hidden = false;
       form.username.focus(); return;
+    }
+    if (action === 'naver-api') {
+      // 팝업 차단을 피하려고 누른 즉시 새 창을 열고, 동의 주소를 받은 뒤 그 창으로 보낸다
+      const win = window.open('about:blank', '_blank'); if (win) win.opener = null;
+      connectionAction(async () => {
+        try { const { url } = await api('POST', `/api/connections/${encodeURIComponent(id)}/naver-api`); if (win) win.location.href = url; else window.location.assign(url); }
+        catch (error) { win?.close(); throw error; }
+        watchNaverApi(id);
+      });
+      return;
+    }
+    if (action === 'naver-api-off') {
+      if (!window.confirm('이 계정의 카페 공식 API 연결을 해제할까요? 카페 글은 다시 브라우저로 올립니다.')) return;
+      connectionAction(() => api('DELETE', `/api/connections/${encodeURIComponent(id)}/naver-api`)); return;
     }
     if (action === 'remove' && !window.confirm('이 계정의 저장된 로그인 연결을 해제할까요?')) return;
     connectionAction(() => api(action === 'remove' ? 'DELETE' : 'POST', `/api/connections/${encodeURIComponent(id)}${action === 'remove' ? '' : '/' + action}`));

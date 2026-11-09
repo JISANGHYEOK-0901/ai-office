@@ -59,7 +59,9 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
   const videoPolicy = run.schedule?.uniqueYoutube ? run.schedule : null;
   const videoExclusions = join(taskDir, 'video-exclusions.json');
   if (videoPolicy) writeFileAtomic(videoExclusions, JSON.stringify({ excludedVideoIds: outbound?.videoHistory?.(run.rootId) || [] }, null, 2));
-  const videoBrief = videoPolicy ? `영상 게시 기준: 오늘 ${videoPolicy.minPosts}~${videoPolicy.maxPosts}개, 영상 1개당 게시글 1개입니다. ${videoExclusions}의 영상 ID는 사용하지 마세요. shorts/watch/youtu.be 주소가 달라도 ID가 같으면 같은 영상입니다. 주제에 맞는 영상을 실제로 확인해 원본 링크와 요약·선정 근거를 적으세요. 다른 채널의 재업로드로 확인되는 동일 영상도 제외하세요. 새 후보가 부족하면 중복으로 채우지 않고 실제 후보만 작성하며 skipped에 사유를 적으세요. 게시 본문 단계는 JSON {posts:[{subject,body}],skipped:[사유]}로 작성하고 각 body에 유튜브 원본 링크를 넣으세요. 실제 게시는 실행기가 검토 후 처리합니다.` : '';
+  const videoBrief = videoPolicy ? `영상 게시 기준: 오늘 ${videoPolicy.minPosts}~${videoPolicy.maxPosts}개, 영상 1개당 게시글 1개입니다. ${videoExclusions}의 영상 ID는 사용하지 마세요. shorts/watch/youtu.be 주소가 달라도 ID가 같으면 같은 영상입니다. 주제에 맞는 영상을 실제로 확인해 원본 링크와 요약·선정 근거를 적으세요. 다른 채널의 재업로드로 확인되는 동일 영상도 제외하세요. 새 후보가 부족하면 중복으로 채우지 않고 실제 후보만 작성하며 skipped에 사유를 적으세요. 게시 본문 단계는 JSON {posts:[{subject,body}],skipped:[사유]}로 작성하고 각 body에 유튜브 원본 링크를 넣으세요. ${videoPolicy.infoPosts
+    ? `영상이 아닌 글(장소·정보 소개 등)은 오늘 최대 ${videoPolicy.infoPosts}개이고 영상 글 수에 세지 않습니다. 그런 글은 posts 항목에 kind:"info"를 적고 유튜브 링크를 넣지 마세요.`
+    : '이 예약은 영상 글만 올립니다. 영상이 아닌 글(kind:"info")은 제외됩니다.'} 실제 게시는 실행기가 검토 후 처리합니다.` : '';
   let saved = {};
   if (existsSync(file)) {
     saved = JSON.parse(readFileSync(file, 'utf8'));
@@ -251,7 +253,8 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       '글·댓글 하나를 올리는 것처럼 단순한 게시 업무는 조사·작성·게시를 같은 직원 한 명에게 맡기세요(단계마다 직원을 바꾸지 않음). 여러 부서의 전문성이 필요한 업무만 나눕니다.',
       '실제 외부 작업은 산출물 작성과 비서실장 검토를 마친 뒤 실행기가 브라우저로 진행합니다. 로그인 정보는 요청하거나 파일에 적지 마세요. 실제 게시·발송·댓글 등록은 stages에 넣지 말고 publications에만 두세요. 계정이 없으면 connection은 빈 문자열로 두세요. 실행기가 로그인 창을 띄운 뒤 계획을 다시 요청합니다. 연결 계정이 있고 로그인해야 읽을 수 있는 글을 조회하는 단계라면 그 단계의 stage.connection과 stage.target을 반드시 채우세요. 연결 계정이 여러 개면 사용할 계정을 확인하세요.',
       `제휴업체 조사 후 주소를 알아내는 메일 업무는 조사 단계 다음에 개인별 발송 문안 JSON 단계를 두세요. {messages:[{recipients:["회사 메일"],subject:"제목",body:"양식을 채운 본문"}],skipped:["연락처 미확인 업체·이유"]}를 작성하고 publication.content에 그 단계 id, recipients에는 []를 씁니다. 검토 후 실행기가 문안별로 발송합니다. 대량 발송을 막기 위해 메일은 한 번에 ${MAX_MAILS_PER_RUN}통까지만 보내고 남은 메일은 대표에게 다시 확인받아 이어 보내므로, messages에는 확인한 대상을 모두 적으세요. 주소·출처를 확인하지 못한 업체에는 보내지 않습니다.`,
-      '여러 게시글은 검토할 본문 JSON 단계에 {posts:[{subject,body,target}],skipped:[사유]}를 작성하고 publication.content에 그 단계 id를 지정하세요. 실행기가 글마다 별도로 게시합니다. 본문은 글을 먼저 쓰고 빈 줄 하나를 띄운 뒤 맨 아래에 유튜브 링크만 있는 줄을 두게 하세요. 올릴 게시판이 앞 단계(사이트 조회 등)에서 정해지면 그 게시판 주소(대표가 준 주소와 같은 사이트)를 target에 넣게 하세요. 비우면 publication.target에 올립니다. 유튜브 링크의 영상 ID는 작업 공간 공통 이력과 대조해 재게시를 차단합니다.',
+      '여러 게시글은 검토할 본문 JSON 단계에 {posts:[{subject,body,target}],skipped:[사유]}를 작성하고 publication.content에 그 단계 id를 지정하세요. 실행기가 글마다 별도로 게시합니다. 유튜브 영상을 소개하는 글은 본문을 먼저 쓰고 빈 줄 하나를 띄운 뒤 맨 아래에 유튜브 링크만 있는 줄을 두게 하세요. 영상이 아닌 글(장소·정보 소개 등)은 그 항목에 kind:"info"를 적고 유튜브 링크를 넣지 않게 하세요. 장소 글에 네이버 지도(플레이스) 링크를 넣으면 유튜브처럼 맨 아래 단독 줄에 두게 하세요(실행기가 따로 붙여넣어 장소 카드로 만듭니다). 올릴 게시판이 앞 단계(사이트 조회 등)에서 정해지면 그 게시판 주소(대표가 준 주소와 같은 사이트)를 target에 넣게 하세요. 비우면 publication.target에 올립니다. 유튜브 링크의 영상 ID는 작업 공간 공통 이력과 대조해 재게시를 차단합니다.',
+      '여러 글에 댓글을 달 때는 검토할 본문 JSON 단계에 {comments:[{target:"댓글을 달 글 주소",body:"댓글",subject:"그 글 제목",author:"그 글 작성자"}],skipped:[사유]}를 작성하고 publication.content에 그 단계 id, publication.target에 같은 사이트 주소를 지정하세요. 실행기가 글마다 댓글 1건씩 등록합니다. target이 없거나 다른 사이트이거나 같은 글이 두 번 나오면 반려됩니다.',
       `대표가 허용한 외부 작업: ${JSON.stringify(allowedActions())}. 초안만 요청한 업무를 외부에 게시하지 마세요.`,
       '대표가 이 목록에 없는 외부 작업의 실제 실행(글 올리기·업로드, 메일 발송, 댓글, 사이트 등록)을 시킨 것으로 보이면 초안으로 끝내거나 gaps에 적지 말고 plan은 null, requestedActions에 해당 action(mail/post/comment/web)을 넣어 응답하세요. 실행기가 대표에게 확인합니다. 조회·조사·작성만 시킨 업무면 requestedActions는 []입니다.',
       state.declinedActions?.length ? `대표가 확인 질문에서 거절한 외부 작업: ${JSON.stringify(state.declinedActions)}. publications와 requestedActions에 넣지 말고 초안까지만 만드세요.` : '',
@@ -310,8 +313,10 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
   checkStop();
   let response;
   let plan;
-  const publicationCorrection = answering && saved.pending?.some((q) => q.phase === 'publish')
-    && (answer?.source === 'ai' ? ['modify', 'decline'].includes(answer.decision) : /수정|변경|바꿔|초안|수신자|하지\s*마/.test(prompt));
+  // 실행 전 확인에 문안·대상을 고치라고 답하면 게시하지 않고 계획으로 돌아가 해당 단계를 다시 쓴 뒤 다시 확인받는다
+  const publicationCorrection = answering && (saved.pending?.some((q) => q.phase === 'publish')
+    && (answer?.source === 'ai' ? ['modify', 'decline'].includes(answer.decision) : /수정|변경|바꿔|초안|수신자|하지\s*마/.test(prompt))
+    || saved.pending?.some((q) => q.phase === 'web-confirm') && answer?.decision === 'modify');
   // 옛 실행기는 검토 후 브라우저·전달 오류도 plan 질문으로 저장했다.
   // 명시 재개라면 승인된 계획을 재검사하며 완료 파일·검토를 재사용한다.
   // 계정이 비어 있던 계획은 계정을 등록한 뒤 다시 세워 새 계정을 쓰게 한다
@@ -826,7 +831,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         const batch = splitMailBatch(prepared.jobs, { sent: Object.keys(state.mailSent), allowance: state.mailAllowance });
         const mailLine = ({ publication: p }) => `받는사람 ${p.recipients.join(', ')} · 제목: ${p.subject}`;
         const publications = [];
-        let posted = 0;
+        let posted = 0, infoPosted = 0;
         // 위임이 없으면 외부 작업(웹사이트·메일·글·댓글)을 실행 전에 한 번에 묶어 확인받는다.
         // 대표가 미리 등록한 예약·상시 감시 업무의 메일·글·댓글은 등록이 곧 지시이므로 묻지 않는다(웹사이트 작업은 기존대로 확인)
         const needsConfirm = (job) => job.publication.action === 'web' || !unattended;
@@ -843,12 +848,14 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           const what = confirmJobs.every((job) => job.publication.action === 'web') ? '웹사이트 작업' : '외부 작업';
           return ask([{ phase: 'web-confirm', question: `아래 ${what}을 실행할까요? ("진행" 또는 "하지 마"로 답하세요. 다음부터 확인 없이 하려면 지시에 "끝까지 자동으로"를 적어 주세요.)\n`
             + confirmJobs.map(({ publication: p, body, files = [] }, i) => { const attached = p.action === 'mail' ? mailFiles(p).map((f) => f.name) : files.map((f) => basename(f));
-              return `${i + 1}. ${p.action === 'web' ? '' : `${kind[p.action] || p.action} `}[${label(p)}] ${p.recipients?.length ? `받는사람 ${p.recipients.join(', ')}` : p.target}${p.subject ? ` · 제목: ${p.subject}` : ''} — ${body.replace(/\s+/g, ' ').slice(0, 300)}${attached.length ? ` (첨부: ${attached.join(', ')})` : ''}`; }).join('\n')
+              return `${i + 1}. ${p.action === 'web' ? '' : `${kind[p.action] || p.action} `}[${label(p)}] ${p.recipients?.length ? `받는사람 ${p.recipients.join(', ')}` : p.target}${p.subject ? ` · 제목: ${p.subject}` : ''}${p.targetTitle ? ` · 대상 글: ${p.targetTitle}` : ''}${p.targetAuthor ? ` (작성자 ${p.targetAuthor})` : ''} — ${body.replace(/\s+/g, ' ').slice(0, 300)}${attached.length ? ` (첨부: ${attached.join(', ')})` : ''}`; }).join('\n')
             + (batch.remaining.length ? `\n\n메일은 대량 발송을 막기 위해 한 번에 ${MAX_MAILS_PER_RUN}통까지만 보냅니다. 남은 ${batch.remaining.length}통은 위 메일을 보낸 뒤 다시 묻습니다.` : '') }]);
         }
         // 웹사이트 작업 추정은 넓은 문장 판별이라, 계획에 외부 작업이 없으면 비서실장 계획을 따른다(메일·게시는 확인)
         if (allowedActions().some((action) => action !== 'web') && !(plan.publications || []).length) return ask([{ phase: 'plan', question: '요청하신 외부 작업의 대상·계정·본문을 계획에서 확인하지 못했습니다. 계정 연결과 대상 주소를 확인해 주세요.' }]);
-        for (const job of batch.run) {
+        const relogged = new Set();
+        for (let index = 0; index < batch.run.length; index++) {
+          const job = batch.run[index];
           const { publication, body, files = [] } = job;
           // 이미 보낸 메일은 다시 보내지 않고 앞서 확인한 결과만 보고한다
           if (wasSent(job)) { publications.push(state.mailSent[mailKey(job)]); continue; }
@@ -885,7 +892,8 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
                   '쿠키·비밀번호·개인 프로필 파일을 읽거나 출력하지 않습니다. 삭제·결제·계정 변경은 하지 않습니다.',
                 ].join('\n\n') : ['대표가 이번 업무에서 지시하고 비서실장이 검토한 외부 작업을 실행합니다. 아래 원문의 내용과 대상을 바꾸지 마세요.',
                   // 이번 한 건만 알려 준다(여러 수신자 문안이 든 파일 경로를 주면 다른 사람 메일과 헷갈린다)
-                  `이번 작업 한 건: ${JSON.stringify({ 종류: publication.action, 대상: publication.target, ...(publication.recipients?.length ? { 받는사람: publication.recipients } : {}), ...(publication.subject ? { 제목: publication.subject } : {}) })}`,
+                  `이번 작업 한 건: ${JSON.stringify({ 종류: publication.action, 대상: publication.target, ...(publication.recipients?.length ? { 받는사람: publication.recipients } : {}), ...(publication.subject ? { 제목: publication.subject } : {}), ...(publication.targetTitle ? { 대상글제목: publication.targetTitle } : {}), ...(publication.targetAuthor ? { 대상글작성자: publication.targetAuthor } : {}) })}`,
+                  publication.action === 'comment' ? `댓글은 대상 글 화면의 댓글 입력칸이 본문 칸입니다(제목·받는사람 칸 없음). 입력칸이 보이지 않으면 화면을 내리거나 댓글 영역을 연 뒤 다시 읽으세요.${publication.targetTitle || publication.targetAuthor ? ' 화면의 글 제목·작성자가 위 대상 글과 다르면 등록하지 말고 needs_decision으로 보고하세요.' : ''}` : '',
                   `본문 앞부분(확인용): ${JSON.stringify(String(body).slice(0, 80))}… 본문 전체는 browser_fill_content(field:"body")가 그대로 넣으니 파일을 읽거나 직접 타이핑하지 마세요.`,
                   attachments.length ? `첨부할 파일(browser_attach의 file 값): ${attachments.map((a) => a.name).join(', ')}. 받는사람·제목·본문을 넣은 뒤 파일 첨부 칸 또는 "파일 첨부"·"내 PC" 같은 버튼의 ref로 browser_attach를 파일마다 호출하고, 화면의 첨부 목록에 파일 이름이 보이는지 확인한 다음 보내세요. 첨부가 빠지면 browser_submit이 거부합니다. 첨부 한도 초과 등으로 붙이지 못하면 보내지 말고 needs_decision으로 보고하세요.` : '',
                   'office_browser 도구만 사용해 사이트의 화면을 읽고 조작하세요. 쿠키·비밀번호·로그인 코드·개인 프로필 파일을 읽거나 출력하지 않습니다.',
@@ -900,12 +908,23 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
             publications.push(web ? `- 웹사이트 작업 ${publication.target}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : '직원 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}${result.evidence ? ` · 증거 evidence/${result.evidence}` : ''}${result.summary ? `\n  - 확인 내용: ${redactContext(result.summary)}` : ''}`
               : `- ${publication.service} ${publication.action}${isMail(job) ? ` (${mailLine(job)})` : ''}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : '브라우저 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}`);
             if (isMail(job)) { state.mailSent[mailKey(job)] = publications.at(-1); persist(); }
-            if (publication.action === 'post') posted++;
+            if (publication.action === 'post') { if (publication.kind === 'info') infoPosted++; else posted++; }
             if (['post', 'comment'].includes(publication.action)) { state.lastPostAt = Date.now(); persist(); }
             emit('agent.stop', { engine, agent: publication.agent, instance, summary: '실제 외부 작업 결과를 확인했습니다.' });
           } catch (error) {
             checkStop();
             if (error.code === 'VIDEO_DUPLICATE') { prepared.skipped.push(error.message); emit('agent.stop', { engine, agent: publication.agent, instance, summary: '중복 또는 오늘 게시 한도에 따라 제외했습니다.' }); continue; }
+            // 게시 중 로그인이 풀리면(직원 창이 로그인 창으로 바뀜) 시작 때처럼 로그인을 기다렸다가 같은 작업을 답장 없이 다시 시작한다(작업마다 한 번).
+            // 등록을 누른 뒤 끊겼다면 다시 시작해도 불확실 기록 때문에 멈추므로 중복 게시가 생기지 않는다
+            const lost = canOpenLogin() && !relogged.has(index) && (outbound.connections?.() || []).find((c) => c.status === 'needs_login'
+              && (publication.connection ? c.id === publication.connection : c.provider === serviceProvider(publication.service)));
+            if (lost) {
+              relogged.add(index);
+              emit('agent.pause', { engine, agent: publication.agent, instance, summary: '로그인이 풀려 로그인 창을 열었습니다. 로그인을 마치면 이 작업부터 다시 시작합니다.' });
+              const outcome = await loginProblem({ name: CONNECTION_PROVIDERS[lost.provider]?.name || lost.label || '연결 계정', provider: lost.provider, connection: lost.id });
+              if (!outcome.question) { index--; continue; }
+              return ask([{ phase: 'publish', question: outcome.question }]);
+            }
             emit('agent.pause', { engine, agent: publication.agent, instance, summary: redactContext(error.message) });
             return ask([{ phase: 'publish', question: `외부 작업을 이어가기 위한 확인이 필요합니다. ${redactContext(error.message)}` }]);
           }
@@ -921,7 +940,8 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           prepared.skipped.push(...batch.remaining.map((job) => `${why}: ${mailLine(job)}`));
         }
         const report = review.report + ((plan.publications || []).length ? '\n\n## 외부 작업 결과\n\n' + (publications.join('\n') || '- 실제 발송·게시 0건: 확인된 대상이 없습니다.')
-          + (videoPolicy ? `\n\n영상 게시 ${posted}건 / 목표 ${videoPolicy.minPosts}~${videoPolicy.maxPosts}건.${posted < videoPolicy.minPosts ? ' 조건에 맞는 중복 없는 새 영상이 부족해 목표 수를 채우지 않았습니다.' : ''}` : '')
+          + (videoPolicy ? `\n\n영상 게시 ${posted}건 / 목표 ${videoPolicy.minPosts}~${videoPolicy.maxPosts}건.${posted < videoPolicy.minPosts ? ' 조건에 맞는 중복 없는 새 영상이 부족해 목표 수를 채우지 않았습니다.' : ''}`
+            + (videoPolicy.infoPosts || infoPosted ? ` 영상이 아닌 글 ${infoPosted}건${videoPolicy.infoPosts ? ` / 최대 ${videoPolicy.infoPosts}건` : ''}.` : '') : '')
           + (prepared.skipped.length ? '\n\n확인 필요:\n' + prepared.skipped.map((s) => '- ' + redactContext(s)).join('\n') : '') : '');
         writeFileAtomic(join(taskDir, 'report.md'), report);
         // 최종산출물 폴더 이름은 비서실장이 정리한 업무 목표(지시문 원문보다 알아보기 쉬움)

@@ -23,6 +23,15 @@ test('한국 시각 매일 예약은 오전/오후·분을 읽고 모호하거�
   assert.equal(new Date(nextDailyTime('00:00', Date.parse('2026-12-31T15:00:00Z'))).toISOString(), '2027-01-01T15:00:00.000Z');
 });
 
+test('영상 글과 영상이 아닌 글을 섞은 예약은 개수 앞 문구로 영상 수와 그 밖의 글 수를 나눈다', () => {
+  assert.deepEqual(videoPostPolicy('매일 오전 9시에 반려동물 유튜브 숏츠 2개와 애견 동반 핫플 1개를 카페에 올려줘'), { uniqueYoutube: true, minPosts: 2, maxPosts: 2, infoPosts: 1 });
+  assert.deepEqual(videoPostPolicy('매일 9시에 카페에 애견 카페 소개 1개, 유튜브 숏츠 2~3개 올려줘'), { uniqueYoutube: true, minPosts: 2, maxPosts: 3, infoPosts: 1 });
+  assert.deepEqual(videoPostPolicy('카페 글 10개 중 유튜브 숏츠 7개, 핫플레이스 3개로 게시'), { uniqueYoutube: true, minPosts: 7, maxPosts: 7, infoPosts: 3 });
+  // 개수 앞에 영상 단어가 없으면 예전처럼 영상 글 수로 본다
+  assert.deepEqual(videoPostPolicy('매일 오전 9시에 카페에 3개씩 고양이 유튜브 숏츠 소개 글을 올려줘'), { uniqueYoutube: true, minPosts: 3, maxPosts: 3 });
+  assert.throws(() => videoPostPolicy('유튜브 숏츠 2개와 핫플 30개를 카페에 게시'), /영상이 아닌 글 수/);
+});
+
 async function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'office-schedules-'));
   t.after(() => rm(root, { recursive: true, force: true }));

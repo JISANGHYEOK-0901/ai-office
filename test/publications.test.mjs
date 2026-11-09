@@ -19,6 +19,25 @@ test('영상 없는 문안은 반려하고 후보 부족 사유가 있으면 0�
   const empty = preparePublications(postPlan, () => JSON.stringify({ posts: [], skipped: ['주제에 맞는 새 영상 없음'] }));
   assert.equal(empty.jobs.length, 0); assert.equal(empty.errors.length, 0); assert.equal(empty.skipped[0], '주제에 맞는 새 영상 없음');
 });
+test('영상이 아닌 글(kind:"info")은 영상 링크 검사에서 빼고, 영상 예약에서는 지시한 수까지만 받는다', () => {
+  const video = (id) => ({ subject: id, body: `확인한 요약 https://youtu.be/${id}` });
+  const info = (n) => ({ subject: `애견 카페 ${n}`, body: `공식 안내에서 확인한 정보 ${n}`, kind: 'info' });
+  const read = (posts) => () => JSON.stringify({ posts, skipped: [] });
+  const mixed = preparePublications(postPlan, read([video('ZyXwVuTsR_2'), info(1), info(2), video('MnOpQrStU_3'), video('VwXyZaBcD_4')]),
+    { videoPolicy: { uniqueYoutube: true, minPosts: 1, maxPosts: 2, infoPosts: 1 } });
+  assert.deepEqual(mixed.errors, []);
+  assert.deepEqual(mixed.jobs.map((j) => [j.publication.subject, j.publication.kind]), [['ZyXwVuTsR_2', undefined], ['애견 카페 1', 'info'], ['MnOpQrStU_3', undefined]]);
+  assert.equal(mixed.skipped.length, 2);
+  assert.match(mixed.skipped.join('\n'), /영상이 아닌 글 최대 1개/);
+  // 영상 예약에 개수 지시가 없으면 제외하고, 표시 없이 링크만 빠진 글은 지금처럼 반려한다
+  const videoOnly = preparePublications(postPlan, read([info(1), { subject: '링크 빠짐', body: '요약만 있음' }]), { videoPolicy: { uniqueYoutube: true, maxPosts: 3 } });
+  assert.equal(videoOnly.jobs.length, 0); assert.match(videoOnly.skipped[0], /개수가 없어/); assert.match(videoOnly.errors[0].reason, /kind/);
+  // 링크가 있으면 표시와 상관없이 영상 글이고, 영상 예약이 아니면 영상이 아닌 글은 그대로 올린다
+  const linked = preparePublications(postPlan, read([{ ...video('ZyXwVuTsR_2'), kind: 'info' }]), { excludedVideos: ['ZyXwVuTsR_2'], videoPolicy: { uniqueYoutube: true, infoPosts: 3 } });
+  assert.equal(linked.jobs.length, 0); assert.match(linked.skipped[0], /중복/);
+  const oneOff = preparePublications(postPlan, read([info(1), info(2), info(3)]));
+  assert.deepEqual(oneOff.jobs.map((j) => j.publication.kind), ['info', 'info', 'info']);
+});
 import { sentMailReceipt } from '../lib/browser-work.mjs';
 
 test('보낸 메일 상세는 실제 시도·계정·수신자 전부·제목·본문 전체가 맞을 때만 증표로 인정한다', () => {
@@ -57,4 +76,44 @@ test('게시글은 앞 단계에서 정한 같은 사이트의 게시판 주소(
     { subject: '지정 없음', body: '본문 C' },
   ] }));
   assert.deepEqual(result.jobs.map((j) => j.publication.target), ['https://cafe.naver.com/f-e/cafes/1/menus/44', 'https://cafe.naver.com/f-e/cafes/1/menus/0', 'https://cafe.naver.com/f-e/cafes/1/menus/0']);
+});
+
+const commentPlan = { stages: [{ id: 'drafts', output: 'comments.json' }], publications: [{ id: 'c', action: 'comment', service: 'naver_cafe', content: 'drafts', subject: '', recipients: [], target: 'https://cafe.naver.com/f-e/cafes/1/menus/44' }] };
+const article = (n) => `https://m.cafe.naver.com/ca-fe/web/cafes/1/articles/${n}`;
+test('여러 글의 댓글은 글마다 한 건으로 나누고 대상 글 제목·작성자를 확인용으로만 넘긴다', () => {
+  for (const key of ['comments', 'posts']) {
+    const result = preparePublications(commentPlan, () => JSON.stringify({ [key]: [
+      { target: article(1), body: '첫 댓글', subject: '첫 글', author: '회원A' },
+      { target: article(2), body: '둘째 댓글' },
+    ], skipped: [] }));
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.jobs.map((j) => [j.publication.target, j.body]), [[article(1), '첫 댓글'], [article(2), '둘째 댓글']]);
+    assert.deepEqual(result.jobs.map((j) => [j.publication.subject, j.publication.targetTitle, j.publication.targetAuthor]), [['', '첫 글', '회원A'], ['', '', '']]);
+    assert.notEqual(result.jobs[0].publication.id, result.jobs[1].publication.id);
+  }
+});
+test('댓글 묶음은 대상 글 주소가 없거나 다른 사이트이거나 같은 글이 겹치면 게시판으로 대신 보내지 않고 반려한다', () => {
+  const run = (comments) => preparePublications(commentPlan, () => JSON.stringify({ comments }));
+  for (const target of [undefined, '', 'https://evil.example.com/articles/1', 'http://m.cafe.naver.com/a/1', 'https://m.evil.cafe.naver.com/a/1']) {
+    const result = run([{ target, body: '댓글' }]);
+    assert.equal(result.jobs.length, 0, String(target)); assert.match(result.errors[0].reason, /대상 글 주소/);
+  }
+  const twice = run([{ target: article(1), body: '하나' }, { target: article(1), body: '둘' }]);
+  assert.equal(twice.jobs.length, 1); assert.match(twice.errors[0].reason, /두 번/);
+  const empty = run([]);
+  assert.equal(empty.jobs.length, 0); assert.match(empty.errors[0].reason, /skipped/);
+});
+test('JSON 원문을 댓글로 그대로 올리지 않고, 평문 댓글은 지정한 글에 한 건으로 올린다', () => {
+  for (const raw of [JSON.stringify({ items: [{ target: article(1), body: '댓글' }] }), JSON.stringify([{ target: article(1), body: '댓글' }])]) {
+    const bad = preparePublications(commentPlan, () => raw);
+    assert.equal(bad.jobs.length, 0); assert.match(bad.errors[0].reason, /comments/);
+  }
+  const plain = preparePublications(commentPlan, () => '평문 댓글');
+  assert.deepEqual(plain.errors, []);
+  assert.deepEqual(plain.jobs.map((j) => [j.publication.target, j.body]), [[commentPlan.publications[0].target, '평문 댓글']]);
+});
+test('글 묶음의 모바일 주소는 지금처럼 같은 사이트로 보지 않는다', () => {
+  const plan = { stages: [{ id: 'drafts', output: 'posts.json' }], publications: [{ id: 'p', action: 'post', service: 'naver_cafe', content: 'drafts', subject: '', recipients: [], target: 'https://cafe.naver.com/f-e/cafes/1/menus/0' }] };
+  const result = preparePublications(plan, () => JSON.stringify({ posts: [{ subject: '글', body: '본문', target: 'https://m.cafe.naver.com/f-e/cafes/1/menus/44' }] }));
+  assert.equal(result.jobs[0].publication.target, plan.publications[0].target);
 });

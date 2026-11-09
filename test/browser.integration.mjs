@@ -17,7 +17,7 @@ test('실제 Playwright 브라우저: 로컬 가짜 사이트 발송·게시·�
 test('실제 Playwright 브라우저: 직원 첫 로그인과 네이버웍스 단계형 인증', async () => { await verifyLogin(); });
 test('실제 Playwright 브라우저: 일반 웹사이트 입력·파일 첨부·업로드 증표와 차단 규칙', async () => { await verifyWebWork(); });
 test('실제 Playwright 브라우저: 메일 서명 유지와 보낸메일함 발송 확인', async () => { await verifyMailEditor(); });
-test('실제 Playwright 브라우저: 카페 글쓰기 제목·게시판 선택·영상 링크 카드', async () => { await verifyCafeEditor(); });
+test('실제 Playwright 브라우저: 카페 글쓰기 제목·게시판 선택·영상·장소 링크 카드', async () => { await verifyCafeEditor(); });
 test('실제 Playwright 브라우저: 메일 지정 파일 첨부와 첨부 전 발송 거부', async () => { await verifyMailAttachment(); });
 
 test('실제 브라우저: 로그인 창을 먼저 열고 대표가 로그인하면 창을 닫고 연결 완료로 이어 간다', async (t) => {

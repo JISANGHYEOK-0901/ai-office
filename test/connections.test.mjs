@@ -49,6 +49,13 @@ test('사용자가 지시한 작업만 허용하고 이후 금지·재발송·�
   assert.equal(externalActionPolicy(['미발송 확인, 재발송']).retryUncertain, true);
   assert.equal(externalActionPolicy(['발송됐음 확인']).confirmExisting, true);
   assert.equal(externalActionPolicy(['미발송 확인, 재발송']).confirmExisting, false);
+  // 사이트에서 본 결과를 자연스럽게 말한 답도 확인으로 보고, 아직 안 올라갔다는 말과 질문은 확인이 아니다
+  for (const text of ['글은 올라가 있는데 나머지 글 2건은 안올라와있어 2건 마저 올리고 보고해줘', '카페에 잘 올라왔어', '글 게시돼 있어', '다 올라갔네']) {
+    assert.equal(externalActionPolicy([text]).confirmExisting, true, text);
+  }
+  for (const text of ['아직 안 올라왔어', '글이 안올라가 있어', '못 올라갔어', '글이 올라갔는지 봐줘', '카페에 올라와 있나요?', '미게시 확인, 재게시']) {
+    assert.equal(externalActionPolicy([text]).confirmExisting, false, text);
+  }
 });
 
 test('최초 메일 승인에 과거 미발송·재발송 금지가 함께 있어도 최초 1통만 허용한다', () => {
@@ -151,13 +158,21 @@ test('requestLogin: 없는 연결을 만들어 창을 열고 로그인 완료·�
   await assert.rejects(work.requestLogin({ provider: 'naver', pollMs: 1, signal: stop.signal }));
 });
 
-test('글 본문 나누기: 유튜브 링크만 따로 떼고 순서를 지키며 다른 링크는 글에 둔다', async () => {
+test('글 본문 나누기: 유튜브·네이버 지도 링크만 따로 떼고 순서를 지키며 다른 링크는 글에 둔다', async () => {
   const { bodySegments } = await import('../lib/browser-work.mjs');
   const y = 'https://www.youtube.com/shorts/AbCdEfGhI_1';
-  assert.deepEqual(bodySegments(`소개글\n${y}\n마무리`), [{ text: '소개글\n\n', video: false }, { text: y, video: true }, { text: '마무리', video: false }]);
+  assert.deepEqual(bodySegments(`소개글\n${y}\n마무리`), [{ text: '소개글\n\n', card: false }, { text: y, card: true }, { text: '마무리', card: false }]);
   assert.deepEqual(bodySegments(`영상: ${y}.`).map((s) => s.text), ['영상:\n\n', y, '.']);
-  assert.deepEqual(bodySegments(y), [{ text: y, video: true }]);
-  assert.deepEqual(bodySegments('https://youtu.be/AbCdEfGhI_1 그리고 https://m.youtube.com/watch?v=ZyXwVuTsR_2').map((s) => s.video), [true, false, true]);
-  assert.deepEqual(bodySegments('자료는 https://example.com/a 를 보세요'), [{ text: '자료는 https://example.com/a 를 보세요', video: false }]);
-  assert.deepEqual(bodySegments(''), [{ text: '', video: false }]);
+  assert.deepEqual(bodySegments(y), [{ text: y, card: true }]);
+  assert.deepEqual(bodySegments('https://youtu.be/AbCdEfGhI_1 그리고 https://m.youtube.com/watch?v=ZyXwVuTsR_2').map((s) => s.card), [true, false, true]);
+  assert.deepEqual(bodySegments('자료는 https://example.com/a 를 보세요'), [{ text: '자료는 https://example.com/a 를 보세요', card: false }]);
+  assert.deepEqual(bodySegments(''), [{ text: '', card: false }]);
+  // 네이버 지도 공유 주소·플레이스 주소도 장소 카드가 되도록 단독으로 붙여넣는다
+  for (const place of ['https://naver.me/AbCd1234', 'https://map.naver.com/p/entry/place/1234567', 'https://m.place.naver.com/place/1234567/home', 'https://pcmap.place.naver.com/place/1234567']) {
+    assert.deepEqual(bodySegments(`이런 곳 좋아보여요~\n\n${place}`), [{ text: '이런 곳 좋아보여요~\n\n', card: false }, { text: place, card: true }], place);
+  }
+  // 네이버의 다른 주소(카페·블로그)와 비슷한 이름의 다른 사이트는 글에 둔다
+  for (const other of ['https://cafe.naver.com/petdilab', 'https://blog.naver.com/a/1', 'https://map.naver.com.evil.example/a', 'https://mynaver.me/a']) {
+    assert.equal(bodySegments(`참고 ${other}`).filter((s) => s.card).length, 0, other);
+  }
 });

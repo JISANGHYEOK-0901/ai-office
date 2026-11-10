@@ -291,7 +291,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     checkStop();
     if (result.status === 'connected') return { id: result.id };
     return { question: result.status === 'timeout'
-      ? `5분 안에 ${name} 로그인이 끝나지 않았습니다. 창은 열어 두었습니다. 답장을 보내면 다시 기다립니다. 이 작업을 하지 않으려면 "하지 마"라고 답해 주세요.`
+      ? `${result.minutes ? `${result.minutes}분` : '기다리는 시간'} 안에 ${name} 로그인이 끝나지 않았습니다. 창은 열어 두었습니다. 답장을 보내면 다시 기다립니다. 이 작업을 하지 않으려면 "하지 마"라고 답해 주세요.`
       : `로그인 창이 닫혀 ${name} 로그인을 마치지 못했습니다. 답장을 보내면 창을 다시 엽니다. 이 작업을 하지 않으려면 "하지 마"라고 답해 주세요.` };
   };
   const isUsable = (c) => Boolean(c) && (c.status === 'connected' || c.hasCredentials === true && c.firstLoginDone === true);
@@ -307,7 +307,15 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       const candidates = (outbound.connections?.() || []).filter((c) => c.provider === provider);
       // 카페 글쓰기만 하는 지시는 공식 API가 연결된 네이버 계정이면 브라우저 로그인 없이 올린다
       const cafeOnly = provider === 'naver' && external.every((action) => action === 'post') && urls.filter((url) => allowedServiceUrl('naver', url)).every((url) => /^https:\/\/(?:m\.)?cafe\.naver\.com\//.test(url));
-      if (candidates.length > 1 || isUsable(candidates[0]) || cafeOnly && candidates[0]?.naverApi?.connected) continue;
+      if (candidates.length > 1 || cafeOnly && candidates[0]?.naverApi?.connected) continue;
+      // 저장된 상태가 '연결됨'이어도 사이트 로그인은 그사이 풀렸을 수 있다. 지시 직후 실제 화면으로 확인해
+      // 게시 직전(대표가 자리를 비웠을 수 있음)이 아니라 지금 로그인 창을 띄운다. 확인하지 못하면 게시 단계가 기존대로 다룬다
+      if (isUsable(candidates[0])) {
+        const target = urls.find((url) => allowedServiceUrl(provider, url));
+        const checked = outbound.checkLogin && target ? await outbound.checkLogin({ connection: candidates[0].id, target, signal }) : null;
+        checkStop();
+        if (checked?.status !== 'needs_login') continue;
+      }
       const outcome = await loginProblem({ name: CONNECTION_PROVIDERS[provider].name, provider, connection: candidates[0]?.id || '' });
       if (outcome.question) return ask([{ phase: 'account', question: outcome.question }]);
     }

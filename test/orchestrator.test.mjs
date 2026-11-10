@@ -1056,6 +1056,48 @@ test('게시 중 로그인이 풀리면 로그인 창을 열고, 로그인하면
   assert.equal(opened.length, 0);
 });
 
+test('업무 시작 로그인 확인: 저장 상태가 연결됨이어도 실제로 풀렸으면 계획 전에 로그인 창을 열고, 로그인돼 있으면 창 없이 진행한다', async (t) => {
+  const connected = () => [{ id: 'n1', label: '네이버', provider: 'naver', status: 'connected' }];
+  let accounts = connected(), live = 'needs_login', login = () => ({ status: 'connected', id: 'n1' });
+  const checks = [], opened = [], delivered = [];
+  let planAtOpen = null, f;
+  const outbound = { connections: () => accounts,
+    // 실제 실행기처럼: 로그인이 풀린 창을 열면 계정이 needs_login이 된다
+    async checkLogin(args) { checks.push(args); if (live === 'needs_login') accounts = [{ ...accounts[0], status: 'needs_login' }]; return { status: live }; },
+    requestLogin: async (args) => { opened.push(args); planAtOpen = f.counts.plan; const r = login(); if (r.status === 'connected') { accounts = connected(); live = 'connected'; } return r; },
+    async deliver(args) { delivered.push(args); return { status: 'confirmed', resultUrl: 'https://blog.naver.com/x/1' }; } };
+  f = fixture(t, { publication: true, outbound });
+  const done = await f.final(f.runner.start({ prompt: 'https://blog.naver.com/fixture 블로그에 글 게시해 줘. 끝까지 자동으로' }));
+  assert.equal(done.needsReply, false, '지시 직후 로그인하면 답장 없이 끝까지 간다');
+  assert.deepEqual(checks.map((c) => [c.connection, c.target]), [['n1', 'https://blog.naver.com/fixture']], '지시의 주소를 연결 계정 창으로 한 번 확인한다');
+  assert.deepEqual(opened.map((o) => [o.provider, o.connection]), [['naver', 'n1']]);
+  assert.equal(planAtOpen, 0, '계획·작성 전에(대표가 자리에 있을 때) 로그인 창을 연다');
+  assert.equal(delivered.length, 1);
+
+  // 실제로 로그인돼 있으면 로그인 창 없이 진행한다
+  accounts = connected(); live = 'connected'; checks.length = 0; opened.length = 0; delivered.length = 0;
+  f = fixture(t, { publication: true, outbound });
+  assert.equal((await f.final(f.runner.start({ prompt: 'https://blog.naver.com/fixture 블로그에 글 게시해 줘. 끝까지 자동으로' }))).needsReply, false);
+  assert.equal(checks.length, 1);
+  assert.equal(opened.length, 0);
+  assert.equal(delivered.length, 1);
+
+  // 기다리는 동안 로그인하지 않으면 기다린 시간을 알려 주고 묻는다(작성은 시작하지 않는다)
+  accounts = connected(); live = 'needs_login'; login = () => ({ status: 'timeout', id: 'n1', minutes: 30 });
+  f = fixture(t, { publication: true, outbound });
+  const late = f.runner.start({ prompt: 'https://blog.naver.com/fixture 블로그에 글 게시해 줘. 끝까지 자동으로' });
+  assert.equal((await f.final(late)).needsReply, true);
+  assert.match(f.runner.result(late.id).text, /30분 안에 [\s\S]*로그인이 끝나지 않았습니다/);
+  assert.equal(f.counts.plan, 0);
+
+  // 확인하지 못하면(브라우저 오류 등) 막지 않고 기존 흐름대로 진행한다
+  accounts = connected(); live = 'unknown'; opened.length = 0; delivered.length = 0;
+  f = fixture(t, { publication: true, outbound });
+  assert.equal((await f.final(f.runner.start({ prompt: 'https://blog.naver.com/fixture 블로그에 글 게시해 줘. 끝까지 자동으로' }))).needsReply, false);
+  assert.equal(opened.length, 0);
+  assert.equal(delivered.length, 1);
+});
+
 test('카페 공식 API: 시작 전 로그인 창을 열지 않고, 실패는 자동 재시도 없이 묻고, "브라우저로 진행"이면 브라우저로 다시 보낸다', async (t) => {
   // 브라우저 로그인은 풀려 있어도(needs_login) 공식 API가 연결돼 있으면 카페 글은 API로 올린다
   const accounts = [{ id: 'n1', label: '네이버', provider: 'naver', status: 'needs_login', naverApi: { configured: true, connected: true } }];

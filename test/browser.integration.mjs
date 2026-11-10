@@ -48,6 +48,39 @@ test('실제 브라우저: 로그인 창을 먼저 열고 대표가 로그인하
   assert.equal(contexts[0].pages().length, 0, '로그인을 마치면 창이 저절로 닫힌다');
 });
 
+test('실제 브라우저: 업무 시작 로그인 확인은 저장 상태가 연결됨이어도 풀린 창을 로그인 창으로 바꾸고, 대표가 로그인하면 연결 완료로 이어 간다', async (t) => {
+  const temp = mkdtempSync(join(tmpdir(), 'office-login-check-')), root = join(temp, 'workspace'); mkdirSync(root);
+  let authenticated = false;
+  const site = createServer((req, res) => {
+    if (req.url.startsWith('/account')) authenticated = true;
+    res.setHeader('content-type', 'text/html; charset=utf-8');
+    res.end(authenticated ? '<h1>내 정보</h1>' : '<form action="/account"><input type="password" name="p"><button>로그인</button></form>');
+  });
+  await new Promise((resolve) => site.listen(0, '127.0.0.1', resolve));
+  const contexts = [];
+  const browser = { launchPersistentContext: async (profile, options) => { const c = await chromium.launchPersistentContext(profile, { ...options, channel: undefined, headless: true }); contexts.push(c); return c; } };
+  const store = createConnectionStore({ root, base: join(temp, 'private') });
+  const sessions = createBrowserSessions({ store, browser, channel: null });
+  t.after(async () => { await sessions.close(); await new Promise((resolve) => site.close(resolve)); await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); });
+  const work = createBrowserWork({ root, store, sessions });
+  const start = `http://localhost:${site.address().port}/`;
+  // 어제 로그인해 '연결됨'으로 저장돼 있지만 사이트 로그인은 풀린 상태
+  const saved = store.create({ provider: 'web', label: '사내', startUrl: start, hosts: [] });
+  store.update(saved.id, { status: 'connected', manualLoginAt: '2026-11-09T00:00:00.000Z' });
+  assert.equal((await work.checkLogin({ connection: saved.id, target: start })).status, 'needs_login');
+  assert.equal(store.list().find((c) => c.id === saved.id).status, 'needs_login');
+  const page = contexts[0].pages().at(-1);
+  await page.locator('#ai-office-login-banner').waitFor({ state: 'attached' });
+  // 실행기는 이어서 같은 창으로 대표의 로그인을 기다린다(새 창을 띄우지 않는다)
+  const waiting = work.requestLogin({ connection: saved.id, pollMs: 50, timeoutMs: 30000 });
+  await page.locator('input[type=password]').fill('fixture');
+  await page.locator('button').click();
+  assert.equal((await waiting).status, 'connected');
+  assert.equal(contexts.length, 1, '확인한 창이 그대로 로그인 창이 된다');
+  assert.equal(contexts[0].pages().length, 0, '창이 저장을 마치고 닫힌 뒤에 이어 간다(먼저 이어 가면 열린 로그인 창 때문에 다시 멈춘다)');
+  assert.equal((await work.checkLogin({ connection: saved.id, target: start })).status, 'connected', '로그인한 뒤에는 로그인 창 없이 연결됨으로 확인한다');
+});
+
 test('실제 브라우저: 비밀번호 칸이 없어도 로그인 링크가 보이면 로그아웃으로 판정한다', async (t) => {
   const browser = await chromium.launch();
   t.after(() => browser.close());

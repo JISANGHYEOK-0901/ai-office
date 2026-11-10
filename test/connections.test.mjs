@@ -157,11 +157,46 @@ test('requestLogin: 없는 연결을 만들어 창을 열고 로그인 완료·�
   assert.equal((await work.requestLogin({ provider: 'naver', pollMs: 1 })).status, 'closed');
   assert.equal(store.list().length, 1, '있는 연결을 다시 쓴다');
   onOpen = () => {};
-  assert.equal((await work.requestLogin({ provider: 'naver', pollMs: 1, timeoutMs: 10 })).status, 'timeout');
+  const late = await work.requestLogin({ provider: 'naver', pollMs: 1, timeoutMs: 10 });
+  assert.deepEqual([late.status, late.minutes], ['timeout', 1], '시간 초과에는 기다린 분을 함께 돌려준다');
   const web = await work.requestLogin({ target: 'https://erp.example.com/a', pollMs: 1, timeoutMs: 10 });
   assert.equal(store.list().find((c) => c.id === web.id).provider, 'web');
   const stop = new AbortController(); stop.abort();
   await assert.rejects(work.requestLogin({ provider: 'naver', pollMs: 1, signal: stop.signal }));
+});
+
+test('checkLogin: 저장 상태가 아니라 실제 화면으로 로그인을 확인하고, 로그인 문제만 needs_login으로 알린다', async (t) => {
+  const { createBrowserWork } = await import('../lib/browser-work.mjs');
+  const { ConnectionRequired, AccountProtected, LOGIN_WAIT_MS } = await import('../lib/browser-session.mjs');
+  assert.equal(LOGIN_WAIT_MS, 30 * 60 * 1000, '지시하고 자리를 비워도 돌아와 로그인할 수 있게 30분 기다린다');
+  const temp = mkdtempSync(join(tmpdir(), 'office-login-check-')), root = join(temp, 'workspace'); mkdirSync(root);
+  t.after(() => rmSync(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const store = createConnectionStore({ root, base: join(temp, 'private') });
+  const naver = store.create({ provider: 'naver', label: '네이버' });
+  store.update(naver.id, { status: 'connected' });
+  const visited = [];
+  let outcome = async () => {};
+  const sessions = { withSession: async (id, url, signal, action) => { visited.push([id, url]); await outcome(); return action({}); } };
+  const work = createBrowserWork({ root, store, sessions });
+  const cafe = 'https://cafe.naver.com/petdilab';
+  assert.equal((await work.checkLogin({ connection: naver.id, target: cafe })).status, 'connected');
+  assert.deepEqual(visited, [[naver.id, cafe]], '연결 계정 창으로 지시의 주소를 실제로 연다');
+  outcome = async () => { throw new ConnectionRequired('로그인이 만료됐습니다.'); };
+  assert.equal((await work.checkLogin({ connection: naver.id, target: cafe })).status, 'needs_login');
+  // 계정 보호·브라우저 오류는 로그인 창으로 풀 수 없으니 여기서 막지 않고 게시 단계가 기존대로 다룬다
+  outcome = async () => { throw new AccountProtected(); };
+  assert.equal((await work.checkLogin({ connection: naver.id, target: cafe })).status, 'unknown');
+  outcome = async () => { throw new Error('브라우저를 시작하지 못했습니다.'); };
+  assert.equal((await work.checkLogin({ connection: naver.id, target: cafe })).status, 'unknown');
+  // 다른 서비스 주소나 없는 연결은 열지 않는다
+  visited.length = 0;
+  assert.equal((await work.checkLogin({ connection: naver.id, target: 'https://example.com/' })).status, 'unknown');
+  assert.equal((await work.checkLogin({ connection: 'missing', target: cafe })).status, 'unknown');
+  assert.equal(visited.length, 0);
+  // 중지하면 확인 결과로 바꾸지 않고 그대로 멈춘다
+  const stop = new AbortController(); stop.abort();
+  outcome = async () => { throw new ConnectionRequired(); };
+  await assert.rejects(work.checkLogin({ connection: naver.id, target: cafe, signal: stop.signal }));
 });
 
 test('글 본문 나누기: 유튜브·네이버 지도 링크만 따로 떼고 순서를 지키며 다른 링크는 글에 둔다', async () => {

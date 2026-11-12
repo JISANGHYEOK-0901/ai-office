@@ -169,6 +169,25 @@ try {
   assert.equal(await page.locator('#agentForm select[name="codexEffort"]').inputValue(), 'high');
   report.checks.push({ name: '직원 Codex 모델·effort 저장 후 수정 화면 유지', interaction: 'click', passed: true });
   await page.keyboard.press('Escape');
+  // 직원 엔진: 브라우저 업무 직원만 Aside로 바꾸고(모델 칸은 숨김), 다시 부서 설정으로 되돌린다
+  await page.locator('[data-act="edit-agent"][data-id="research-1"]').first().click();
+  await page.locator('#agentForm .select-trigger[data-select="engine"]').click();
+  await popup().getByRole('option', { name: /Aside/ }).click();
+  assert.equal(await page.locator('#agentForm select[name="engine"]').inputValue(), 'aside');
+  const modelHidden = await page.locator('#agentModelRow').isHidden();
+  check('Aside 엔진이면 Claude 모델 칸을 숨김', 'click', () => assert.equal(modelHidden, true));
+  await shot('staff-engine-aside.png');
+  await page.locator('#agentSubmit').click();
+  await page.waitForFunction(() => !document.querySelector('#agentDialog').open);
+  await saved((s) => s.agents['research-1']?.engine === 'aside');
+  await page.locator('[data-act="edit-agent"][data-id="research-1"]').first().click();
+  assert.equal(await page.locator('#agentForm select[name="engine"]').inputValue(), 'aside');
+  await page.locator('#agentForm .select-trigger[data-select="engine"]').click();
+  await popup().getByRole('option', { name: /부서 설정 따름/ }).click();
+  await page.locator('#agentSubmit').click();
+  await page.waitForFunction(() => !document.querySelector('#agentDialog').open);
+  await saved((s) => !s.agents['research-1']?.engine);
+  report.checks.push({ name: '직원 엔진 Aside 저장·되돌리기', interaction: 'click', passed: true });
   await page.locator('#addDeptBtn').click();
   await page.locator('#deptForm .select-trigger[data-select="handoffPolicy"]').click();
   await popup().getByRole('option', { name: /필수/ }).click();

@@ -177,6 +177,7 @@ export function normalizeState(raw = {}) {
     mode: raw.mode || 'none',
     connectionStatus: raw.connectionStatus || { connected: 0, needsLogin: 0 },
     workspace: raw.workspace && typeof raw.workspace === 'object' ? raw.workspace : {},
+    asideAdvice: raw.asideAdvice && typeof raw.asideAdvice === 'object' ? raw.asideAdvice : null,
   };
 }
 
@@ -198,6 +199,13 @@ export function toolBanners(tools, { demo = false } = {}) {
   if (tools.claude?.installed === false) out.push({ key: 'claude', text: 'Claude가 설치되지 않았습니다. Codex 직원은 사용할 수 있어요 — npm run doctor로 확인하세요' });
   if (tools.codex?.installed === false) out.push({ key: 'codex', text: 'Codex가 설치되지 않았습니다. 비서실장 제공자를 Claude로 바꿔 사용하세요 — npm run doctor로 확인하세요' });
   return out;
+}
+
+// 브라우저 업무 Aside 권장 배너: 바꿀 직원이 있거나(브라우저 업무를 맡았던 직원) Aside 직원인데 Aside가 없을 때만 알린다(닫을 수 있음).
+// 브라우저 업무가 없는 회사에 설치 권장만 계속 띄우지 않는다(그 안내는 doctor·서버 켜기 때 한다)
+export function asideBanners(advice, { demo = false } = {}) {
+  if (demo || !advice || advice.level !== 'warn' || !advice.message) return [];
+  return [{ key: `aside-${advice.level}-${(advice.candidates || []).map((c) => c.id).join(',')}`, text: advice.message }];
 }
 
 // 가져올 회사 구성 파일 미리보기. 형식만 가볍게 보고(최종 검증은 서버), 부서·직원 수를 센다
@@ -1155,7 +1163,7 @@ function renderTop() {
 }
 
 function renderBanners() {
-  const list = [...workspaceBanners(S.workspace, { demo: S.demo }), ...toolBanners(S.tools, { demo: S.demo })].filter((b) => !ui.dismissedBanners.has(b.key));
+  const list = [...workspaceBanners(S.workspace, { demo: S.demo }), ...toolBanners(S.tools, { demo: S.demo }), ...asideBanners(S.asideAdvice, { demo: S.demo })].filter((b) => !ui.dismissedBanners.has(b.key));
   setHTML($('toolBanners'), list.map((b) => `
     <div class="tool-banner"><span>${esc(b.text)}</span>${b.sticky ? '' : `
       <button type="button" class="icon-btn" data-banner="${esc(b.key)}" data-key="banner-${esc(b.key)}" aria-label="알림 닫기">✕</button>`}</div>`).join(''));
@@ -1430,7 +1438,7 @@ function renderToolFeed() {
     }
     return `<li class="feed-item k-${esc(String(e.kind || '').replace('.', '-'))}">
       <time datetime="${esc(e.ts)}">${hms(e.ts)}</time>
-      <div class="fi-body"><div class="fi-line">${e.agent && e.agent !== 'chief' ? avatar(e.agent, 'ava-sm') : '<span class="ava ava-sm ava-chief" aria-hidden="true">★</span>'}<b>${esc(name)}</b><span class="kind">${esc(kind)}</span>${e.tool ? `<code>${esc(e.tool)}</code>` : ''}${verdict}${e.engine === 'codex' ? '<span class="engine engine-codex">codex</span>' : ''}</div>
+      <div class="fi-body"><div class="fi-line">${e.agent && e.agent !== 'chief' ? avatar(e.agent, 'ava-sm') : '<span class="ava ava-sm ava-chief" aria-hidden="true">★</span>'}<b>${esc(name)}</b><span class="kind">${esc(kind)}</span>${e.tool ? `<code>${esc(e.tool)}</code>` : ''}${verdict}${e.engine === 'codex' ? '<span class="engine engine-codex">codex</span>' : e.engine === 'aside' ? '<span class="engine engine-aside">aside</span>' : ''}</div>
       ${e.summary ? `<p>${esc(e.summary)}</p>` : ''}</div></li>`;
   }).join('') : '<li class="empty">아직 이벤트가 없어요. 업무를 지시하면 여기에 실시간으로 쌓여요.</li>');
 }
@@ -1507,7 +1515,7 @@ function renderTasks() {
     const live = r.status === 'running' || r.status === 'queued';
     const who = runWho(r);
     return `<li class="run run-${esc(r.status)}${r.needsReply ? ' run-needs-reply' : ''}">
-      <div class="task-top"><span class="tag r-${esc(r.status)}">${esc(runLabel(r))}</span><b>${esc(who)}</b>${r.engine === 'codex' ? '<span class="engine engine-codex">codex</span>' : ''}${replyBadge(r, `rb-${r.id}`)}<time>${esc(timeAgo(runStart(r)))}</time></div>
+      <div class="task-top"><span class="tag r-${esc(r.status)}">${esc(runLabel(r))}</span><b>${esc(who)}</b>${r.engine === 'codex' ? '<span class="engine engine-codex">codex</span>' : r.engine === 'aside' ? '<span class="engine engine-aside">aside</span>' : ''}${replyBadge(r, `rb-${r.id}`)}<time>${esc(timeAgo(runStart(r)))}</time></div>
       <p class="run-text">${r.parentId ? '<span class="reply-mark" title="이어서 답한 실행">↳ 답장</span> ' : ''}${esc(runText(r))}</p>
       ${r.model ? `<p class="run-usage">${esc(r.model)}${r.effort ? ` · ${esc(r.effort)}` : ''}</p>` : ''}
       ${r.continuous ? `<p class="run-monitor">${esc({ checking: '자료 확인 중', waiting: '새 자료 대기', retrying: '확인 재시도 대기', needs_decision: '감시 결정 대기', suspended: '감시 재개 대기', paused: '감시 일시정지', stopped: '감시 중지', finished: '감시 종료' }[r.monitor?.status] || '지속 감시 준비')} · ${r.monitor?.deadlineAt ? `${esc(new Date(r.monitor.deadlineAt).toLocaleString('ko-KR'))}까지` : '중지할 때까지'} · 새 자료 ${r.monitor?.discoveries || 0}건 · 보고 ${r.monitor?.deliveries || 0}건${r.monitor?.nextAt && live ? `<br>다음 확인 ${esc(new Date(r.monitor.nextAt).toLocaleTimeString('ko-KR'))}` : ''}${r.monitor?.error ? `<br>최근 오류: ${esc(r.monitor.error)}` : ''}</p>` : ''}
@@ -1597,7 +1605,7 @@ function agentProfile(a) {
       <dt>담당</dt><dd>${esc(a.specialty || '—')}</dd>
       <dt>현재</dt><dd>${esc(a.status === 'working' || a.queued ? statusLine(a) : STATUS_LABEL[a.status] || a.status)}</dd>
       <dt>마지막 활동</dt><dd>${esc(timeAgo(lastTs))}${a.lastSummary && a.status !== 'working' ? ` · ${esc(a.lastSummary)}` : ''}</dd>
-      <dt>모델</dt><dd>${esc(dept?.engine === 'codex' ? `${a.codexModel || dept.codexModel || 'gpt-6.1-sol'} · ${a.codexEffort || dept.codexEffort || 'max'} (Codex)` : a.model || (a.lead ? 'opus (팀장 기본)' : dept?.model ? `${dept.model} (부서 기본)` : 'sonnet (기본)'))}</dd>
+      <dt>모델</dt><dd>${esc(a.engine === 'aside' || dept?.engine === 'aside' ? 'Aside (브라우저 업무 · 대표의 Aside 로그인과 연결 구독 사용)' : dept?.engine === 'codex' ? `${a.codexModel || dept.codexModel || 'gpt-6.1-sol'} · ${a.codexEffort || dept.codexEffort || 'max'} (Codex)` : a.model || (a.lead ? 'opus (팀장 기본)' : dept?.model ? `${dept.model} (부서 기본)` : 'sonnet (기본)'))}</dd>
       <dt>id</dt><dd><code>${esc(a.id)}</code></dd>
     </dl>
     <div class="profile-actions">
@@ -1762,7 +1770,7 @@ function fillDeptForm(values) {
   f.color.value = /^#[0-9a-f]{6}$/i.test(values.color || '') ? values.color : COLORS[0];
   f.summary.value = values.summary || '';
   f.instructions.value = values.instructions || '';
-  f.engine.value = values.engine === 'codex' ? 'codex' : 'claude';
+  f.engine.value = ['codex', 'aside'].includes(values.engine) ? values.engine : 'claude';
   fillModels(f.codexModel, 'codex', values.codexModel || '', '기본(gpt-6.1-sol)');
   fillEfforts(f.codexEffort, 'codex', values.codexModel || 'gpt-6.1-sol', values.codexEffort || '', '기본(max)');
   f.codexRole.value = values.codexRole || (deptEditing?.engine === 'codex' || values.id === 'verify' ? 'review' : 'exec');
@@ -1790,7 +1798,8 @@ function syncDeptUi() {
   $('bypassWarn').hidden = f.permission.value !== 'bypassPermissions';
   const codex = f.engine.value === 'codex';
   $('codexFields').hidden = !codex;
-  $('deptModelRow').hidden = codex;
+  // Aside 부서는 Claude 모델을 쓰지 않는다(대표가 Aside에 연결한 구독 사용)
+  $('deptModelRow').hidden = codex || f.engine.value === 'aside';
   $('deptToolsField').hidden = codex;
   $('deptPermissionRow').hidden = codex;
   for (const b of $('deptSwatches').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.color === f.color.value));
@@ -1917,8 +1926,9 @@ function refreshAgentDeptUi() {
   const roles = rolesFor(deptId);
   const dept = deptOf(deptId);
   const codex = dept?.engine === 'codex';
-  $('agentModelRow').hidden = codex;
-  $('agentCodexFields').hidden = !codex;
+  const aside = f.engine.value === 'aside' || dept?.engine === 'aside';
+  $('agentModelRow').hidden = codex || aside;
+  $('agentCodexFields').hidden = !codex || aside;
   fillModels(f.codexModel, 'codex', agentEditing?.codexModel || '', `부서 기본(${dept?.codexModel || 'gpt-6.1-sol'})`);
   fillEfforts(f.codexEffort, 'codex', agentEditing?.codexModel || dept?.codexModel || 'gpt-6.1-sol', agentEditing?.codexEffort || '', `부서 기본(${dept?.codexEffort || 'max'})`);
   $('agentRole').innerHTML = '<option value="">직접 입력</option>' + roles.map((r, i) => `<option value="${i}">${esc(r.name || r.key)}${r.lead ? ' (팀장)' : ''}</option>`).join('');
@@ -1961,6 +1971,7 @@ function openAgentDialog({ deptId, agent } = {}) {
     f.instructions.value = agent.instructions || '';
     f.thoughts.value = (Array.isArray(agent.thoughts) ? agent.thoughts : []).join('\n');
     f.model.value = agent.model || '';
+    f.engine.value = agent.engine === 'aside' ? 'aside' : '';
     f.id.value = agent.id;
     f.lead.checked = !!agent.lead;
     f.active.checked = agent.active !== false;
@@ -2009,6 +2020,8 @@ async function submitAgent(ev) {
     active: f.active.checked,
   };
   if (f.model.value) body.model = f.model.value; else if (agentEditing?.model) body.model = null;
+  // 직원 엔진: 비우면 부서 설정을 따른다. Aside는 브라우저 업무 직원에게 권장한다
+  if (f.engine.value === 'aside') body.engine = 'aside'; else if (agentEditing?.engine) body.engine = '';
   if (deptOf(f.department.value)?.engine === 'codex') Object.assign(body, { codexModel: f.codexModel.value, codexEffort: f.codexEffort.value });
   if (agentRoleKey) body.role = agentRoleKey;
   const btn = $('agentSubmit');
@@ -3724,6 +3737,11 @@ function init() {
   const af = $('agentForm');
   af.addEventListener('submit', submitAgent);
   af.department.addEventListener('change', refreshAgentDeptUi);
+  af.engine.addEventListener('change', () => {
+    const dept = deptOf(af.department.value), aside = af.engine.value === 'aside' || dept?.engine === 'aside';
+    $('agentModelRow').hidden = dept?.engine === 'codex' || aside;
+    $('agentCodexFields').hidden = dept?.engine !== 'codex' || aside;
+  });
   af.codexModel.addEventListener('change', () => fillEfforts(af.codexEffort, 'codex', af.codexModel.value || deptOf(af.department.value)?.codexModel || 'gpt-6.1-sol', af.codexEffort.value, '부서 기본'));
   $('agentRole').addEventListener('change', applyRole);
   af.lead.addEventListener('change', syncLeadWarn);

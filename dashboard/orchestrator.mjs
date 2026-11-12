@@ -23,6 +23,8 @@ import { documentDiff, documentPreview, officeGuide, officeKind, officeNotices }
 import { findSoffice } from '../lib/doc-preview.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';
 import { CONNECTION_PROVIDERS, allowedServiceUrl, serviceProvider } from '../lib/connections.mjs';
+import { ASIDE_CONNECTION, agentEngine, asideInstalled, asidePublishPrompt, fallbackEngine } from '../lib/aside.mjs';
+import { LOGIN_WAIT_MS } from '../lib/browser-session.mjs';
 
 // 외부 작업·전문 검토가 없는 업무의 최종 검토 재작업 한도
 const MAX_REVIEW_REWORK = 1;
@@ -48,7 +50,7 @@ export function checkpointFile(root, rootId) {
   return join(root, '.office', 'orchestrations', `${rootId}.json`);
 }
 
-export async function orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel = 4, resume = false, onDecision = () => {}, outbound = null, intent = null, judge = null, home = homedir(), sourceCheck = checkSources, wait = waitFor, notes = [] }) {
+export async function orchestrate({ root, run, prompt, execute: runAI, signal, maxParallel = 4, resume = false, onDecision = () => {}, outbound = null, intent = null, judge = null, home = homedir(), sourceCheck = checkSources, wait = waitFor, notes = [], engineOf = null }) {
   const task = run.task;
   const taskDir = join(root, 'outputs', ...task.split('/'));
   const file = checkpointFile(root, run.rootId);
@@ -56,6 +58,15 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
   const taskReal = realpathSync(taskDir);
   if (!insideRel(realpathSync(root), taskReal)) throw new Error('업무 폴더가 작업 공간 밖을 가리킵니다.');
   const org = loadOrg(root);
+  // 직원이 실제로 쓰는 엔진: Aside 직원은 Aside가 설치돼 있을 때만 aside, 아니면 부서 엔진(브라우저는 Playwright)이다
+  const engineFor = (agentId) => {
+    if (engineOf) return engineOf(agentId);
+    const agent = org.roster.find((a) => a.id === agentId), dept = org.departments.find((d) => d.id === agent?.department);
+    const engine = agentEngine(agent, dept);
+    return engine === 'aside' && !asideInstalled() ? fallbackEngine(dept) : engine;
+  };
+  const asideStaff = () => org.roster.filter((a) => a.active !== false && org.departments.find((d) => d.id === a.department)?.active !== false && engineFor(a.id) === 'aside');
+  const isAsideWork = (item) => typeof item?.agent === 'string' && engineFor(item.agent) === 'aside';
   const videoPolicy = run.schedule?.uniqueYoutube ? run.schedule : null;
   const videoExclusions = join(taskDir, 'video-exclusions.json');
   if (videoPolicy) writeFileAtomic(videoExclusions, JSON.stringify({ excludedVideoIds: outbound?.videoHistory?.(run.rootId) || [] }, null, 2));
@@ -252,6 +263,7 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       'done은 완료 기준 문자열입니다. 근무중 exec 직원에게만 생산 단계를 배정하고 검토 직원은 stages에 넣지 마세요.',
       '연결된 일반 웹사이트(관리자 화면 등)에서 자료를 조회·추출해야 하는 단계는 stage.connection에 그 연결 계정 id, stage.target에 시작 주소(대표가 준 링크 또는 연결의 시작 주소)를 넣으세요. 담당 직원이 읽기 전용 브라우저로 조회해 output 파일에 정리합니다. 이 단계에서는 그 연결 사이트 안의 화면만 볼 수 있고 웹 검색이나 다른 사이트(영상·기사·공개 자료 등)는 열 수 없습니다(로그인된 화면 내용이 밖으로 새지 않게). 다른 공개 웹 자료가 필요하면 connection 없는 별도 단계로 나누고 사이트 조회 결과를 inputs로 받게 하세요. 대표가 링크를 주면 허용 도메인이 맞는 연결 계정을 고르세요. 그 밖의 단계는 connection·target을 빈 문자열로 둡니다. done에는 대표가 요구한 항목과 그 목적(예: 연락하려면 연락처)에 필요한 항목을 빠짐없이 넣으세요. 대표가 조사·참고 범위를 정했으면(특정 회원의 글만, 특정 메뉴만 등) 그 범위 밖의 조회(공지·규칙·다른 게시판 둘러보기 등)는 done에 넣지 마세요. 글을 올릴 곳은 대표가 준 주소나 참고한 자료(예: 참고한 글이 있는 게시판)에서 정합니다.',
       '공개 페이지를 브라우저 화면으로 직접 봐야 하는 단계(WebFetch로 내용이 잘리는 동적 페이지, 유튜브 조회수 확인 등)는 stage.connection을 "public", stage.target에 시작 주소를 넣으세요. 계정 없는 브라우저와 웹 도구를 함께 받습니다. 일반 검색은 connection 빈 문자열로 충분합니다.',
+      asideStaff().length ? `Aside 브라우저 직원(엔진 aside): ${JSON.stringify(asideStaff().map((a) => ({ id: a.id, name: a.name, department: a.department })))}. 로그인해야 하는 사이트의 조회 단계와 메일·글·댓글·웹사이트 작업(publications)은 이 직원에게 맡기세요. 그 단계·외부 작업의 connection은 "${ASIDE_CONNECTION}"(대표가 Aside 브라우저에 로그인해 둔 계정)으로 쓰고 target에 시작 주소를 넣습니다. Aside 직원은 대표의 Aside 로그인을 쓰므로 계정 연결이 없어도 됩니다. Aside 직원은 파일(엑셀·HTML·문서)을 만들지 않고 글자 결과(md·json·txt)만 돌려주므로, 문서·보고서 작성과 공개 웹 조사(connection "public" 또는 빈 문자열)는 다른 직원에게 맡기세요.` : '',
       '앞 단계 id를 inputs와 dependsOn에 넣으세요. report/summary/findings/analysis로 시작하는 .md 이름은 쓰지 마세요.',
       `파일 조회 기준 폴더는 작업 공간 ${root}입니다. .office/… 등 요청의 상대 원본 경로는 작업 공간 기준입니다. inputs에는 앞 단계 id 또는 작업 공간 내부 원본의 절대 경로를 쓰세요. 기존 업무 상대 입력도 지원합니다. 파일 부재를 묻기 전에 Read/Glob으로 작업 공간과 업무 폴더를 확인하세요. 경로 검사 실패는 먼저 계획을 수정하고 실제로 있는 원본의 복구를 대표에게 요구하지 마세요.`,
       'plan.goal은 업무를 알아보기 쉬운 짧은 한국어 이름으로 쓰세요(최종산출물 폴더 이름이 됩니다). 대표에게 전달할 단계의 title은 대표가 받는 파일 이름이 됩니다. 내용을 바로 알 수 있는 한국어 이름으로 지으세요(예: 업무 내용·대상·조건이 드러나게). 작업 파일 output 이름은 지금 규칙대로 둡니다.',
@@ -311,6 +323,27 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       ? `${result.minutes ? `${result.minutes}분` : '기다리는 시간'} 안에 ${name} 로그인이 끝나지 않았습니다. 창은 열어 두었습니다. 답장을 보내면 다시 기다립니다. 이 작업을 하지 않으려면 "하지 마"라고 답해 주세요.`
       : `로그인 창이 닫혀 ${name} 로그인을 마치지 못했습니다. 답장을 보내면 창을 다시 엽니다. 이 작업을 하지 않으려면 "하지 마"라고 답해 주세요.` };
   };
+  // Aside 직원의 로그인: 계정 연결 창 대신 Aside 창에 로그인 화면을 열고, 로그인될 때까지 기다린 뒤 답장 없이 이어 간다
+  const hostOf = (url) => { try { return new URL(url).hostname; } catch { return String(url || '사이트'); } };
+  const asideLoginProblem = async ({ target }) => {
+    if (!outbound?.asideRequestLogin || unattended) return { question: `Aside 브라우저에서 ${hostOf(target)}에 로그인한 뒤 "이어서 재개"라고 답해 주세요.` };
+    emit('flow.notice', { summary: `Aside 창에 ${hostOf(target)} 로그인 화면을 열었습니다. Aside 창에서 직접 로그인하면 자동으로 이어 갑니다.` });
+    const started = Date.now();
+    let result;
+    try { result = await outbound.asideRequestLogin({ target, signal }); }
+    catch (err) { checkStop(); return { question: `Aside 로그인 화면을 열지 못했습니다: ${redactContext(err.message)} Aside 앱을 켠 뒤 답장을 보내면 다시 시도합니다. 이 작업을 하지 않으려면 "하지 마"라고 답해 주세요.` }; }
+    finally { loginWaitMs += Date.now() - started; persist(); }
+    checkStop();
+    if (result?.status === 'ok') return {};
+    if (result?.status === 'protected') return { question: `${hostOf(target)}가 계정 보호 조치를 건 것으로 보입니다. 자동 작업을 멈췄습니다. 서비스 공식 화면에서 직접 해제한 뒤 답장을 보내 주세요. 해제 전에는 다시 시도하지 않습니다.` };
+    return { question: `${Math.round(LOGIN_WAIT_MS / 60000)}분 안에 Aside에서 ${hostOf(target)} 로그인이 끝나지 않았습니다. Aside 창에서 로그인한 뒤 답장을 보내면 다시 확인합니다. 이 작업을 하지 않으려면 "하지 마"라고 답해 주세요.` };
+  };
+  const asideLogin = async (target) => {
+    const checked = await outbound.asideCheckLogin({ target, signal }).catch(() => null);
+    checkStop();
+    if (checked?.status === 'protected') return { question: `${hostOf(target)}가 계정 보호 조치를 건 것으로 보입니다. 자동 작업을 멈췄습니다. 서비스 공식 화면에서 직접 해제한 뒤 답장을 보내 주세요.` };
+    return checked?.status === 'needs_login' ? asideLoginProblem({ target }) : {};
+  };
   const isUsable = (c) => Boolean(c) && (c.status === 'connected' || c.hasCredentials === true && c.firstLoginDone === true);
   // 지시의 링크로 서비스를 알 수 있으면 계획 전에 로그인을 끝낸다. 계획이 연결 계정을 알아야 조회 단계에 브라우저를 붙인다
   if (canOpenLogin() && !state.accountDeclined && !saved.plan) {
@@ -321,6 +354,13 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       return provider ? [provider] : [];
     }))] : [];
     for (const provider of providers) {
+      // Aside 직원이 있으면 브라우저 업무는 대표의 Aside 로그인으로 한다(계정 연결 창을 띄우지 않는다)
+      const asideTarget = asideStaff().length && outbound?.asideCheckLogin ? urls.find((url) => allowedServiceUrl(provider, url)) : null;
+      if (asideTarget) {
+        const outcome = await asideLogin(asideTarget);
+        if (outcome.question) return ask([{ phase: 'account', question: outcome.question }]);
+        continue;
+      }
       const candidates = (outbound.connections?.() || []).filter((c) => c.provider === provider);
       // 카페 글쓰기만 하는 지시는 공식 API가 연결된 네이버 계정이면 브라우저 로그인 없이 올린다
       const cafeOnly = provider === 'naver' && external.every((action) => action === 'post') && urls.filter((url) => allowedServiceUrl('naver', url)).every((url) => /^https:\/\/(?:m\.)?cafe\.naver\.com\//.test(url));
@@ -362,6 +402,14 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
   const editInput = editSource ? `outputs/${task}/source/${basename(editSource.path)}` : '';
   const fastPlan = editSource ? quickEditPlan({ org, task, request: state.originalRequest, agentId: intent.quickAgent, sourceName: basename(editSource.path), input: editInput })
     : !saved.originalRequest && intent?.quick === true && !allowedActions().length ? quickPlan({ org, task, request: state.originalRequest, agentId: intent.quickAgent }) : null;
+  // 빠른 조회가 로그인해야 하는 서비스(네이버·카카오·NAVER WORKS) 주소를 다루면 처음부터 Aside 직원에게 맡긴다
+  // (로그인 브라우저가 없는 직원에게 먼저 보내면 되돌려 보내 계획을 한 번 더 세우게 된다)
+  const quickSite = !editSource && fastPlan && asideStaff().length
+    ? (String(state.originalRequest).match(/https?:\/\/[^\s<>"'),]+/g) || []).find((url) => Object.keys(CONNECTION_PROVIDERS).some((id) => allowedServiceUrl(id, url))) : null;
+  if (quickSite) {
+    const chosen = asideStaff().find((a) => a.id === intent?.quickAgent) || asideStaff()[0];
+    Object.assign(fastPlan.stages[0], { agent: chosen.id, dept: chosen.department, connection: ASIDE_CONNECTION, target: quickSite, output: `outputs/${task}/${chosen.department}/${chosen.id}-quick.md` });
+  }
   if (editSource && fastPlan) {
     mkdirSync(dirname(join(root, editInput)), { recursive: true });
     copyFileSync(editSource.path, join(root, editInput));
@@ -455,8 +503,11 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     const needs = [];
     const logins = new Map();
     let replan = false, choice = false;
+    const asideTargets = new Set();
     for (const p of plan.publications || []) {
       if (!allowedActions().includes(p.action) || state.accountDeclined) continue;
+      // Aside 직원의 외부 작업은 대표의 Aside 로그인을 쓴다. 대상 사이트 로그인만 확인한다
+      if (isAsideWork(p)) { const at = p.target || (p.service === 'naverworks_mail' ? CONNECTION_PROVIDERS.naverworks.loginUrl : ''); if (at) asideTargets.add(at); continue; }
       if (p.action === 'web') {
         const chosen = list.find((c) => c.id === p.connection);
         if (!usable(chosen)) { needs.push(`${p.target} 웹사이트 작업용 계정`); replan ||= !chosen; logins.set(chosen?.id || p.target, { name: `${p.target} 사이트`, connection: chosen?.id || '', target: p.target }); }
@@ -471,8 +522,15 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     }
     for (const stage of plan.stages) {
       if (typeof stage.connection !== 'string' || !stage.connection.trim() || stage.connection === PUBLIC_CONNECTION) continue;
+      if (isAsideWork(stage)) { if (stage.target && !state.completed[stage.id]) asideTargets.add(stage.target); continue; }
       const chosen = list.find((c) => c.id === stage.connection);
       if (!usable(chosen)) { needs.push(`${stage.target} 조회용 계정`); replan ||= !chosen; logins.set(chosen?.id || stage.target, { name: `${stage.target} 사이트`, connection: chosen?.id || '', target: stage.target }); }
+    }
+    if (asideTargets.size && outbound?.asideCheckLogin && !state.accountDeclined) {
+      for (const target of asideTargets) {
+        const outcome = await asideLogin(target);
+        if (outcome.question) return ask([{ phase: 'account', question: outcome.question }]);
+      }
     }
     if (needs.length && !choice && canOpenLogin()) {
       for (const login of logins.values()) {
@@ -519,9 +577,26 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     const command = (script) => `node "${join(programRoot(), 'scripts', script)}"`;
     return { newsSearch: command('news-search.mjs'), linkCheck: command('check-links.mjs') };
   };
+  // Aside 직원은 작업 공간 파일을 읽지 못하므로 입력 자료를 지시문에 붙인다(계정 파일 등 막힌 위치는 넣지 않는다)
+  const ASIDE_INPUT_MAX = 20000, ASIDE_INPUTS_MAX = 60000;
+  const asideInputs = (inputs) => {
+    let total = 0;
+    return inputs.map((input) => {
+      const abs = isAbsolute(input) ? input : resolve(root, input);
+      if (!insideRel(root, abs) || blockedReason(abs, { root, home })) return `### ${input}\n(이 위치는 직원에게 넘기지 않습니다)`;
+      let text;
+      try { text = readFileSync(abs, 'utf8'); } catch { return `### ${input}\n(읽지 못함)`; }
+      const room = Math.max(0, Math.min(ASIDE_INPUT_MAX, ASIDE_INPUTS_MAX - total));
+      total += Math.min(text.length, room);
+      return `### ${input}\n${text.slice(0, room)}${text.length > room ? '\n…(이하 생략)' : ''}`;
+    });
+  };
+  // 파일로 만들어야 하는 산출물(엑셀·문서·이미지 등)은 Aside 직원이 만들 수 없다
+  const ASIDE_BINARY = /\.(?:xlsx|xlsm|xls|docx|doc|pptx|ppt|pdf|png|jpe?g|gif|webp|zip|hwp|hwpx)$/i;
   const executeStage = async (stage, reason = '') => {
     const desc = `${reason ? '[반려] ' : ''}${stage.title}`;
-    const engine = org.departments.find((d) => d.id === stage.dept)?.engine || 'claude';
+    const engine = engineFor(stage.agent);
+    const asideRun = engine === 'aside';
     emit('tool.start', { tool: 'Agent', target: stage.agent, desc, summary: redact(`${stage.agent}: ${desc}`) });
     emit('agent.start', { engine, agent: stage.agent, instance: `${run.id}-${stage.id}` });
     for (const dependency of stage.dependsOn || []) {
@@ -533,7 +608,10 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
     const site = typeof stage.connection === 'string' && stage.connection.trim();
     // 사이트 조회 단계는 연결 계정 브라우저(읽기 전용)를 붙여 실행한다
     const publicWeb = stage.connection === PUBLIC_CONNECTION;
-    const runStage = (args) => !site ? execute(args)
+    // 공개 웹 조사는 로그인 없는 임시 브라우저(요청 단위 사내 주소 차단)로만 한다. Aside 기본 프로필에는 대표 로그인이 있어 맡기지 않는다
+    if (asideRun && publicWeb) return { stage, result: { status: 'replan', reason: `공개 웹 조사 단계(${stage.id})는 Aside 직원이 맡지 않습니다. 로그인 없는 브라우저를 쓰는 다른 직원에게 배정하세요.` } };
+    if (asideRun && ASIDE_BINARY.test(stage.output)) return { stage, result: { status: 'replan', reason: `Aside 직원은 ${stage.output.split('.').at(-1)} 파일을 만들지 않습니다. 이 단계(${stage.id})는 파일을 만드는 다른 직원에게 배정하거나 md·json 산출물로 바꾸세요.` } };
+    const runStage = (args) => asideRun ? execute(args) : !site ? execute(args)
       : publicWeb ? (outbound?.browsePublic ? outbound.browsePublic({ target: stage.target, signal, execute: (browser) => execute({ ...args, browser }) }) : execute(args))
       : outbound?.browse ? outbound.browse({ connection: stage.connection, target: stage.target, signal, execute: (browser) => execute({ ...args, browser }) })
         : Promise.reject(Object.assign(new Error('사이트 조회를 위해 계정 연결을 먼저 완료해 주세요.'), { code: 'CONNECTION_REQUIRED' }));
@@ -545,7 +623,14 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         // 직원 지시: 목표 → 입력·출력·완료 기준 → 이 단계 안내 → 응답 형식 → 안전선 순서로 묶는다
         const html = /\.html?$/i.test(stage.output);
         const mailDraft = (plan.publications || []).some((p) => p.action === 'mail' && (p.content === stage.id || p.content === stage.output) && !p.recipients.length);
-        const guide = [
+        const guide = asideRun ? [
+          site ? `사이트 조회(Aside): 대표가 Aside 브라우저에 로그인해 둔 계정으로 ${stage.target}에서 시작해 필요한 자료를 조회하세요. 읽기 전용이라 저장·등록·수정·삭제·발송은 하지 않습니다. 대표 요청의 의도에 맞는 메뉴·탭·필터를 사이트를 둘러보며 스스로 찾아 쓰고(대표가 범위를 정했으면 그 범위의 자료만 엽니다), 목록은 끝까지 읽으세요. 대표가 요구한 항목(연락처 등)은 빠뜨리지 마세요. 조건에 맞는 항목이 없으면 그 사실과 확인한 화면·조건을 적으세요. 로그인 화면·추가 인증이 나오면 입력하지 말고 status:needs_decision, question에 "로그인 필요: 사이트 주소"를 적으세요.` : '',
+          mailDraft ? '이번 산출물은 메일 문안 JSON입니다. 입력 자료의 회사별 연락처·출처를 확인하고 대표 양식을 채운 messages:[{recipients:[주소],subject,body}]와 skipped:[미확인 업체·이유]를 작성하세요. 실제 메일은 지금 보내지 않습니다.' : '',
+          `결과물은 파일로 쓰지 말고 마지막 JSON의 content에 출력 파일(${stage.output})에 들어갈 전체 내용을 넣으세요(확장자에 맞게 Markdown·JSON·텍스트). 숫자는 화면의 원문 표기(예: 1.3K)를 함께 적고, 확인하지 못한 항목은 미확인으로 적으세요.`,
+          inputs.length ? `입력 자료(작업 공간 파일 내용):\n${asideInputs(inputs).join('\n\n')}` : '',
+          issue ? `앞 실행의 산출물 검사 실패: ${issue}. 고쳐서 content에 다시 담으세요.` : '',
+          '완료 기준을 채우면 바로 끝내세요. 기준에 없는 추가 조사·확인은 하지 않습니다.',
+        ].filter(Boolean) : [
           publicWeb ? `공개 웹 조회: 로그인 없는 브라우저(office_browser 도구)로 ${stage.target}에서 시작해 화면을 읽으세요. WebSearch·WebFetch도 함께 쓸 수 있습니다. 읽기 전용이라 입력·등록은 하지 않습니다. 유튜브 숏츠의 조회수는 /shorts/영상ID 화면에 글자로 나오지 않으니 /watch?v=영상ID로 열어 읽으세요. 결과는 출력 파일에 직접 작성하세요. 영상 내용처럼 글자로 확인할 수 없는 항목은 미확인으로 적으세요.` : '',
           site && !publicWeb ? `사이트 조회: 연결 계정 브라우저(office_browser 도구)로 ${stage.target}에서 시작해 필요한 자료를 조회하세요. 읽기 전용이라 저장·등록·수정·삭제는 하지 않습니다. 대표 요청의 의도에 맞는 메뉴·탭·필터를 사이트를 둘러보며 스스로 찾아 쓰고(대표가 범위를 정했으면 그 범위의 자료만 엽니다. 예: 특정 회원의 글이면 작성자 검색·필터를 먼저 쓰고 공지·다른 게시판은 열지 않음), 목록은 browser_text의 offset으로 끝까지 읽으세요. 결과는 출력 파일에 직접 작성하고, 대표가 요구한 항목(연락처 등)은 빠뜨리지 마세요. 조건에 맞는 항목이 없으면 그 사실과 확인한 화면·조건을 출력 파일에 적으세요. 이 단계에서는 연결 사이트 밖(웹 검색·다른 사이트)은 볼 수 없습니다. 그런 자료는 다른 단계가 맡으니 사이트 안 자료만 정리하고, 사이트 밖 자료가 없다는 이유로 대표에게 묻지 마세요.` : '',
           mailDraft ? '이번 산출물은 메일 문안 JSON입니다. 입력 조사 자료의 회사별 연락처·출처를 확인하고 대표 양식을 채운 messages:[{recipients:[주소],subject,body}]와 skipped:[미확인 업체·이유]를 작성하세요. 실제 메일은 지금 보내지 않습니다.' : '',
@@ -565,12 +650,14 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
           `${desc}\n\n## 목표·대표 요청\n업무: ${task}\n${context()}`,
           `## 입력·출력·완료 기준\n입력: ${JSON.stringify(inputs)}\n출력: ${stage.output}\n완료 기준: ${stage.done}${reason ? `\n반려 사유(모두 반영): ${reason}` : ''}`,
           guide.length ? `## 이 단계 안내\n${guide.join('\n')}` : '',
+          asideRun ? '## 응답 형식(Aside)\n마지막 응답은 코드 블록 없이 JSON 하나입니다. status=done이면 content에 출력 파일 전체 내용을 넣으세요. 결정이 필요하면 status=needs_decision과 question, 이 직원이 할 수 없는 일이면 status=replan과 reason을 씁니다.' : '',
           `## 응답 형식\n마지막 응답은 JSON입니다. status=done(작성 완료), needs_decision(대표 결정), reroute(부서 오전달), delegate(팀장 분담), replan(도구 부족). summary/question/department/agent/reason/assignments 필드를 쓰세요.\n`
             + '도구·브라우저·권한·로그인 상태는 대표가 답해서 바뀌는 일이 아니므로 대표에게 묻지 마세요. 지금 도구로 못 하는 일이면 status=replan, reason에 필요한 것(예: 로그인한 카페 글 조회, 공개 웹 검색)을 적으세요. 비서실장이 계획을 고칩니다. 확인할 수 없는 항목(조회수·영상 내용 등)만 남았으면 미확인으로 표시하고 status=done으로 끝내세요.\n'
             + '질문이 필요하면 산출물을 억지로 쓰지 말고 question에 원문을 적으세요. 오전달이면 적합한 department/agent와 reason을 제안하세요.\n'
             + `팀장만 같은 부서의 근무중 직원에게 assignments:[{agent,title,output,done}]로 분담할 수 있습니다. 실행기는 분담 결과를 모아 팀장에게 다시 전달합니다. 직접 다른 직원을 호출하지 마세요.\n`
             + `부서 근무중 실행 직원: ${JSON.stringify(org.roster.filter((a) => available(a.id, stage.dept)).map((a) => ({ id: a.id, name: a.name, lead: a.lead, role: a.role, specialty: a.specialty || a.description })))}`,
-          '## 안전선\n출력 파일에만 쓰고 업무 폴더 밖은 고치지 않습니다. 메일 발송·글/댓글 게시·사이트 업로드는 이 단계에서 하지 않습니다(검토 뒤 실행기가 처리). 비밀번호·쿠키·계정 파일은 읽거나 옮겨 적지 않습니다.',
+          asideRun ? '## 안전선\n파일은 쓰지 않고 결과를 content에 담습니다. 이 단계는 읽기 전용입니다. 메일 발송·글/댓글 게시·사이트 저장·업로드는 하지 않습니다(검토 뒤 실행기가 처리). 비밀번호·쿠키·인증 코드는 읽거나 옮겨 적지 않습니다.'
+            : '## 안전선\n출력 파일에만 쓰고 업무 폴더 밖은 고치지 않습니다. 메일 발송·글/댓글 게시·사이트 업로드는 이 단계에서 하지 않습니다(검토 뒤 실행기가 처리). 비밀번호·쿠키·계정 파일은 읽거나 옮겨 적지 않습니다.',
         ].filter(Boolean).join('\n\n') });
       } catch (err) {
         emit('agent.pause', { engine, agent: stage.agent, instance: `${run.id}-${stage.id}`, summary: redact(err.message) });
@@ -580,6 +667,13 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       }
       checkStop();
       const result = stageResult(text);
+      // Aside 직원은 파일을 쓰지 않으므로 응답의 content를 실행기가 출력 파일로 저장한다
+      if (asideRun && result.status === 'done') {
+        if (typeof result.content !== 'string' || !result.content.trim()) { issue = 'Aside 직원 응답에 content(출력 파일 내용)가 없습니다'; continue; }
+        const out = safeOutput(stage.output, true);
+        mkdirSync(dirname(out), { recursive: true });
+        writeFileAtomic(out, result.content.endsWith('\n') ? result.content : `${result.content}\n`);
+      }
       if (result.status !== 'done') return { stage, result };
       if (state.quick) state.quickSummary = redactContext(String(result.summary || ''));
       const hash = fingerprint(stage);
@@ -900,16 +994,16 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
             }
           }
           const instance = `${run.id}-publish-${publication.id || publications.length}`;
-          const engine = org.departments.find((d) => d.id === org.roster.find((a) => a.id === publication.agent)?.department)?.engine || 'claude';
-          emit('agent.start', { engine, agent: publication.agent, instance, summary: '검토된 원문의 외부 작업을 시작합니다.' });
+          const engine = engineFor(publication.agent);
+          emit('agent.start', { engine, agent: publication.agent, instance, summary: engine === 'aside' ? '검토된 원문의 외부 작업을 Aside 직원이 시작합니다.' : '검토된 원문의 외부 작업을 시작합니다.' });
           try {
             const web = publication.action === 'web';
             const attachments = isMail(job) ? mailFiles(publication) : files.map((f) => ({ name: basename(f), path: safeOutput(f) }));
             const result = await outbound.deliver({ scope: run.rootId, publication, body, allowedActions: allowedActions(), instructionKey: instructionKey(), ...policy(), schedule: videoPolicy, signal,
-              files: attachments, evidenceDir: join(taskDir, 'evidence'),
-              execute: async (browser) => {
+              files: attachments, evidenceDir: join(taskDir, 'evidence'), engine,
+              execute: async (browser, extra = {}) => {
                 const text = await execute({ phase: 'publish', agentId: publication.agent, browser,
-                prompt: web ? [
+                prompt: engine === 'aside' ? asidePublishPrompt({ publication, body, web, files: extra.files || [] }) : web ? [
                   '대표가 이번 업무에서 지시한 웹사이트 작업을 연결 계정의 브라우저로 실행합니다. 아래 지침대로 진행하고 지침에 없는 변경은 하지 마세요.',
                   `시작 주소: ${publication.target}`, `지침:\n${body}`,
                   attachments.length ? `첨부할 파일(browser_attach의 file 값): ${attachments.map((a) => a.name).join(', ')}` : '첨부 파일 없음',
@@ -929,12 +1023,14 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
                   '전송 완료 또는 실제 게시된 본문을 확인해 browser_finish로 증표를 만든 뒤 status:done JSON으로 보고하세요. 로그인/추가 인증/쓰기 권한이 필요하면 status:needs_decision과 질문을 반환하세요.',
                   '이메일·글·댓글 작성 외의 삭제·결제·계정 변경은 하지 않습니다. 결과가 불확실한 전송을 다시 누르지 마세요.',
                 ].filter(Boolean).join('\n\n') });
+                // Aside 직원의 보고(눌렀는지·결과 주소)는 실행기가 결과 화면과 함께 판단하므로 그대로 넘긴다
+                if (engine === 'aside') return text;
                 const result = stageResult(text);
                 if (['needs_decision', 'replan'].includes(result.status)) throw new Error(result.question || result.reason || '외부 작업에 필요한 계정·권한을 확인해 주세요.');
                 return text;
               } });
-            publications.push(web ? `- 웹사이트 작업 ${publication.target}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : '직원 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}${result.evidence ? ` · 증거 evidence/${result.evidence}` : ''}${result.summary ? `\n  - 확인 내용: ${redactContext(result.summary)}` : ''}`
-              : `- ${publication.service} ${publication.action}${isMail(job) ? ` (${mailLine(job)})` : ''}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : result.method === 'api' ? '공식 API 게시 완료' : '브라우저 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}`);
+            publications.push(web ? `- 웹사이트 작업 ${publication.target}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : result.method === 'aside' ? 'Aside 직원 확인 완료' : '직원 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}${result.evidence ? ` · 증거 evidence/${result.evidence}` : ''}${result.summary ? `\n  - 확인 내용: ${redactContext(result.summary)}` : ''}`
+              : `- ${publication.service} ${publication.action}${isMail(job) ? ` (${mailLine(job)})` : ''}: ${result.confirmedBy === 'user' ? '사용자 확인 완료' : result.method === 'api' ? '공식 API 게시 완료' : result.method === 'aside' ? 'Aside 직원 실행 · 결과 화면 대조 완료' : '브라우저 확인 완료'}${result.resultUrl ? ` · ${result.resultUrl}` : ''}`);
             if (isMail(job)) { state.mailSent[mailKey(job)] = publications.at(-1); persist(); }
             if (publication.action === 'post') { if (publication.kind === 'info') infoPosted++; else posted++; }
             if (['post', 'comment'].includes(publication.action)) { state.lastPostAt = Date.now(); persist(); }
@@ -945,12 +1041,20 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
             // 게시 중 로그인이 풀리면(직원 창이 로그인 창으로 바뀜) 시작 때처럼 로그인을 기다렸다가 같은 작업을 답장 없이 다시 시작한다(작업마다 한 번).
             // 등록을 누른 뒤 끊겼다면 다시 시작해도 불확실 기록 때문에 멈추므로 중복 게시가 생기지 않는다
             // 공식 API 실패는 브라우저 로그인과 무관하므로 로그인 창을 열거나 자동으로 다시 시도하지 않는다
-            const lost = error.code !== 'NAVER_API' && canOpenLogin() && !relogged.has(index) && (outbound.connections?.() || []).find((c) => c.status === 'needs_login'
+            const lost = !['NAVER_API', 'ASIDE_LOGIN', 'ASIDE'].includes(error.code) && engine !== 'aside' && canOpenLogin() && !relogged.has(index) && (outbound.connections?.() || []).find((c) => c.status === 'needs_login'
               && (publication.connection ? c.id === publication.connection : c.provider === serviceProvider(publication.service)));
             if (lost) {
               relogged.add(index);
               emit('agent.pause', { engine, agent: publication.agent, instance, summary: '로그인이 풀려 로그인 창을 열었습니다. 로그인을 마치면 이 작업부터 다시 시작합니다.' });
               const outcome = await loginProblem({ name: CONNECTION_PROVIDERS[lost.provider]?.name || lost.label || '연결 계정', provider: lost.provider, connection: lost.id });
+              if (!outcome.question) { index--; continue; }
+              return ask([{ phase: 'publish', question: outcome.question }]);
+            }
+            // Aside 직원의 로그인이 풀렸으면 Aside 창에 로그인 화면을 열고 기다렸다가 같은 작업을 다시 시작한다(작업마다 한 번)
+            if (error.code === 'ASIDE_LOGIN' && !relogged.has(index)) {
+              relogged.add(index);
+              emit('agent.pause', { engine, agent: publication.agent, instance, summary: 'Aside에서 로그인이 필요해 로그인 화면을 열었습니다. 로그인을 마치면 이 작업부터 다시 시작합니다.' });
+              const outcome = await asideLoginProblem({ target: error.target || publication.target });
               if (!outcome.question) { index--; continue; }
               return ask([{ phase: 'publish', question: outcome.question }]);
             }

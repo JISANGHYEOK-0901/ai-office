@@ -211,6 +211,7 @@
     <li><a href="#start">서버 켜기</a></li>
     <li><a href="#how">어디에 무엇을 요청할까</a></li>
     <li><a href="#setup">사용 전 세팅: AI에게 맡기기</a></li>
+    <li><a href="#aside">브라우저 업무는 Aside로</a></li>
     <li><a href="#use">대시보드 사용법</a></li>
     <li><a href="#mail">제휴 메일 보내기</a></li>
     <li><a href="#custom">내 마음대로 고쳐 쓰기</a></li>
@@ -255,6 +256,7 @@
       </li>
       <li><b>둘 다 있으면</b> 기본 설정 그대로 씁니다. 계획·실무는 Claude가, 최종 검토는 Codex가 맡습니다.</li>
       <li><b>컴퓨터 관리자 비밀번호</b>: 프로그램을 설치할 때 물어볼 수 있습니다.</li>
+      <li><b>Aside (선택, 브라우저 업무 권장)</b>: 메일·카페·블로그·사이트 일을 맡길 거라면 설치를 권장합니다. 설치·세팅은 <a href="#aside">7장</a>에 있습니다. 없어도 AI Office는 동작합니다.</li>
     </ul>
   </div>
   <div class="warn"><b>주의</b>계정은 <b>반드시 본인 것</b>을 쓰세요. 한 사람의 계정을 여러 명이 같이 쓰면 사용량 한도가 금방 찹니다.</div>
@@ -551,7 +553,7 @@
     <p style="margin:12px 0 4px"><b>회사 사이트 조회·작업</b> — 일반 웹사이트로 계정 연결</p>
     <div class="say both">(ERP 링크)에서 30일 넘게 활동 없는 상담사를 찾아 엑셀로 정리해줘</div>
     <div class="say both">만든 HTML을 (관리자 화면 링크)의 제휴 페이지에 업로드해줘</div>
-    <p style="margin:12px 0 4px"><b>제휴 메일</b> — 자세한 사용법은 <a href="#mail">8. 제휴 메일 보내기</a></p>
+    <p style="margin:12px 0 4px"><b>제휴 메일</b> — 자세한 사용법은 <a href="#mail">9. 제휴 메일 보내기</a></p>
     <div class="say both">○○ 관련 업체 10곳을 찾아 리스트로 만들고, 공개된 제휴 문의 메일로 제휴 제안 메일 보내줘. 제휴제안서.pdf 첨부해서</div>
     <p style="margin:12px 0 4px"><b>멈추기·이어 하기</b></p>
     <div class="say both">하던 작업 멈추고 정리해 둬, 다음에 이어서 하자</div>
@@ -597,13 +599,114 @@
     <div class="say">마케팅부에 블로그 글 검수 담당을 한 명 더 추가해줘</div>
     <div class="say">모든 직원이 존댓말로 쓰고, 출처를 꼭 적게 회사 규칙을 정해줘</div>
     <div class="say">리서치부 직원은 빠르고 저렴한 모델로 바꿔줘</div>
+    <div class="say">메일 보내고 카페 글 올리는 직원은 Aside로 바꿔줘</div>
     <div class="say">지금 우리 회사 부서랑 직원 구성 설명해줘</div>
   </div>
   <div class="ok"><b>다음 단계</b>세팅이 끝나면 같은 터미널 AI에게 실제 업무를 말합니다(대시보드 위쪽 <b>비서실장</b> 입력창에 써도 됩니다). 예: “다음 달 블로그 콘텐츠 주제와 발행 일정을 기획해줘”</div>
 </section>
 
+<section class="part" id="aside">
+  <h2>7. 브라우저 업무는 Aside로 (권장)</h2>
+  <p class="sub">메일 발송·카페/블로그 글·댓글·로그인한 사이트 조회처럼 브라우저로 하는 일은 <b>Aside 직원</b>에게 맡기길 권장합니다. Aside는 로그인한 사이트를 직접 다루는 AI 브라우저입니다. 대표가 Aside에 로그인해 둔 계정을 그대로 쓰고, 예전 자동 브라우저(Playwright)에서 자주 걸리던 네이버 보호 조치를 줄이는 것이 목적입니다. Aside가 없으면 예전 방식으로 그대로 동작합니다.</p>
+
+  <div class="card">
+    <h3 style="margin-top:0">무엇이 달라지나요</h3>
+    <ul>
+      <li>Aside 직원이 사이트를 직접 둘러보며 일합니다. 일이 끝나면 AI Office가 결과 화면을 다시 읽어 <b>검토한 원문이 정확히 한 번 올라갔는지</b> 확인합니다.</li>
+      <li>실행 직전 확인, 같은 글 다시 올리지 않기, 결과가 불확실하면 다시 보내지 않고 멈추기는 그대로입니다.</li>
+      <li>공개 웹 조사(뉴스 수집 등)와 문서·보고서·엑셀 작성은 지금처럼 Claude·Codex 직원이 합니다.</li>
+      <li>Aside 직원은 Aside에 연결한 구독(Claude 또는 ChatGPT) 사용량을 씁니다.</li>
+    </ul>
+  </div>
+
+  <div class="card step">
+    <div class="num">1</div>
+    <div>
+      <h3>Aside 설치하기</h3>
+      <p>Aside는 <b>맥(macOS 15 이상)과 윈도우(Windows 10 22H2 이상, Windows 11)</b>에서 씁니다. 앱과 <b>CLI</b>(AI Office가 Aside를 부르는 명령)를 함께 설치합니다.</p>
+      <div class="only-mac">
+        <p>터미널에 아래 두 줄을 차례로 붙여 넣습니다(앱 설치 → CLI 설치).</p>
+        <div class="cmd"><code>brew install --cask aside</code><button type="button" class="copy">복사</button></div>
+        <div class="cmd"><code>curl -fsSL https://releases.aside.com/install.sh | bash</code><button type="button" class="copy">복사</button></div>
+        <p>Homebrew가 없으면 <a href="https://aside.com/download">aside.com/download</a>에서 앱을 받아 설치하고, 앱의 <span class="btnlike">Settings → Developer</span>에서 CLI를 설치합니다.</p>
+      </div>
+      <div class="only-win">
+        <ol>
+          <li><a href="https://aside.com/download">aside.com/download</a>에서 Windows 설치 파일(대부분 x64)을 받아 설치합니다.</li>
+          <li>앱의 <span class="btnlike">Settings → Developer</span>에서 CLI를 설치합니다. 새 PowerShell 창에서 <code>aside --version</code>이 나오면 됩니다.</li>
+        </ol>
+      </div>
+      <div class="tip"><b>팁</b>터미널 AI에게 “Aside 설치해줘”라고 해도 됩니다. 앱의 첫 설정(아래 2단계)은 직접 해야 합니다.</div>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">2</div>
+    <div>
+      <h3>처음 한 번: Aside 첫 화면 세팅</h3>
+      <ol>
+        <li><b>가입·로그인:</b> Aside 계정을 만들거나 로그인합니다.</li>
+        <li><b>브라우저 데이터 가져오기:</b> <b>건너뛰기를 권장합니다.</b> 가져오면 크롬의 개인 로그인·쿠키가 전부 Aside 에이전트가 쓸 수 있는 브라우저로 넘어옵니다. 업무에 필요한 사이트만 아래 6번에서 직접 로그인하는 편이 안전합니다.</li>
+        <li><b>비밀번호 관리자(Vault):</b> 잠금 비밀번호를 정합니다. 여기 저장한 비밀번호는 AI에게 보이지 않고 자동 입력에만 쓰입니다.</li>
+        <li><b>구독 고르기(Choose your AI subscription):</b> Aside 에이전트가 쓸 AI를 고릅니다. 아래 장단점을 보고 고르세요. 연결 창이 뜨면 그 서비스에 로그인합니다.</li>
+        <li><b>기본 웹 브라우저:</b> <b>Chrome을 그대로 두기를 권장합니다.</b> AI Office는 Aside를 명령으로 직접 부르므로 기본 브라우저가 아니어도 됩니다. Aside를 기본으로 하면 메일·메신저 링크가 모두 Aside에서 열려 개인 브라우징이 Aside의 기억에 섞입니다.</li>
+        <li><b>업무 사이트 로그인:</b> Aside 브라우저 안에서 NAVER WORKS·네이버 등 업무에 쓸 사이트에 직접 로그인합니다. “로그인 상태 유지”를 켜 두면 덜 번거롭습니다. 개인 계정보다 <b>업무 전용 계정</b>을 권장합니다.</li>
+      </ol>
+      <div class="grid2">
+        <div class="card">
+          <h3>Claude (Pro·Max)</h3>
+          <p><b>장점</b> AI Office와 같은 계정 하나로 관리합니다. 한도가 넉넉한 요금제면 여유가 있습니다.</p>
+          <p><b>단점</b> AI Office의 계획·직원 작업과 같은 한도를 나눠 씁니다.</p>
+        </div>
+        <div class="card">
+          <h3>ChatGPT (Codex를 쓸 수 있는 요금제)</h3>
+          <p><b>장점</b> AI Office는 ChatGPT를 최종 검토에만 써서 사용량이 나뉩니다. Business 좌석도 됩니다(회사가 로컬 Codex를 허용해야 함).</p>
+          <p><b>단점</b> Codex를 쓸 수 있는 요금제(Plus·Pro·Business)여야 합니다.</p>
+        </div>
+        <div class="card">
+          <h3>Aside (자체 크레딧)</h3>
+          <p><b>장점</b> 다른 구독 없이 바로 시작합니다. 무료 요금제는 월 500크레딧입니다.</p>
+          <p><b>단점</b> 크레딧을 다 쓰면 유료 요금제(Pro·Max)가 필요합니다. 모델·속도에 따라 소모량이 다릅니다.</p>
+        </div>
+        <div class="card">
+          <h3>나중에 바꾸려면</h3>
+          <p>Aside 앱 <span class="btnlike">Settings → Models → Providers</span>에서 <b>Connect</b>로 추가하고, 항목 메뉴에서 연결을 끊습니다. 기본으로 쓸 모델은 <span class="btnlike">Settings → Models → Task models</span>에서 바꿉니다.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">3</div>
+    <div>
+      <h3>브라우저 업무 직원의 엔진을 Aside로 바꾸기</h3>
+      <ul>
+        <li>대시보드에서 직원을 눌러 <span class="btnlike">수정</span> → <b>엔진: Aside (브라우저 업무 권장)</b> → <span class="btnlike">저장</span>. 같은 부서의 다른 직원은 그대로 둡니다.</li>
+        <li>터미널 AI에게 “메일 보내는 신제안 대리를 Aside로 바꿔줘”라고 해도 됩니다.</li>
+        <li>“ai-office 실행해줘”, “서버 켜줘”라고 하면 AI가 Aside 설치 여부와 <b>Aside로 바꾸면 좋은 직원</b>(예전에 메일·카페·사이트 일을 맡았던 직원)을 알려 줍니다. 대시보드 위쪽에도 같은 안내가 뜹니다.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card step">
+    <div class="num">4</div>
+    <div>
+      <h3>쓰는 법</h3>
+      <div class="say">https://cafe.naver.com/petdilab 에서 아이스베어 회원 최근 글 3개 정리해줘</div>
+      <div class="say">신제안 대리가 NAVER WORKS로 partner@example.com에 제휴 제안 메일 보내줘. 제휴제안서.pdf 첨부해</div>
+      <ul>
+        <li>평소처럼 지시하면 비서실장이 사이트 일은 Aside 직원에게 맡깁니다. <b>Aside 창에서 작업하는 모습</b>을 볼 수 있습니다.</li>
+        <li>Aside 앱은 켜 두세요. 꺼져 있으면 업무 때 자동으로 켜집니다.</li>
+        <li>로그인이 풀려 있으면 Aside 창에 로그인 화면이 열립니다. 직접 로그인하면 답장 없이 이어 갑니다.</li>
+        <li>메일 첨부 파일은 업무 동안 Aside 작업 폴더에 잠깐 복사했다가 끝나면 지웁니다.</li>
+      </ul>
+      <div class="warn"><b>주의</b>Aside 브라우저에 로그인된 계정은 Aside 에이전트가 쓸 수 있습니다. 업무에 필요한 계정만 로그인하세요. 결과가 불확실하면 AI Office가 다시 보내지 않고 멈추니, 사이트에서 직접 확인한 뒤 “미발송 확인, 재발송”처럼 답해 주세요.</div>
+    </div>
+  </div>
+</section>
+
 <section class="part" id="use">
-  <h2>7. 대시보드 사용법</h2>
+  <h2>8. 대시보드 사용법</h2>
   <p class="sub">처음에는 회사가 비어 있습니다. 부서와 직원부터 만듭니다.</p>
 
   <div class="card step">
@@ -645,7 +748,7 @@
         <li>일하는 중에도 비서실장이 결과를 보며 단계를 더하거나 고칩니다. 마지막에 검토해 부족한 부분은 담당에게 다시 맡깁니다.</li>
         <li>결과 파일 저장 위치를 정하고 싶으면 지시에 전체 경로를 적습니다(예: “~/Desktop/상담사 리스트 폴더에 저장해줘”). 적지 않으면 <b>보관함/최종산출물/날짜</b> 폴더에 모입니다.</li>
         <li>메일 발송·카페 글·댓글처럼 밖으로 나가는 일은 올리기 직전에 한 번 <b>“실행할까요?”</b>라고 묻습니다. 확인 없이 끝까지 하려면 지시에 <b>“끝까지 자동으로”</b>를 적어 주세요.</li>
-        <li>메일은 한 번에 <b>20통까지만</b> 보내고, 지시문에 적은 파일을 첨부할 수 있습니다. 자세한 방법은 <a href="#mail">8. 제휴 메일 보내기</a>를 보세요.</li>
+        <li>메일은 한 번에 <b>20통까지만</b> 보내고, 지시문에 적은 파일을 첨부할 수 있습니다. 자세한 방법은 <a href="#mail">9. 제휴 메일 보내기</a>를 보세요.</li>
         <li>입력창 옆의 <b>Codex / Claude</b> 선택은 <b>최종 검토</b>를 누가 할지 정합니다. 고르는 법은 <a href="#models">아래 6번</a>을 보세요.
           <span class="only-claude">Claude만 쓴다면 <b>Claude</b>로 바꿔 주세요.</span>
           <span class="only-codex">Codex만 쓴다면 그대로 <b>Codex</b>에 둡니다. Claude가 없으면 계획·실무·검토를 모두 Codex가 맡습니다.</span></li>
@@ -672,7 +775,7 @@
       <ul>
         <li><span class="btnlike">회사 설정</span>: 모든 직원이 지킬 회사 규칙, 결과 파일 저장 위치, <b>업무 예산</b>(업무 하나가 쓸 AI 사용 횟수·시간, 기본 40회·60분), 회사 구성 <b>내보내기(백업)·가져오기</b>. 업무가 예산의 80%를 쓰면 계속할지 묻습니다.</li>
         <li><span class="btnlike">예약</span>: “내일 오전 10시에 이 업무 하기”(한 번), “내일부터 3일간 매일 9시에”(정한 횟수), “매일 오전 11시에”(매일)처럼 정해진 시간에 자동으로 일을 시킵니다. 지시창에 그렇게 써도 예약됩니다. 컴퓨터와 서버가 켜져 있어야 실행됩니다.</li>
-        <li><span class="btnlike">계정 연결</span>: 메일 발송·카페 글 게시처럼 바깥 사이트에서 할 일이 있을 때 내 계정을 연결합니다. 연결이 없으면 업무 중에 로그인 창이 저절로 열립니다. 창에서 로그인만 하면 답장 없이 이어 갑니다. 지시에 카페·블로그 주소가 있으면 일을 시작하기 전에 실제로 로그인돼 있는지 먼저 열어 보고, 풀렸으면 바로 로그인 창을 엽니다. 로그인 창은 30분 기다립니다. 미리 해 두려면 이 메뉴를 씁니다. <b>자동 게시는 네이버 등에서 계정 보호 조치를 부를 수 있으니 개인 계정 대신 업무 전용 계정을 권장합니다.</b> 보호 조치가 걸리면 자동 작업을 멈추며, 서비스 공식 화면에서 직접 해제해야 합니다. 글·댓글 사이 간격은 <span class="btnlike">회사 설정</span>에서 바꿀 수 있습니다(기본 30초). 네이버 카페 글은 네이버 계정의 <span class="btnlike">카페 공식 API 연결</span>을 해 두면 브라우저 대신 공식 API로 올라가 로그인 보호 조치를 줄일 수 있습니다(네이버 지도 링크가 든 장소 글은 장소 카드를 만들려고 브라우저로 올립니다)(보관함/계정.env에 <code>NAVER_API_CLIENT</code>·<code>NAVER_API_SECRET</code>·<code>NAVER_API_CALLBACK</code> 필요, 동의 화면에서 카페 가입·글쓰기 항목 체크). API가 실패하면 자동으로 바꾸지 않고 멈추며, “브라우저로 진행”이라고 답하면 브라우저로 올립니다. API로는 글 수정·삭제가 되지 않습니다. <b>처음 한 번은 <span class="btnlike">로그인 창 열기</span>에서 직접 로그인</b>해 주세요. 로그인을 마치면 창이 저절로 닫히고, 그다음부터는 AI가 알아서 로그인 상태를 씁니다. 로그인 창은 직접 닫지 마세요. 여러 사이트 계정을 미리 적어 두려면 작업 공간의 <b>보관함/계정.env</b> 파일을 씁니다(Git에 올라가지 않고 AI 직원은 읽지 못합니다).</li>
+        <li><span class="btnlike">계정 연결</span>: 메일 발송·카페 글 게시처럼 바깥 사이트에서 할 일이 있을 때 내 계정을 연결합니다. <b>Aside 직원은 계정 연결 대신 Aside 브라우저의 로그인을 씁니다(<a href="#aside">7장</a>).</b> 연결이 없으면 업무 중에 로그인 창이 저절로 열립니다. 창에서 로그인만 하면 답장 없이 이어 갑니다. 지시에 카페·블로그 주소가 있으면 일을 시작하기 전에 실제로 로그인돼 있는지 먼저 열어 보고, 풀렸으면 바로 로그인 창을 엽니다. 로그인 창은 30분 기다립니다. 미리 해 두려면 이 메뉴를 씁니다. <b>자동 게시는 네이버 등에서 계정 보호 조치를 부를 수 있으니 개인 계정 대신 업무 전용 계정을 권장합니다.</b> 보호 조치가 걸리면 자동 작업을 멈추며, 서비스 공식 화면에서 직접 해제해야 합니다. 글·댓글 사이 간격은 <span class="btnlike">회사 설정</span>에서 바꿀 수 있습니다(기본 30초). 네이버 카페 글은 네이버 계정의 <span class="btnlike">카페 공식 API 연결</span>을 해 두면 브라우저 대신 공식 API로 올라가 로그인 보호 조치를 줄일 수 있습니다(네이버 지도 링크가 든 장소 글은 장소 카드를 만들려고 브라우저로 올립니다)(보관함/계정.env에 <code>NAVER_API_CLIENT</code>·<code>NAVER_API_SECRET</code>·<code>NAVER_API_CALLBACK</code> 필요, 동의 화면에서 카페 가입·글쓰기 항목 체크). API가 실패하면 자동으로 바꾸지 않고 멈추며, “브라우저로 진행”이라고 답하면 브라우저로 올립니다. API로는 글 수정·삭제가 되지 않습니다. <b>처음 한 번은 <span class="btnlike">로그인 창 열기</span>에서 직접 로그인</b>해 주세요. 로그인을 마치면 창이 저절로 닫히고, 그다음부터는 AI가 알아서 로그인 상태를 씁니다. 로그인 창은 직접 닫지 마세요. 여러 사이트 계정을 미리 적어 두려면 작업 공간의 <b>보관함/계정.env</b> 파일을 씁니다(Git에 올라가지 않고 AI 직원은 읽지 못합니다).</li>
         <li><b>계속 지켜보는 업무</b>(예: “새 자료가 올라오면 계속 정리해줘”)는 업무 카드에 오늘 쓴 AI 사용량이 보이고, 평소보다 크게 많이 쓰면 <b>사용량 이상</b> 알림이 뜹니다.</li>
         <li><span class="btnlike">내역 초기화</span>: 끝난 업무·실행 기록을 정리합니다. 결과 파일과 계정은 지워지지 않습니다. 비서실장에게 <b>“작업 내역 지워줘”</b>라고 말해도 바로 처리합니다. 답변을 기다리는 업무는 남습니다. 그 대화에 <b>“이 업무 끝내줘”</b>라고 쓰면 끝나고 지울 수 있습니다.</li>
       </ul>
@@ -704,7 +807,7 @@
 </section>
 
 <section class="part" id="mail">
-  <h2>8. 제휴 메일 보내기: 20통씩, 파일 첨부까지</h2>
+  <h2>9. 제휴 메일 보내기: 20통씩, 파일 첨부까지</h2>
   <p class="sub">조사한 업체·대학에 업체별로 따로 메일을 보내는 업무입니다. 대량 발송을 막으려고 한 번에 20통까지만 보내고, 지시문에 적은 파일을 모든 메일에 붙일 수 있습니다.</p>
 
   <div class="card">
@@ -830,7 +933,7 @@
 </section>
 
 <section class="part" id="custom">
-  <h2>9. 내 마음대로 고쳐 쓰기</h2>
+  <h2>10. 내 마음대로 고쳐 쓰기</h2>
   <p class="sub">AI Office는 쓰면서 내 일에 맞게 계속 바꿔 나가는 프로그램입니다.</p>
   <div class="grid2">
     <div class="card">
@@ -867,7 +970,7 @@
 </section>
 
 <section class="part" id="daily">
-  <h2>10. 매일 쓰는 순서</h2>
+  <h2>11. 매일 쓰는 순서</h2>
   <div class="card">
     <div class="flow">
       <span class="box">터미널 열기</span><span class="arrow">→</span>
@@ -886,7 +989,7 @@
 </section>
 
 <section class="part" id="safe">
-  <h2>11. 꼭 지켜 주세요</h2>
+  <h2>12. 꼭 지켜 주세요</h2>
   <div class="card">
     <ul>
       <li><b>비밀번호·카드번호·인증번호를 AI 대화창이나 업무 지시에 적지 마세요.</b> 바깥 사이트 계정은 <span class="btnlike">계정 연결</span> 창이나 <b>보관함/계정.env</b> 파일에만 둡니다.</li>
@@ -899,7 +1002,7 @@
 </section>
 
 <section class="part" id="help">
-  <h2>12. 막혔을 때</h2>
+  <h2>13. 막혔을 때</h2>
   <p class="sub">대부분은 터미널의 AI에게 화면에 보이는 그대로 말하면 해결됩니다.</p>
   <div class="card">
     <details>
@@ -922,6 +1025,18 @@
       <summary>업무가 멈춘 것 같아요</summary>
       <p>오른쪽 <b>업무 · 실행</b> 목록에서 상태를 봅니다. “답변 필요”라면 답을 적어 주세요. 멈췄다면 그 실행을 중지한 뒤 대화창에 <b>“이어서 재개”</b>라고 답하면 끝난 단계는 건너뛰고 이어서 합니다.</p>
       <p>노트북을 끄기 전에는 지시창에 <b>“하던 작업 멈추고 정리해 둬, 다음에 이어서 하자”</b>라고 쓰세요. 모든 업무를 멈추고 업무 폴더마다 정리 노트(pause-note.md)를 남깁니다. 다음에 <b>“이어서 해줘”</b>라고 쓰면 한 번에 다시 시작합니다.</p>
+    </details>
+    <details>
+      <summary>화면 위에 “Aside로 바꾸길 권장드립니다”라고 떠요</summary>
+      <p>예전에 메일·카페·사이트 일을 맡았던 직원이 아직 Aside 엔진이 아니라는 안내입니다. <a href="#aside">7장 3단계</a>대로 그 직원의 엔진을 Aside로 바꾸거나, 지금 방식을 유지하려면 알림을 닫으면 됩니다.</p>
+    </details>
+    <details>
+      <summary>Aside 직원이 일하는 모습이 안 보이거나 “Aside를 찾지 못했습니다”라고 나와요</summary>
+      <p>Dock(작업 표시줄)에서 Aside 창을 앞으로 띄웁니다. “찾지 못했습니다”는 Aside CLI가 설치되지 않은 경우입니다. <a href="#aside">7장 1단계</a>의 CLI 설치를 하거나 AI에게 <b>“Aside CLI 설치해줘”</b>라고 말합니다. CLI가 없으면 그 직원은 예전 방식(부서 엔진)으로 일합니다.</p>
+    </details>
+    <details>
+      <summary>“Aside에서 로그인이 필요합니다”라고 나와요</summary>
+      <p>Aside 창에 로그인 화면이 열려 있습니다. 직접 로그인하면 답장 없이 이어 갑니다. 보호 조치 안내가 나오면 그 서비스 공식 화면에서 직접 해제한 뒤 답장을 보내 주세요.</p>
     </details>
     <details>
       <summary>“사용량 한도에 도달했습니다”라고 나와요</summary>

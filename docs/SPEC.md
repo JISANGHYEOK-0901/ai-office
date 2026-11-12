@@ -117,6 +117,7 @@ test/                     node:test
 ```
 
 - 추가 필드: `active`, `model`(부서 기본값보다 우선), `thoughts`(대기 중 혼잣말 2~3개).
+- `engine`: 비우면 부서 엔진을 따르고, `"aside"`면 그 직원만 Aside 직원으로 실행한다(브라우저 업무 직원용, 5장 "Aside 직원"). 부서 `engine`도 `claude`·`codex`·`aside` 중 하나다.
 - `id`: `^[a-z][a-z0-9-]{1,47}$`, 부서·직원 id 전체에서 유일. `chief`는 쓸 수 없다. 화면이 부서 id와 순번으로 자동 생성한다(예: `research-3`).
 - 부서당 `lead: true`는 1명 이하다.
 - description·specialty가 모두 비면 저장은 하되 "비서실장이 배정 기준으로 쓸 설명이 없습니다" 경고를 낸다.
@@ -406,6 +407,16 @@ test/                     node:test
 - 실패: 브라우저로 자동 전환하지 않는다. 요청 거부(게시 안 됨, 예: 999)는 기록을 `failed`로 두고 "브라우저로 진행"이라고 답하면 브라우저로 다시 시도한다고 묻는다(`viaBrowser`). 인증 만료·권한 없음, 계정·게시판 제한(`0005`, `CA002`, `AP002`~`AP008`)은 우회를 제안하지 않고 멈춘다. 응답을 못 받거나 코드 없는 5xx는 `uncertain`으로 두고 "미게시 확인, 재게시" 절차를 따른다.
 - 보고: 결과 줄은 "공식 API 게시 완료 · <글 주소>"다.
 - 계정 확인: 공식 API가 연결된 네이버 계정은 카페 글쓰기(게시 대상별 확인, 지시의 네이버 링크가 모두 카페 주소일 때의 시작 전 확인)에 브라우저 로그인을 요구하지 않는다. API 실패(`code: NAVER_API`)는 게시 중 재로그인·자동 재시작 경로를 타지 않는다. 장소 링크 글은 브라우저로 올리므로, 그때 로그인이 풀려 있으면 게시 중 로그인 창(답장 없이 재시작) 경로를 탄다.
+
+### Aside 직원
+
+- 엔진: 직원 `engine: "aside"` 또는 부서 `engine: "aside"`(`lib/aside.mjs`의 `agentEngine`). Aside CLI가 없으면(`ASIDE_BIN` > PATH > `~/.local/bin/aside`) 부서 엔진(부서가 aside면 Claude)으로 실행하고 브라우저 업무는 기존 Playwright 경로를 탄다. 실행기는 `aside exec --json --timeout 60m <지시문>`으로 띄운다(지시문은 인자, 표준 입력 없음). 결과는 마지막 JSON 줄의 `answer`다. 실패·중지·시간 초과 뒤에는 `aside session list --json`으로 이 실행 뒤 CLI가 시작해 아직 도는 세션을 `aside session stop`한다(CLI를 끝내도 세션은 계속 돈다).
+- 지침: 직원 지침은 Aside 전용 근무 규칙으로 만든다(파일을 읽거나 쓰지 않고 결과를 마지막 JSON의 `content`에 담음, 로그인·추가 인증·보호 조치는 입력하지 않고 needs_decision, 숫자는 원문 표기 함께). Claude 직원용 파일·office_browser 규칙은 넣지 않는다.
+- 단계: 계획은 Aside 직원의 사이트 조회·외부 작업에 `connection: "aside"`를 쓴다. Aside 직원 단계는 office_browser를 붙이지 않고, 입력 파일 내용을 지시문에 붙이며(파일당 2만 자, 합계 6만 자, 막힌 위치 제외), 응답의 `content`를 실행기가 출력 파일로 저장한다. 공개 웹 조회(`connection: "public"`)와 파일 산출물(xlsx·docx·pptx·pdf·이미지 등)을 Aside 직원에게 배정하면 실행하지 않고 replan으로 계획을 고치게 한다. 공개 웹 조사는 요청 단위 사내 주소 차단이 있는 Playwright 임시 브라우저로만 한다(Aside 기본 프로필에는 대표 로그인이 있다).
+- 로그인: Aside 직원이 있으면 시작 전 확인·계정 확인에서 계정 연결 창 대신 Aside 숨은 탭(`aside repl`)으로 대상 주소의 로그인 상태를 본다(로그인 주소·비밀번호 칸·로그아웃 링크·보호 조치 문구, `requiresLogin`·`accountProtected`와 같은 기준). 풀려 있으면 대표가 보는 Aside 창의 현재 탭에 로그인 화면을 열고(맥은 `open -a Aside`) 로그인될 때까지 기다렸다가(`LOGIN_WAIT_MS`) 답장 없이 이어 간다. 보호 조치면 멈춘다.
+- 외부 작업(`deliver(engine:"aside")`): 계정 연결 없이 대상 서비스·주소만 검사한다. 실행 전 로그인 확인 → 실행 전 화면(댓글: 같은 문구 수, 메일: 보낸메일함의 같은 제목 메일 id) → 기록 `committing`(method `aside`) → 첨부는 Aside 작업 폴더(`~/.aside/u/0/ai-office/<임의>`)에 복사(에이전트는 기본 권한에서 그 밖 파일을 못 읽음)하고 끝나면 지움 → Aside 직원 실행(검토된 원문을 `<<<본문 … 본문>>>`으로 넣고 정확히 한 번만) → 실행기가 숨은 탭으로 다시 읽어 대조한다. 댓글은 같은 문구가 늘었는지, 글은 직원이 보고한 `resultUrl`(서비스 주소만)의 제목·본문, 메일은 새로 생긴 보낸 메일 상세(`/read/popup?nMailId=`)의 본문·받는사람(보낸사람 주소를 모르므로 받는사람 전원과 다른 주소 하나까지만 인정). 확인되면 `confirmed`(`confirmedBy: aside-readback`), 안 보이면 직원이 누르지 않았다고 보고한 경우(`submitted:false`)만 `prepared`, 그 밖은 `uncertain`으로 멈춘다(자동 재시도 없음). 로그인이 필요하면 `code: ASIDE_LOGIN`으로 알리고 실행기가 Aside 로그인을 기다린 뒤 작업마다 한 번 다시 시작한다. 일반 웹사이트 작업(`web`)은 직원 보고(`completed`·`summary`·`resultUrl`)를 증표로 남기고 미완료는 완료로 닫지 않는다.
+- 바뀌는 것: office_browser의 클릭 단위 강제(금지 버튼·허용 주소·칸 종류·조회 단계 쓰기 금지)는 Aside 직원에게는 지시문과 사후 대조로 바뀐다. 실행 직전 확인·중복 방지 기록·불확실 시 정지·검토는 같다.
+- 권장 안내(`asideAdvice`): 지난 업무 계획(`.office/orchestrations/*.json`)에서 메일·글·댓글·웹사이트 작업·사이트 조회를 맡았던 근무중 직원 중 Aside가 아닌 직원을 찾아 엔진 변경을 권한다. Aside가 없으면 설치를 권한다. `npm run doctor`(선택 항목 `aside`), 대시보드 상단 배너(`state.asideAdvice`, 30초 재사용), 서버 켜기 수칙(AGENTS.md)에서 같은 문장을 쓴다.
 
 ### 사이트 조회 단계
 

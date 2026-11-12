@@ -375,9 +375,11 @@ code { font-family: var(--mono); font-size: .86em; padding: 1px 5px; border-radi
 .engine { display: inline-block; padding: 0 6px; border-radius: 4px; font: 800 10px/1.6 var(--mono); text-transform: uppercase; letter-spacing: .06em; border: 1px solid; }
 .engine-claude { color: #fb923c; border-color: rgba(251, 146, 60, .5); }
 .engine-codex { color: #a78bfa; border-color: rgba(167, 139, 250, .55); }
+.engine-aside { color: #34d399; border-color: rgba(52, 211, 153, .55); }
 :root[data-theme="pastel"] .badge, :root[data-theme="pastel"] .engine { border: 1.5px solid var(--line); color: var(--text); background: #fff; }
 :root[data-theme="pastel"] .engine-claude { background: #ffe0c2; }
 :root[data-theme="pastel"] .engine-codex { background: #e4d6ff; }
+:root[data-theme="pastel"] .engine-aside { background: #d3f5e6; }
 :root[data-theme="pastel"] .badge-warn, :root[data-theme="pastel"] .badge-lead { background: #fff3b0; }
 :root[data-theme="pastel"] .badge-off { background: #ffd3e6; }
 

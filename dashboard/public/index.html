@@ -216,6 +216,7 @@
           <legend>엔진</legend>
           <label class="inline"><input type="radio" name="engine" value="claude" checked> Claude (실행)</label>
           <label class="inline"><input type="radio" name="engine" value="codex"> Codex (실행 / 검토)</label>
+          <label class="inline"><input type="radio" name="engine" value="aside"> Aside (브라우저 업무)</label>
         </fieldset>
         <div class="codex-fields span-2" id="codexFields" hidden>
           <label>Codex 모델
@@ -299,6 +300,12 @@
             <option value="opus">opus</option>
             <option value="haiku">haiku</option>
             <option value="inherit">inherit</option>
+          </select>
+        </label>
+        <label id="agentEngineRow"><span class="lbl">엔진 <small class="help-inline">브라우저 업무는 Aside 권장</small></span>
+          <select name="engine">
+            <option value="">부서 설정 따름</option>
+            <option value="aside">Aside (브라우저 업무 권장)</option>
           </select>
         </label>
         <div id="agentCodexFields" class="span-2 form-grid" hidden>

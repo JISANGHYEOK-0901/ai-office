@@ -1,4 +1,4 @@
-// 대시보드 작업 실행기: claude -p / codex exec 를 프로세스 그룹으로 띄우고 runs 를 관리한다
+// 대시보드 작업 실행기: claude -p / codex exec / aside exec 를 프로세스 그룹으로 띄우고 runs 를 관리한다
 import * as child_process from 'node:child_process';
 import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -24,6 +24,7 @@ import { AUTO_RESUME_MAX_AGE_MS } from '../lib/guardrails.mjs';
 import { appendEvent, normalizeCodexItem, redact } from '../lib/events.mjs';
 import { buildPrompt, parseVerdict } from '../scripts/codex-review.mjs';
 import { AGENT_ID_PATTERN, RUN_MODELS, TOOL_PATTERN, codexModelArgs, killTree, resolveCommand, spawnCli, writePrompt } from '../lib/cli.mjs';
+import { agentEngine, asideExecArgs, createAside, fallbackEngine, parseExecOutput, resolveAside } from '../lib/aside.mjs';
 
 const PERMISSIONS = ['acceptEdits', 'bypassPermissions', 'default'];
 const MAX_PROMPT = 20000;
@@ -77,7 +78,9 @@ function groupAlive(pid) {
   }
 }
 
-export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, spawnImpl = child_process.spawn, killGraceMs = 5000, outbound = null, keepAwake = null, env = process.env, toolStatus = () => null }) {
+export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, spawnImpl = child_process.spawn, killGraceMs = 5000, outbound = null, keepAwake = null, env = process.env, toolStatus = () => null, aside = null }) {
+  // Aside 직원 실행의 세션 정리(CLI를 끝내도 Aside 세션은 계속 돌기 때문)
+  const asideTools = aside || createAside({ env, spawnImpl });
   const officeDir = join(root, '.office');
   const runsFile = join(officeDir, 'runs.json');
   const logDir = join(officeDir, 'runs');
@@ -152,7 +155,12 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
     if (agent.active === false) throw httpError(409, `${agent.name || agentId} 님은 휴무 중이라 작업을 지시할 수 없습니다.`);
     const dept = org.departments.find((d) => d.id === agent.department);
     if (dept?.active === false) throw httpError(409, `${dept.name || dept.id} 부서가 운영 중지 상태라 작업을 지시할 수 없습니다.`);
-    if (dept?.engine === 'codex') return codexSpec({ agent, dept, prompt, resume, model, effort: options.effort });
+    // Aside 직원: 설치돼 있으면 Aside 에이전트로, 없으면 부서 엔진(Claude·Codex, 브라우저는 Playwright)으로 실행한다
+    if (agentEngine(agent, dept) === 'aside') {
+      const cmd = resolveAside({ env });
+      if (cmd.found) return asideSpec({ agent, dept, prompt, cmd });
+      if (fallbackEngine(dept) === 'codex') return codexSpec({ agent, dept, prompt, resume, model, effort: options.effort });
+    } else if (dept?.engine === 'codex') return codexSpec({ agent, dept, prompt, resume, model, effort: options.effort });
     if (model && !RUN_MODELS.includes(model)) throw httpError(400, 'Claude 직원 모델은 haiku/sonnet/opus 중 하나여야 합니다.');
     if (options.effort && !CLAUDE_EFFORTS.includes(options.effort)) throw httpError(400, 'Claude effort가 올바르지 않습니다.');
     const perm = PERMISSIONS.includes(dept?.permission) ? dept.permission : 'acceptEdits';
@@ -277,6 +285,14 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
       args: ['exec', '--json', '--skip-git-repo-check', '-s', sandbox, '-C', root, ...modelArgs, '-'],
       input: text,
     };
+  }
+
+  // Aside 직원: 직원 지침과 지시를 한 지시문으로 넘긴다(CLI가 표준 입력을 받지 않는다). 파일 대신 마지막 JSON 응답에 결과를 담는다
+  function asideSpec({ agent, dept, prompt, cmd }) {
+    const text = `${agentInstructions(root, agent, dept, undefined, 'aside')}\n\n${prompt}`;
+    // Windows 명령줄은 32767자까지라 여유를 두고 막는다
+    if (text.length > (process.platform === 'win32' ? 30000 : 100000)) throw httpError(400, 'Aside 직원에게 넘길 지시문이 너무 깁니다. 입력 자료를 줄여 주세요.');
+    return { engine: 'aside', agentId: agent.id, model: null, effort: null, cmd, args: asideExecArgs(text), input: null };
   }
 
   // thread: 답장일 때 { parentId, rootId, sessionId }. sessionId 는 실행 출력에서 새 값이 오면 바뀐다
@@ -443,6 +459,16 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
     let msg;
     try { msg = JSON.parse(line); } catch { return; }
     if (!msg || typeof msg !== 'object') return;
+    // aside exec --json: 끝에 { session, outcome, answer, error } 한 줄. 세션 id는 이어서 답하기에 쓰지 않는다
+    if (spec.engine === 'aside') {
+      const result = parseExecOutput(line);
+      if (!result) return;
+      const answer = typeof result.answer === 'string' ? result.answer : '';
+      spec.fullText = answer;
+      run.summary = redact(answer || String(result.error || ''));
+      if (result.outcome !== 'completed') run.resultError = true;
+      return;
+    }
     if (spec.engine === 'claude' && msg.type === 'result' || spec.engine === 'codex' && msg.type === 'turn.completed') {
       const usage = cliUsage(spec.engine, msg);
       if (usage) run.usage = usage;
@@ -549,12 +575,14 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
     });
     child.on('error', (err) => {
       const summary = err.code === 'ENOENT'
-        ? `실행 파일을 찾지 못했습니다: ${spec.cmd.display}. 설치 여부와 PATH(또는 ${spec.engine === 'codex' ? 'CODEX_BIN' : 'CLAUDE_BIN'})를 확인해 주세요.`
+        ? `실행 파일을 찾지 못했습니다: ${spec.cmd.display}. 설치 여부와 PATH(또는 ${spec.engine === 'codex' ? 'CODEX_BIN' : spec.engine === 'aside' ? 'ASIDE_BIN' : 'CLAUDE_BIN'})를 확인해 주세요.`
         : `실행 오류: ${err.message}`;
       finish(run, { status: 'failed', summary });
     });
     child.on('close', (code, signal) => {
       if (buffer) handleLine(run, spec, buffer);
+      // Aside는 CLI가 끝나도(중지·시간 초과·실패) 세션이 계속 돌 수 있어 이 실행이 시작한 세션을 멈춘다
+      if (spec.engine === 'aside' && (entry.stopRequested || code !== 0)) asideTools.stopSessions(run.startedAt).catch(() => {});
       if (entry.stopRequested && run.paused) {
         finish(run, { status: 'stopped', summary: pausedSummary(run, notePaused(run)) });
       } else if (entry.stopRequested) {
@@ -614,6 +642,14 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
     }
   }
 
+  // 직원이 실제로 쓰는 엔진(업무 진행부가 지시문을 고를 때 쓴다). buildSpec과 같은 기준이다
+  function engineOf(agentId) {
+    const org = loadOrg(root);
+    const agent = org.roster.find((a) => a.id === agentId), dept = org.departments.find((d) => d.id === agent?.department);
+    const engine = agentEngine(agent, dept);
+    return engine === 'aside' && !resolveAside({ env }).found ? fallbackEngine(dept) : engine;
+  }
+
   function launchOrchestration(run, spec) {
     const controller = new AbortController();
     const children = new Set();
@@ -638,8 +674,9 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
       if (readOnly && childSpec.engine === 'claude') childSpec.args.push('--tools', 'Read,Glob,Grep');
       childSpec.phase = phase;
       childSpec.env = { ...childSpec.env, OFFICE_ORCHESTRATOR_CHILD: '1' };
-      if (browser) attachBrowser(childSpec, browser);
-      if (!agentId || ['stage', 'watch', 'publish'].includes(phase)) {
+      // Aside 직원은 자기 브라우저를 쓴다(office_browser 도구·응답 형식 인자를 붙이지 않고, 형식은 지시문으로 정한다)
+      if (browser && childSpec.engine !== 'aside') attachBrowser(childSpec, browser);
+      if (childSpec.engine !== 'aside' && (!agentId || ['stage', 'watch', 'publish'].includes(phase))) {
         const schema = join(programRoot(), 'dashboard', 'schemas', `${phase}.json`);
         if (childSpec.engine === 'codex') childSpec.args.splice(-1, 0, '--output-schema', schema);
         else {
@@ -696,7 +733,7 @@ export function createRunner({ root, onChange, judge = null, maxConcurrent = 4, 
                 display: `지속 감시 새 자료 보고: ${path.split('/').at(-1)}` });
             } });
         } else text = await orchestrate({ root, run, prompt: spec.input, execute, signal: controller.signal, intent: spec.intent || null, judge,
-          maxParallel: maxConcurrent, resume: spec.resumeOrchestration, onDecision: () => { spec.needsDecision = true; }, outbound, notes: entry.notes });
+          maxParallel: maxConcurrent, resume: spec.resumeOrchestration, onDecision: () => { spec.needsDecision = true; }, outbound, notes: entry.notes, engineOf });
       } catch (err) {
         status = controller.signal.aborted ? 'stopped' : 'failed';
         text = controller.signal.aborted ? '사용자가 업무 진행을 중지했습니다. 이어서 재개할 수 있습니다.' : redact(err.message);

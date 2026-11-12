@@ -15,6 +15,7 @@ import { modelCatalog } from '../lib/models.mjs';
 import { createConnectionStore, CONNECTION_PROVIDERS, CUSTOM_PROVIDER, CUSTOM_PROVIDER_INFO, validateLoginValues } from '../lib/connections.mjs';
 import { createBrowserSessions } from '../lib/browser-session.mjs';
 import { createBrowserWork } from '../lib/browser-work.mjs';
+import { asideAdvice, createAside } from '../lib/aside.mjs';
 import { createNaverCafeApi, naverApiApp } from '../lib/naver-cafe-api.mjs';
 import { createKeepAwake } from '../lib/keep-awake.mjs';
 import { createSchedules, scheduleRequest } from '../lib/schedules.mjs';
@@ -78,7 +79,7 @@ export const HTML_PREVIEW_CSP = "sandbox; default-src 'none'; img-src data:; sty
 // 생성 HTML의 style 속성(부서색 변수) 때문에 style-src에 'unsafe-inline'을 둔다
 export const DASHBOARD_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src blob:; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const NO_DESCRIPTION_WARNING = '비서실장이 배정 기준으로 쓸 설명이 없습니다. 담당 업무나 호출 설명을 채워 주세요.';
-const AGENT_FIELDS = ['id', 'name', 'department', 'title', 'lead', 'specialty', 'description', 'instructions', 'active', 'model', 'rank', 'thoughts', 'role', 'codexModel', 'codexEffort'];
+const AGENT_FIELDS = ['id', 'name', 'department', 'title', 'lead', 'specialty', 'description', 'instructions', 'active', 'model', 'rank', 'thoughts', 'role', 'codexModel', 'codexEffort', 'engine'];
 const AUTH_COOKIE = 'office_auth';
 
 class HttpError extends Error {
@@ -503,10 +504,12 @@ export async function startServer({
   const browserSessions = createBrowserSessions({ store: connections, ...browserOptions });
   // 네이버 카페 공식 API(앱 키는 보관함/계정.env, 토큰은 연결 저장소). 브라우저 게시와 따로 쓰는 도구다
   const cafeApi = createNaverCafeApi({ root, store: connections });
-  const browserWork = createBrowserWork({ root, store: connections, sessions: browserSessions, cafeApi });
+  // Aside(브라우저 업무 권장 엔진): 설치돼 있으면 Aside 직원이 대표의 Aside 로그인으로 일하고, 실행기는 결과 화면을 다시 읽어 대조한다
+  const aside = demo ? null : createAside({ env });
+  const browserWork = createBrowserWork({ root, store: connections, sessions: browserSessions, cafeApi, aside });
   // 지시·답장 의도 판별(짧은 AI 호출). 로그인된 도구가 없으면 규칙 판별로 대신한다
   const judge = demo ? null : createJudge({ env, engine: () => tools.claude?.loggedIn === true ? 'claude' : tools.codex?.loggedIn === true ? 'codex' : null });
-  const runner = demo ? null : createRunner({ root, env, judge, toolStatus: async () => { await toolProbe; return tools; }, onChange: () => scheduleBroadcast(), outbound: browserWork, keepAwake: createKeepAwake() });
+  const runner = demo ? null : createRunner({ root, env, judge, toolStatus: async () => { await toolProbe; return tools; }, onChange: () => scheduleBroadcast(), outbound: browserWork, keepAwake: createKeepAwake(), aside });
   const schedules = demo ? null : createSchedules({ root, now: scheduleNow, runs: () => runner.list(),
     start: (request) => runner.start(request), onChange: () => scheduleBroadcast() });
 
@@ -533,6 +536,16 @@ export async function startServer({
     return out;
   }
 
+  // Aside 권장 안내(설치 여부·브라우저 업무 직원). 화면 갱신마다 이력을 읽지 않도록 30초 동안 재사용한다
+  let asideCache = { at: 0, value: null };
+  function currentAsideAdvice() {
+    if (demo) return null;
+    if (Date.now() - asideCache.at < 30000 && asideCache.value) return asideCache.value;
+    let value = null;
+    try { value = asideAdvice({ org, root, installed: aside.installed() }); } catch { value = null; }
+    asideCache = { at: Date.now(), value };
+    return value;
+  }
   function currentState() {
     const plans = currentPlans();
     const settings = loadSettings(root);
@@ -557,6 +570,7 @@ export async function startServer({
         needsLogin: connections.list().filter((c) => c.status === 'needs_login').length },
       // 경로 값은 토큰이 필요한 /api/company에서만 준다(상태는 토큰 없이 읽힌다)
       workspace: { compat, legacyPending },
+      asideAdvice: currentAsideAdvice(),
     };
   }
 

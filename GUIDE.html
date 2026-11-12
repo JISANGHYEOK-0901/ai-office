@@ -88,14 +88,6 @@
   }
   .os-switch button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   .os-switch .theme { margin-left: auto; }
-  nav.toc {
-    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
-    padding: 18px 22px; box-shadow: var(--shadow); margin: 16px 0 28px;
-  }
-  nav.toc strong { display: block; margin-bottom: 6px; }
-  nav.toc ol { margin: 0; padding-left: 22px; columns: 2; column-gap: 32px; }
-  nav.toc a { color: var(--accent); text-decoration: none; }
-  nav.toc a:hover { text-decoration: underline; }
   section.part { margin: 40px 0 0; scroll-margin-top: 64px; }
   section.part > h2 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.01em; }
   section.part > p.sub { color: var(--muted); margin: 0 0 16px; }
@@ -170,7 +162,6 @@
   @media (max-width: 640px) {
     body { font-size: 16px; }
     .hero h1 { font-size: 27px; }
-    nav.toc ol { columns: 1; }
     .grid2 { grid-template-columns: 1fr; }
     .step { grid-template-columns: minmax(0, 1fr); gap: 6px; }
     .num { width: 36px; height: 36px; font-size: 17px; }
@@ -182,6 +173,23 @@
     body { background: #fff; }
     .card { box-shadow: none; break-inside: avoid; }
   }
+  .tabs { position: sticky; top: 0; z-index: 20; display: flex; gap: 6px; overflow-x: auto; padding: 10px 0; margin: 0 0 18px; background: var(--bg); border-bottom: 1px solid var(--line); scrollbar-width: thin; }
+  .tabs button { flex: 0 0 auto; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 8px 14px; font-family: inherit; font-size: 15px; font-weight: 600; line-height: 1.2; cursor: pointer; }
+  .tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tabs button:focus-visible, .btn-next:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
+  .js-tabs .tab-panel { display: none; }
+  .js-tabs .tab-panel.active { display: block; }
+  .mini-toc { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 16px; margin-bottom: 18px; }
+  .mini-toc ol { margin: 0; padding-left: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  .mini-toc a { color: var(--accent); text-decoration: none; }
+  .tab-next { display: flex; justify-content: flex-end; margin: 8px 0 32px; }
+  .btn-next { border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); border-radius: 10px; padding: 10px 16px; font-family: inherit; font-size: 15px; font-weight: 700; line-height: 1.2; cursor: pointer; }
+  .table-wrap { overflow-x: auto; }
+  table.compare { width: 100%; border-collapse: collapse; font-size: 15px; min-width: 560px; }
+  table.compare th, table.compare td { border-top: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+  table.compare thead th { color: var(--muted); font-size: 14px; border-top: 0; }
+  table.compare tbody th { white-space: nowrap; }
+  @media print { .tabs, .tab-next, .mini-toc { display: none !important; } .js-tabs .tab-panel { display: block !important; } }
 </style>
 </head>
 <body data-os="mac" data-ai="claude">
@@ -202,25 +210,17 @@
   <button type="button" class="theme" id="themeBtn">화면 밝기 바꾸기</button>
 </div>
 
-<nav class="toc" aria-label="목차">
-  <strong>목차</strong>
-  <ol>
-    <li><a href="#what">AI Office는 무엇인가요</a></li>
-    <li><a href="#ready">준비물</a></li>
-    <li><a href="#install">처음 한 번만: 설치하기</a></li>
-    <li><a href="#start">서버 켜기</a></li>
-    <li><a href="#how">어디에 무엇을 요청할까</a></li>
-    <li><a href="#setup">사용 전 세팅: AI에게 맡기기</a></li>
-    <li><a href="#aside">브라우저 업무는 Aside로</a></li>
-    <li><a href="#use">대시보드 사용법</a></li>
-    <li><a href="#mail">제휴 메일 보내기</a></li>
-    <li><a href="#custom">내 마음대로 고쳐 쓰기</a></li>
-    <li><a href="#daily">매일 쓰는 순서</a></li>
-    <li><a href="#safe">꼭 지켜 주세요</a></li>
-    <li><a href="#help">막혔을 때</a></li>
-  </ol>
-</nav>
+<div class="tabs" role="tablist" aria-label="가이드 단원">
+  <button type="button" role="tab" id="tab-start" aria-controls="panel-start" aria-selected="true" data-tab="start">시작하기</button>
+  <button type="button" role="tab" id="tab-work" aria-controls="panel-work" aria-selected="false" data-tab="work">업무 시키기</button>
+  <button type="button" role="tab" id="tab-aside" aria-controls="panel-aside" aria-selected="false" data-tab="aside">Aside 브라우저</button>
+  <button type="button" role="tab" id="tab-dashboard" aria-controls="panel-dashboard" aria-selected="false" data-tab="dashboard">대시보드</button>
+  <button type="button" role="tab" id="tab-mail" aria-controls="panel-mail" aria-selected="false" data-tab="mail">제휴 메일</button>
+  <button type="button" role="tab" id="tab-help" aria-controls="panel-help" aria-selected="false" data-tab="help">고쳐 쓰기·도움말</button>
+</div>
 
+<div class="tab-panel" id="panel-start" role="tabpanel" aria-labelledby="tab-start" tabindex="-1">
+<nav class="mini-toc" aria-label="시작하기 목차"><ol><li><a href="#what">1. AI Office는 무엇인가요</a></li><li><a href="#ready">2. 준비물</a></li><li><a href="#install">3. 처음 한 번만: 설치하기</a></li><li><a href="#start">4. 서버 켜기</a></li></ol></nav>
 <section class="part" id="what">
   <h2>1. AI Office는 무엇인가요</h2>
   <p class="sub">내 컴퓨터 안에 작은 회사를 하나 차린다고 생각하면 됩니다.</p>
@@ -256,7 +256,7 @@
       </li>
       <li><b>둘 다 있으면</b> 기본 설정 그대로 씁니다. 계획·실무는 Claude가, 최종 검토는 Codex가 맡습니다.</li>
       <li><b>컴퓨터 관리자 비밀번호</b>: 프로그램을 설치할 때 물어볼 수 있습니다.</li>
-      <li><b>Aside (선택, 브라우저 업무 권장)</b>: 메일·카페·블로그·사이트 일을 맡길 거라면 설치를 권장합니다. 설치·세팅은 <a href="#aside">7장</a>에 있습니다. 없어도 AI Office는 동작합니다.</li>
+      <li><b>Aside (선택, 브라우저 업무 권장)</b>: 메일·카페·블로그·사이트 일을 맡길 거라면 설치를 권장합니다. 설치·세팅은 <a href="#aside">8장</a>에 있습니다. 없어도 AI Office는 동작합니다.</li>
     </ul>
   </div>
   <div class="warn"><b>주의</b>계정은 <b>반드시 본인 것</b>을 쓰세요. 한 사람의 계정을 여러 명이 같이 쓰면 사용량 한도가 금방 찹니다.</div>
@@ -455,6 +455,11 @@
   </div>
 </section>
 
+<div class="tab-next"><button type="button" class="btn-next" data-goto="work">다음: 업무 시키기 →</button></div>
+</div>
+
+<div class="tab-panel" id="panel-work" role="tabpanel" aria-labelledby="tab-work" tabindex="-1">
+<nav class="mini-toc" aria-label="업무 시키기 목차"><ol><li><a href="#how">5. 어디에 무엇을 요청할까: 처음부터 권장 순서</a></li><li><a href="#setup">6. 사용 전 세팅: AI에게 맡기기</a></li><li><a href="#daily">7. 매일 쓰는 순서</a></li></ol></nav>
 <section class="part" id="how">
   <h2>5. 어디에 무엇을 요청할까: 처음부터 권장 순서</h2>
   <p class="sub">기본은 <b>터미널의 AI에게 그냥 말하기</b>입니다. 프로그램 일은 터미널 AI가 바로 하고, 실제 회사 업무는 터미널 AI가 대시보드 비서실장에게 넘겨서 처리합니다.</p>
@@ -553,7 +558,7 @@
     <p style="margin:12px 0 4px"><b>회사 사이트 조회·작업</b> — 일반 웹사이트로 계정 연결</p>
     <div class="say both">(ERP 링크)에서 30일 넘게 활동 없는 상담사를 찾아 엑셀로 정리해줘</div>
     <div class="say both">만든 HTML을 (관리자 화면 링크)의 제휴 페이지에 업로드해줘</div>
-    <p style="margin:12px 0 4px"><b>제휴 메일</b> — 자세한 사용법은 <a href="#mail">9. 제휴 메일 보내기</a></p>
+    <p style="margin:12px 0 4px"><b>제휴 메일</b> — 자세한 사용법은 <a href="#mail">10. 제휴 메일 보내기</a></p>
     <div class="say both">○○ 관련 업체 10곳을 찾아 리스트로 만들고, 공개된 제휴 문의 메일로 제휴 제안 메일 보내줘. 제휴제안서.pdf 첨부해서</div>
     <p style="margin:12px 0 4px"><b>멈추기·이어 하기</b></p>
     <div class="say both">하던 작업 멈추고 정리해 둬, 다음에 이어서 하자</div>
@@ -605,9 +610,49 @@
   <div class="ok"><b>다음 단계</b>세팅이 끝나면 같은 터미널 AI에게 실제 업무를 말합니다(대시보드 위쪽 <b>비서실장</b> 입력창에 써도 됩니다). 예: “다음 달 블로그 콘텐츠 주제와 발행 일정을 기획해줘”</div>
 </section>
 
+<section class="part" id="daily">
+  <h2>7. 매일 쓰는 순서</h2>
+  <div class="card">
+    <div class="flow">
+      <span class="box">터미널 열기</span><span class="arrow">→</span>
+      <span class="box"><code>cd ~/ai-office</code></span><span class="arrow">→</span>
+      <span class="box"><code class="only-claude">claude</code><code class="only-codex">codex</code> 입력</span><span class="arrow">→</span>
+      <span class="box">“서버 켜줘”</span><span class="arrow">→</span>
+      <span class="box">터미널 AI에게 업무 말하기</span><span class="arrow">→</span>
+      <span class="box">대시보드에서 진행·결과 보기</span>
+    </div>
+    <ul>
+      <li>다 쓰면 AI에게 <b>“서버 꺼줘”</b>라고 말합니다. 창만 닫으면 서버는 계속 켜져 있습니다.</li>
+      <li>새 버전이 나왔다고 들으면 이렇게 부탁합니다.</li>
+    </ul>
+    <div class="say">AI Office 최신 버전으로 업데이트해줘. 내가 고친 부분은 유지해줘</div>
+  </div>
+</section>
+
+<div class="tab-next"><button type="button" class="btn-next" data-goto="aside">다음: Aside 브라우저 →</button></div>
+</div>
+
+<div class="tab-panel" id="panel-aside" role="tabpanel" aria-labelledby="tab-aside" tabindex="-1">
 <section class="part" id="aside">
-  <h2>7. 브라우저 업무는 Aside로 (권장)</h2>
+  <h2>8. 브라우저 업무는 Aside로: 설치·세팅 (권장)</h2>
   <p class="sub">메일 발송·카페/블로그 글·댓글·로그인한 사이트 조회처럼 브라우저로 하는 일은 <b>Aside 직원</b>에게 맡기길 권장합니다. Aside는 로그인한 사이트를 직접 다루는 AI 브라우저입니다. 대표가 Aside에 로그인해 둔 계정을 그대로 쓰고, 예전 자동 브라우저(Playwright)에서 자주 걸리던 네이버 보호 조치를 줄이는 것이 목적입니다. Aside가 없으면 예전 방식으로 그대로 동작합니다.</p>
+
+  <div class="card">
+    <h3 style="margin-top:0">기존 방식보다 Aside가 좋은 이유</h3>
+    <div class="table-wrap"><table class="compare">
+      <thead><tr><th>항목</th><th>기존 방식(자동 브라우저 Playwright)</th><th>Aside 직원</th></tr></thead>
+      <tbody>
+        <tr><th>네이버 보호 조치</th><td>자동화 브라우저라는 표시가 남아 사이트가 자동 접속으로 알아보기 쉽습니다. 실제 카페 댓글 시험 중 보호 모드가 걸린 적이 있습니다(원인은 확정하지 못함).</td><td>대표가 쓰는 일반 브라우저처럼 동작하고, 대표가 직접 로그인한 계정을 그대로 씁니다. 2026-11-12 시험(댓글·글·메일·조회)에서 보호 조치가 없었습니다. 다만 보호 조치가 절대 안 생긴다는 보장은 아닙니다.</td></tr>
+        <tr><th>로그인</th><td>계정 연결 창에서 로그인하고, 저장한 쿠키를 다시 불러와 씁니다. 로그인이 풀리면 창이 다시 뜹니다.</td><td>Aside 브라우저에 한 번 로그인하면 유지됩니다. 비밀번호 관리자가 자동으로 채우고, 비밀번호는 AI에게 보이지 않습니다.</td></tr>
+        <tr><th>일하는 방식</th><td>직원 AI가 화면의 버튼·칸을 도구로 하나씩 눌러 진행합니다. 단계가 많고, 사이트 화면 구조가 바뀌면 막히기 쉽습니다.</td><td>브라우저 전문 AI가 화면을 보고 메뉴·검색·필터를 스스로 찾아갑니다. 로그인한 사이트의 조회·감시도 맡길 수 있습니다.</td></tr>
+        <tr><th>걸린 시간(실측)</th><td>—</td><td>카페 회원 글 조회 약 50초, 댓글 14초~1분 반, 첨부 메일 약 1분(2026-11-12, 이 맥북)</td></tr>
+        <tr><th>결과 확인</th><td>결과 화면에서 원문을 대조해 증표를 남깁니다.</td><td>같습니다. 직원이 끝낸 뒤 AI Office가 화면을 다시 읽어 원문이 정확히 한 번 올라갔는지 대조합니다.</td></tr>
+        <tr><th>작업 모습</th><td>업무용 크롬 창</td><td>Aside 창</td></tr>
+        <tr><th>사용량</th><td>Claude·Codex 직원의 사용량</td><td>Aside에 연결한 구독(Claude 또는 ChatGPT)의 사용량</td></tr>
+        <tr><th>아쉬운 점</th><td>—</td><td>Aside 설치·가입이 필요합니다. 버튼 하나하나를 코드로 막던 방식이 지시문과 결과 대조로 바뀝니다. Windows는 아직 실제로 시험하지 않았습니다.</td></tr>
+      </tbody>
+    </table></div>
+  </div>
 
   <div class="card">
     <h3 style="margin-top:0">무엇이 달라지나요</h3>
@@ -616,6 +661,17 @@
       <li>실행 직전 확인, 같은 글 다시 올리지 않기, 결과가 불확실하면 다시 보내지 않고 멈추기는 그대로입니다.</li>
       <li>공개 웹 조사(뉴스 수집 등)와 문서·보고서·엑셀 작성은 지금처럼 Claude·Codex 직원이 합니다.</li>
       <li>Aside 직원은 Aside에 연결한 구독(Claude 또는 ChatGPT) 사용량을 씁니다.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">AI Office를 많이 고쳐 써서 업데이트하면 충돌이 나는 경우</h3>
+    <p>내 컴퓨터의 AI Office를 직접 많이 고쳤다면 최신 버전을 통째로 받을 때 충돌이 납니다. 이때는 <b>Aside 기능만 골라서 내 코드에 옮겨 달라고</b> 터미널 AI에게 말합니다. 내가 고친 기능은 그대로 둡니다.</p>
+    <div class="say">https://github.com/JISANGHYEOK-0901/ai-office.git 의 Aside 업데이트를 내 AI Office에 적용해줘. git fetch·pull로 통째로 가져오지 말고 그 저장소의 docs/ASIDE_PORTING.md 안내대로 Aside 관련 코드만 내 코드에 옮겨줘. 내가 고친 기능은 유지하고, 다 옮기면 테스트를 돌려서 결과를 알려줘</div>
+    <div class="say">위 저장소의 GUIDE.html을 받아서 Aside 탭을 열어 주고, 어떻게 세팅해야 하는지 비개발자도 알기 쉽게 하나씩 설명해줘</div>
+    <ul>
+      <li>AI가 원본을 다른 폴더에 받아 읽고, 바뀐 부분을 내 코드의 같은 역할을 하는 곳에 옮깁니다. 옮기기 전에 지금 상태를 저장해 두라고 하면 더 안전합니다(“옮기기 전에 지금 상태 커밋해줘”).</li>
+      <li>끝나면 AI가 옮긴 것, 내 코드에 없어서 옮기지 않은 것, 테스트 결과를 알려 줍니다.</li>
     </ul>
   </div>
 
@@ -699,14 +755,19 @@
         <li>Aside 앱은 켜 두세요. 꺼져 있으면 업무 때 자동으로 켜집니다.</li>
         <li>로그인이 풀려 있으면 Aside 창에 로그인 화면이 열립니다. 직접 로그인하면 답장 없이 이어 갑니다.</li>
         <li>메일 첨부 파일은 업무 동안 Aside 작업 폴더에 잠깐 복사했다가 끝나면 지웁니다.</li>
+      <li>네이버 카페 <b>공식 API</b>를 연결해 두었다면 카페 일반 글은 API로 올라가고, 장소(네이버 지도) 카드가 필요한 글만 Aside 직원이 올립니다.</li>
       </ul>
       <div class="warn"><b>주의</b>Aside 브라우저에 로그인된 계정은 Aside 에이전트가 쓸 수 있습니다. 업무에 필요한 계정만 로그인하세요. 결과가 불확실하면 AI Office가 다시 보내지 않고 멈추니, 사이트에서 직접 확인한 뒤 “미발송 확인, 재발송”처럼 답해 주세요.</div>
     </div>
   </div>
 </section>
 
+<div class="tab-next"><button type="button" class="btn-next" data-goto="dashboard">다음: 대시보드 →</button></div>
+</div>
+
+<div class="tab-panel" id="panel-dashboard" role="tabpanel" aria-labelledby="tab-dashboard" tabindex="-1">
 <section class="part" id="use">
-  <h2>8. 대시보드 사용법</h2>
+  <h2>9. 대시보드 사용법</h2>
   <p class="sub">처음에는 회사가 비어 있습니다. 부서와 직원부터 만듭니다.</p>
 
   <div class="card step">
@@ -748,7 +809,7 @@
         <li>일하는 중에도 비서실장이 결과를 보며 단계를 더하거나 고칩니다. 마지막에 검토해 부족한 부분은 담당에게 다시 맡깁니다.</li>
         <li>결과 파일 저장 위치를 정하고 싶으면 지시에 전체 경로를 적습니다(예: “~/Desktop/상담사 리스트 폴더에 저장해줘”). 적지 않으면 <b>보관함/최종산출물/날짜</b> 폴더에 모입니다.</li>
         <li>메일 발송·카페 글·댓글처럼 밖으로 나가는 일은 올리기 직전에 한 번 <b>“실행할까요?”</b>라고 묻습니다. 확인 없이 끝까지 하려면 지시에 <b>“끝까지 자동으로”</b>를 적어 주세요.</li>
-        <li>메일은 한 번에 <b>20통까지만</b> 보내고, 지시문에 적은 파일을 첨부할 수 있습니다. 자세한 방법은 <a href="#mail">9. 제휴 메일 보내기</a>를 보세요.</li>
+        <li>메일은 한 번에 <b>20통까지만</b> 보내고, 지시문에 적은 파일을 첨부할 수 있습니다. 자세한 방법은 <a href="#mail">10. 제휴 메일 보내기</a>를 보세요.</li>
         <li>입력창 옆의 <b>Codex / Claude</b> 선택은 <b>최종 검토</b>를 누가 할지 정합니다. 고르는 법은 <a href="#models">아래 6번</a>을 보세요.
           <span class="only-claude">Claude만 쓴다면 <b>Claude</b>로 바꿔 주세요.</span>
           <span class="only-codex">Codex만 쓴다면 그대로 <b>Codex</b>에 둡니다. Claude가 없으면 계획·실무·검토를 모두 Codex가 맡습니다.</span></li>
@@ -775,7 +836,7 @@
       <ul>
         <li><span class="btnlike">회사 설정</span>: 모든 직원이 지킬 회사 규칙, 결과 파일 저장 위치, <b>업무 예산</b>(업무 하나가 쓸 AI 사용 횟수·시간, 기본 40회·60분), 회사 구성 <b>내보내기(백업)·가져오기</b>. 업무가 예산의 80%를 쓰면 계속할지 묻습니다.</li>
         <li><span class="btnlike">예약</span>: “내일 오전 10시에 이 업무 하기”(한 번), “내일부터 3일간 매일 9시에”(정한 횟수), “매일 오전 11시에”(매일)처럼 정해진 시간에 자동으로 일을 시킵니다. 지시창에 그렇게 써도 예약됩니다. 컴퓨터와 서버가 켜져 있어야 실행됩니다.</li>
-        <li><span class="btnlike">계정 연결</span>: 메일 발송·카페 글 게시처럼 바깥 사이트에서 할 일이 있을 때 내 계정을 연결합니다. <b>Aside 직원은 계정 연결 대신 Aside 브라우저의 로그인을 씁니다(<a href="#aside">7장</a>).</b> 연결이 없으면 업무 중에 로그인 창이 저절로 열립니다. 창에서 로그인만 하면 답장 없이 이어 갑니다. 지시에 카페·블로그 주소가 있으면 일을 시작하기 전에 실제로 로그인돼 있는지 먼저 열어 보고, 풀렸으면 바로 로그인 창을 엽니다. 로그인 창은 30분 기다립니다. 미리 해 두려면 이 메뉴를 씁니다. <b>자동 게시는 네이버 등에서 계정 보호 조치를 부를 수 있으니 개인 계정 대신 업무 전용 계정을 권장합니다.</b> 보호 조치가 걸리면 자동 작업을 멈추며, 서비스 공식 화면에서 직접 해제해야 합니다. 글·댓글 사이 간격은 <span class="btnlike">회사 설정</span>에서 바꿀 수 있습니다(기본 30초). 네이버 카페 글은 네이버 계정의 <span class="btnlike">카페 공식 API 연결</span>을 해 두면 브라우저 대신 공식 API로 올라가 로그인 보호 조치를 줄일 수 있습니다(네이버 지도 링크가 든 장소 글은 장소 카드를 만들려고 브라우저로 올립니다)(보관함/계정.env에 <code>NAVER_API_CLIENT</code>·<code>NAVER_API_SECRET</code>·<code>NAVER_API_CALLBACK</code> 필요, 동의 화면에서 카페 가입·글쓰기 항목 체크). API가 실패하면 자동으로 바꾸지 않고 멈추며, “브라우저로 진행”이라고 답하면 브라우저로 올립니다. API로는 글 수정·삭제가 되지 않습니다. <b>처음 한 번은 <span class="btnlike">로그인 창 열기</span>에서 직접 로그인</b>해 주세요. 로그인을 마치면 창이 저절로 닫히고, 그다음부터는 AI가 알아서 로그인 상태를 씁니다. 로그인 창은 직접 닫지 마세요. 여러 사이트 계정을 미리 적어 두려면 작업 공간의 <b>보관함/계정.env</b> 파일을 씁니다(Git에 올라가지 않고 AI 직원은 읽지 못합니다).</li>
+        <li><span class="btnlike">계정 연결</span>: 메일 발송·카페 글 게시처럼 바깥 사이트에서 할 일이 있을 때 내 계정을 연결합니다. <b>Aside 직원은 계정 연결 대신 Aside 브라우저의 로그인을 씁니다(<a href="#aside">8장</a>).</b> 연결이 없으면 업무 중에 로그인 창이 저절로 열립니다. 창에서 로그인만 하면 답장 없이 이어 갑니다. 지시에 카페·블로그 주소가 있으면 일을 시작하기 전에 실제로 로그인돼 있는지 먼저 열어 보고, 풀렸으면 바로 로그인 창을 엽니다. 로그인 창은 30분 기다립니다. 미리 해 두려면 이 메뉴를 씁니다. <b>자동 게시는 네이버 등에서 계정 보호 조치를 부를 수 있으니 개인 계정 대신 업무 전용 계정을 권장합니다.</b> 보호 조치가 걸리면 자동 작업을 멈추며, 서비스 공식 화면에서 직접 해제해야 합니다. 글·댓글 사이 간격은 <span class="btnlike">회사 설정</span>에서 바꿀 수 있습니다(기본 30초). 네이버 카페 글은 네이버 계정의 <span class="btnlike">카페 공식 API 연결</span>을 해 두면 브라우저 대신 공식 API로 올라가 로그인 보호 조치를 줄일 수 있습니다(네이버 지도 링크가 든 장소 글은 장소 카드를 만들려고 브라우저로 올립니다)(보관함/계정.env에 <code>NAVER_API_CLIENT</code>·<code>NAVER_API_SECRET</code>·<code>NAVER_API_CALLBACK</code> 필요, 동의 화면에서 카페 가입·글쓰기 항목 체크). API가 실패하면 자동으로 바꾸지 않고 멈추며, “브라우저로 진행”이라고 답하면 브라우저로 올립니다. API로는 글 수정·삭제가 되지 않습니다. <b>처음 한 번은 <span class="btnlike">로그인 창 열기</span>에서 직접 로그인</b>해 주세요. 로그인을 마치면 창이 저절로 닫히고, 그다음부터는 AI가 알아서 로그인 상태를 씁니다. 로그인 창은 직접 닫지 마세요. 여러 사이트 계정을 미리 적어 두려면 작업 공간의 <b>보관함/계정.env</b> 파일을 씁니다(Git에 올라가지 않고 AI 직원은 읽지 못합니다).</li>
         <li><b>계속 지켜보는 업무</b>(예: “새 자료가 올라오면 계속 정리해줘”)는 업무 카드에 오늘 쓴 AI 사용량이 보이고, 평소보다 크게 많이 쓰면 <b>사용량 이상</b> 알림이 뜹니다.</li>
         <li><span class="btnlike">내역 초기화</span>: 끝난 업무·실행 기록을 정리합니다. 결과 파일과 계정은 지워지지 않습니다. 비서실장에게 <b>“작업 내역 지워줘”</b>라고 말해도 바로 처리합니다. 답변을 기다리는 업무는 남습니다. 그 대화에 <b>“이 업무 끝내줘”</b>라고 쓰면 끝나고 지울 수 있습니다.</li>
       </ul>
@@ -806,8 +867,12 @@
   </div>
 </section>
 
+<div class="tab-next"><button type="button" class="btn-next" data-goto="mail">다음: 제휴 메일 →</button></div>
+</div>
+
+<div class="tab-panel" id="panel-mail" role="tabpanel" aria-labelledby="tab-mail" tabindex="-1">
 <section class="part" id="mail">
-  <h2>9. 제휴 메일 보내기: 20통씩, 파일 첨부까지</h2>
+  <h2>10. 제휴 메일 보내기: 20통씩, 파일 첨부까지</h2>
   <p class="sub">조사한 업체·대학에 업체별로 따로 메일을 보내는 업무입니다. 대량 발송을 막으려고 한 번에 20통까지만 보내고, 지시문에 적은 파일을 모든 메일에 붙일 수 있습니다.</p>
 
   <div class="card">
@@ -932,8 +997,13 @@
   <div class="warn"><b>주의</b>영리 목적의 광고성 메일은 받는 사람의 사전 동의가 필요할 수 있습니다(정보통신망법). 웹사이트에서 이메일 주소를 자동으로 모으는 것도 금지돼 있습니다. 공개된 제휴 문의 창구로만 업체당 1통 보내고, 본문에 보내는 사람 정보와 수신 거부 방법을 넣도록 지시하세요. 법적 판단이 필요하면 전문가에게 확인하세요.</div>
 </section>
 
+<div class="tab-next"><button type="button" class="btn-next" data-goto="help">다음: 고쳐 쓰기·도움말 →</button></div>
+</div>
+
+<div class="tab-panel" id="panel-help" role="tabpanel" aria-labelledby="tab-help" tabindex="-1">
+<nav class="mini-toc" aria-label="고쳐 쓰기·도움말 목차"><ol><li><a href="#custom">11. 내 마음대로 고쳐 쓰기</a></li><li><a href="#safe">12. 꼭 지켜 주세요</a></li><li><a href="#help">13. 막혔을 때</a></li></ol></nav>
 <section class="part" id="custom">
-  <h2>10. 내 마음대로 고쳐 쓰기</h2>
+  <h2>11. 내 마음대로 고쳐 쓰기</h2>
   <p class="sub">AI Office는 쓰면서 내 일에 맞게 계속 바꿔 나가는 프로그램입니다.</p>
   <div class="grid2">
     <div class="card">
@@ -966,25 +1036,6 @@
       <li>고친 뒤 마음에 안 들면 <b>“방금 바꾼 거 되돌려줘”</b>라고 하면 됩니다.</li>
       <li>AI가 고친 뒤 스스로 검사(테스트)를 돌려 확인합니다.</li>
     </ul>
-  </div>
-</section>
-
-<section class="part" id="daily">
-  <h2>11. 매일 쓰는 순서</h2>
-  <div class="card">
-    <div class="flow">
-      <span class="box">터미널 열기</span><span class="arrow">→</span>
-      <span class="box"><code>cd ~/ai-office</code></span><span class="arrow">→</span>
-      <span class="box"><code class="only-claude">claude</code><code class="only-codex">codex</code> 입력</span><span class="arrow">→</span>
-      <span class="box">“서버 켜줘”</span><span class="arrow">→</span>
-      <span class="box">터미널 AI에게 업무 말하기</span><span class="arrow">→</span>
-      <span class="box">대시보드에서 진행·결과 보기</span>
-    </div>
-    <ul>
-      <li>다 쓰면 AI에게 <b>“서버 꺼줘”</b>라고 말합니다. 창만 닫으면 서버는 계속 켜져 있습니다.</li>
-      <li>새 버전이 나왔다고 들으면 이렇게 부탁합니다.</li>
-    </ul>
-    <div class="say">AI Office 최신 버전으로 업데이트해줘. 내가 고친 부분은 유지해줘</div>
   </div>
 </section>
 
@@ -1028,11 +1079,11 @@
     </details>
     <details>
       <summary>화면 위에 “Aside로 바꾸길 권장드립니다”라고 떠요</summary>
-      <p>예전에 메일·카페·사이트 일을 맡았던 직원이 아직 Aside 엔진이 아니라는 안내입니다. <a href="#aside">7장 3단계</a>대로 그 직원의 엔진을 Aside로 바꾸거나, 지금 방식을 유지하려면 알림을 닫으면 됩니다.</p>
+      <p>예전에 메일·카페·사이트 일을 맡았던 직원이 아직 Aside 엔진이 아니라는 안내입니다. <a href="#aside">8장 3단계</a>대로 그 직원의 엔진을 Aside로 바꾸거나, 지금 방식을 유지하려면 알림을 닫으면 됩니다.</p>
     </details>
     <details>
       <summary>Aside 직원이 일하는 모습이 안 보이거나 “Aside를 찾지 못했습니다”라고 나와요</summary>
-      <p>Dock(작업 표시줄)에서 Aside 창을 앞으로 띄웁니다. “찾지 못했습니다”는 Aside CLI가 설치되지 않은 경우입니다. <a href="#aside">7장 1단계</a>의 CLI 설치를 하거나 AI에게 <b>“Aside CLI 설치해줘”</b>라고 말합니다. CLI가 없으면 그 직원은 예전 방식(부서 엔진)으로 일합니다.</p>
+      <p>Dock(작업 표시줄)에서 Aside 창을 앞으로 띄웁니다. “찾지 못했습니다”는 Aside CLI가 설치되지 않은 경우입니다. <a href="#aside">8장 1단계</a>의 CLI 설치를 하거나 AI에게 <b>“Aside CLI 설치해줘”</b>라고 말합니다. CLI가 없으면 그 직원은 예전 방식(부서 엔진)으로 일합니다.</p>
     </details>
     <details>
       <summary>“Aside에서 로그인이 필요합니다”라고 나와요</summary>
@@ -1048,6 +1099,8 @@
     </details>
   </div>
 </section>
+
+</div>
 
 <footer>
   AI Office · 이 가이드는 프로그램 폴더의 <code>GUIDE.html</code>입니다. 더 자세한 설명은 <code>README.md</code>에 있습니다.
@@ -1095,6 +1148,47 @@
     var next = dark ? 'light' : 'dark';
     root.setAttribute('data-theme', next);
     store.set('aio-guide-theme', next);
+  });
+
+  // 탭: 장 링크(#install 등)를 누르면 그 장이 든 탭을 연다. 주소에 장이 없으면 마지막으로 본 탭을 연다
+  var tabs = [].slice.call(document.querySelectorAll('[role="tab"]'));
+  root.classList.add('js-tabs');
+  function showTab(id, focusPanel) {
+    tabs.forEach(function (t) {
+      var on = t.getAttribute('data-tab') === id;
+      t.setAttribute('aria-selected', String(on));
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById('panel-' + t.getAttribute('data-tab')).classList.toggle('active', on);
+    });
+    store.set('aio-guide-tab', id);
+    if (focusPanel) { var p = document.getElementById('panel-' + id); p.focus({ preventScroll: true }); window.scrollTo(0, 0); }
+  }
+  function openHash(scroll) {
+    var id = decodeURIComponent((location.hash || '').slice(1));
+    var el = id && document.getElementById(id);
+    var panel = el && (el.classList.contains('tab-panel') ? el : el.closest('.tab-panel'));
+    if (!panel) return false;
+    showTab(panel.id.replace('panel-', ''));
+    if (scroll) el.scrollIntoView();
+    return true;
+  }
+  if (!openHash(true)) {
+    var last = store.get('aio-guide-tab');
+    showTab(tabs.some(function (t) { return t.getAttribute('data-tab') === last; }) ? last : tabs[0].getAttribute('data-tab'));
+  }
+  window.addEventListener('hashchange', function () { openHash(true); });
+  tabs.forEach(function (t, i) {
+    t.addEventListener('click', function () { showTab(t.getAttribute('data-tab'), true); history.replaceState(null, '', location.pathname + location.search); });
+    t.addEventListener('keydown', function (e) {
+      var next = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : null;
+      if (next === null) return;
+      e.preventDefault();
+      var target = tabs[(next + tabs.length) % tabs.length];
+      showTab(target.getAttribute('data-tab')); target.focus();
+    });
+  });
+  document.querySelectorAll('[data-goto]').forEach(function (b) {
+    b.addEventListener('click', function () { var id = b.getAttribute('data-goto'); showTab(id, true); document.getElementById('tab-' + id).scrollIntoView({ block: 'nearest', inline: 'center' }); });
   });
 
   document.querySelectorAll('.copy').forEach(function (btn) {

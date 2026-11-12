@@ -9,7 +9,7 @@
 
 설계 정본은 [`docs/SPEC.md`](docs/SPEC.md)(현재 동작 기준)이고, 날짜별 결정 원문은 [`docs/DECISIONS.md`](docs/DECISIONS.md)에 있습니다.
 
-**처음 쓰는 분(비개발자)은 [`GUIDE.html`](GUIDE.html)을 브라우저로 열어 보세요.** IntelliJ 설치부터 서버 켜기, 업무 지시, 고쳐 쓰기까지 순서대로 안내합니다.
+**처음 쓰는 분(비개발자)은 [`GUIDE.html`](GUIDE.html)을 브라우저로 열어 보세요.** 시작하기·업무 시키기·Aside 브라우저·대시보드·제휴 메일·고쳐 쓰기/도움말 탭으로 나뉘어 있고, 설치부터 서버 켜기, 업무 지시, 고쳐 쓰기까지 순서대로 안내합니다.
 
 ## 처음 받는 사람
 
@@ -344,7 +344,7 @@ node scripts/codex-review.mjs --target outputs/<날짜>/<slug> [--reviewers fact
 
 프로필·인증 상태·선택 저장한 로그인 정보는 작업 공간 밖 `~/.config/ai-office/private/<작업공간별 식별자>/`에 보관합니다. POSIX에서는 디렉터리 0700·파일 0600 권한을 적용하고 모든 OS에서 Git 제외 규칙을 적용합니다. 암호화 키도 같은 사용자 로컬에 있으므로 OS 계정 자체가 보안 경계이며 별도 비밀 금고는 아닙니다. AI에는 비밀번호·쿠키 대신 업무에 한정한 브라우저 도구를 제공합니다. **연결 해제**하면 해당 프로필과 저장 정보를 삭제합니다.
 
-**Aside 직원(브라우저 업무 권장):** 메일 발송·카페/블로그 글·댓글·로그인한 사이트 조회는 [Aside](https://aside.com)(로그인한 사이트를 직접 다루는 AI 브라우저)를 엔진으로 쓰는 직원에게 맡기길 권장합니다. 대시보드 → 직원 편집 → **엔진: Aside**(직원 단위, 같은 부서의 다른 직원은 그대로). Aside 직원은 계정 연결 대신 대표가 Aside 브라우저에 로그인해 둔 계정과 Aside에 연결한 구독(Claude·ChatGPT)을 쓰고, 실행기가 결과 화면을 다시 읽어 검토한 원문이 정확히 한 번 올라갔는지 대조합니다(실행 전 확인·중복 방지·불확실 시 정지는 같음). 공개 웹 조사와 파일(엑셀·문서) 작성은 맡기지 않습니다. 카페 공식 API가 연결된 네이버 계정이 있으면 Aside 직원의 카페 글도 일반 글은 API로, 장소 카드 글만 Aside로 올립니다. Aside가 없으면 부서 엔진과 기존 브라우저(Playwright)로 실행합니다. 설치: 맥 `brew install --cask aside` + `curl -fsSL https://releases.aside.com/install.sh | bash`(CLI), Windows는 https://aside.com/download 와 앱의 Settings → Developer. 첫 세팅(브라우저 데이터 가져오기는 건너뛰기, 구독 선택, 기본 브라우저는 Chrome 유지, 업무 사이트 로그인)은 `GUIDE.html` 7장. `npm run doctor`·대시보드 상단·서버 켜기 때 브라우저 업무를 맡았던 직원의 Aside 변경을 권합니다. 자세한 동작은 `docs/SPEC.md` "Aside 직원".
+**Aside 직원(브라우저 업무 권장):** 메일 발송·카페/블로그 글·댓글·로그인한 사이트 조회는 [Aside](https://aside.com)(로그인한 사이트를 직접 다루는 AI 브라우저)를 엔진으로 쓰는 직원에게 맡기길 권장합니다. 대시보드 → 직원 편집 → **엔진: Aside**(직원 단위, 같은 부서의 다른 직원은 그대로). Aside 직원은 계정 연결 대신 대표가 Aside 브라우저에 로그인해 둔 계정과 Aside에 연결한 구독(Claude·ChatGPT)을 쓰고, 실행기가 결과 화면을 다시 읽어 검토한 원문이 정확히 한 번 올라갔는지 대조합니다(실행 전 확인·중복 방지·불확실 시 정지는 같음). 공개 웹 조사와 파일(엑셀·문서) 작성은 맡기지 않습니다. 카페 공식 API가 연결된 네이버 계정이 있으면 Aside 직원의 카페 글도 일반 글은 API로, 장소 카드 글만 Aside로 올립니다. Aside가 없으면 부서 엔진과 기존 브라우저(Playwright)로 실행합니다. 설치: 맥 `brew install --cask aside` + `curl -fsSL https://releases.aside.com/install.sh | bash`(CLI), Windows는 https://aside.com/download 와 앱의 Settings → Developer. 첫 세팅(브라우저 데이터 가져오기는 건너뛰기, 구독 선택, 기본 브라우저는 Chrome 유지, 업무 사이트 로그인)은 `GUIDE.html` 8장(Aside 탭). AI Office를 많이 고쳐 써서 업데이트를 통째로 받으면 충돌이 나는 경우, Aside 기능만 옮기는 AI용 안내는 `docs/ASIDE_PORTING.md`. `npm run doctor`·대시보드 상단·서버 켜기 때 브라우저 업무를 맡았던 직원의 Aside 변경을 권합니다. 자세한 동작은 `docs/SPEC.md` "Aside 직원".
 
 **네이버 카페 공식 API:** `보관함/계정.env`에 `NAVER_API_CLIENT`·`NAVER_API_SECRET`·`NAVER_API_CALLBACK`(예: `http://localhost:4777/oauth/naver/callback`)을 넣고, 계정 연결의 네이버 계정에서 **카페 공식 API 연결**을 눌러 동의하면(카페 가입·글쓰기 항목 체크) 그 계정의 카페 글은 브라우저 대신 공식 API로 올립니다. 로그인 보호 조치를 줄이기 위한 것이며 블로그·댓글은 브라우저 그대로입니다. 네이버 지도·플레이스 링크가 든 장소 글은 장소 카드가 브라우저 편집기에서만 만들어져서 브라우저로 올립니다. 유튜브 링크는 영상 재생기로 붙고, 전체 공개로 올립니다. API가 실패하면 자동으로 브라우저로 바꾸지 않고 멈춥니다. 요청이 거부된 경우에만 "브라우저로 진행"이라고 답하면 브라우저로 올리고, 인증 만료·계정 제한은 그대로 멈춥니다. 개발 중인 네이버 앱은 개발자센터 멤버관리에 등록한 아이디(테스터 최대 20개)만 연결할 수 있습니다. API로는 글 수정·삭제를 할 수 없습니다.
 

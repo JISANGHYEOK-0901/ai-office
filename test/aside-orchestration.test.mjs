@@ -42,7 +42,7 @@ function fixture(t, { plan: planOf, staff, publish, outbound: extraOutbound = {}
     child.stdin.on('data', (d) => { input += d; });
     child.stdin.on('finish', () => setImmediate(() => {
       const schemaArg = args.includes('--json-schema') ? JSON.parse(args[args.indexOf('--json-schema') + 1]) : null;
-      const schema = schemaArg ? (schemaArg.properties.plan ? 'plan' : schemaArg.properties.revisedPlan ? 'progress' : schemaArg.properties.verdict ? 'review' : 'other') : (args[args.indexOf('--output-schema') + 1] || '').replace(/.*\/|\.json$/g, '');
+      const schema = schemaArg ? (schemaArg.properties.plan ? 'plan' : schemaArg.properties.revisedPlan ? 'progress' : schemaArg.properties.verdict ? 'review' : 'other') : (args[args.indexOf('--output-schema') + 1] || '').replace(/.*[\\/]|\.json$/g, ''); // Windows 경로(\)도 파일 이름만 남긴다
       const call = { kind: schema || 'other', args, input };
       calls.push(call);
       let value;

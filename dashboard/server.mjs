@@ -37,12 +37,15 @@ import { historyClearIntent, taskCloseIntent } from '../lib/pause.mjs';
 import { quickCandidates } from '../lib/quick.mjs';
 import { createJudge } from '../lib/ai-judge.mjs';
 import { ensureVault } from '../lib/vault.mjs';
+import { UPLOAD_MAX_BYTES, saveUpload } from '../lib/uploads.mjs';
 import { buildState } from './state.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BODY_LIMIT = 1024 * 1024;
 // 회사 구성 가져오기는 내보낸 파일 전체(지침 포함)를 받으므로 한도를 따로 둔다. 내보내기에는 크기 제한이 없어 1MB로는 큰 회사가 왕복되지 않는다
 const IMPORT_BODY_LIMIT = 8 * 1024 * 1024;
+// 지시창 파일 올리기는 base64(4/3배)로 받는다
+const UPLOAD_BODY_LIMIT = Math.ceil(UPLOAD_MAX_BYTES * 4 / 3) + 64 * 1024;
 const LOG_TAIL_BYTES = 64 * 1024;
 const BROADCAST_DEBOUNCE_MS = 300;
 const PING_MS = 15_000;
@@ -1425,8 +1428,16 @@ export async function startServer({
     if (method !== 'POST' && method !== 'PUT' && method !== 'DELETE') throw new HttpError(405, '허용되지 않은 메서드입니다.');
     checkMutation(req);
     const isImport = method === 'POST' && parts.length === 3 && parts[1] === 'org' && parts[2] === 'import';
-    const body = await readBody(req, isImport ? IMPORT_BODY_LIMIT : BODY_LIMIT);
+    const isUpload = method === 'POST' && parts.length === 2 && parts[1] === 'uploads';
+    const body = await readBody(req, isImport ? IMPORT_BODY_LIMIT : isUpload ? UPLOAD_BODY_LIMIT : BODY_LIMIT);
     const [, resource, id, action] = parts;
+
+    // 지시창에서 올린 파일: 작업 공간 보관함/업로드/<날짜>/에 저장하고 지시문에 붙일 경로를 돌려준다
+    if (isUpload) {
+      if (demo) throw new HttpError(409, '데모 모드에서는 파일을 올릴 수 없습니다.');
+      try { return sendJson(res, 201, saveUpload(root, body)); }
+      catch (error) { if (error.status) throw new HttpError(error.status, error.message); throw error; }
+    }
 
     if (resource === 'history' && method === 'DELETE' && parts.length === 2) return sendJson(res, 200, clearHistory());
 

@@ -186,6 +186,9 @@ test/                     node:test
 - `agentId`가 있으면 400("직원에게 직접 지시할 수 없습니다. 비서실장에게 업무를 지시해 주세요.")이고 업무를 만들지 않는다.
 - 서버 처리 순서: 의도 판별 → 일시정지·재개면 처리 후 종료 → 예약 지시(1회·N회·매일)면 예약만 저장 → 지시 경로 검사 → `runner.start`.
 - runner는 업무(`<날짜>/run-<id>`)를 등록하고, 요청 끝에 `[저장 위치] …` 안내를 붙여 오케스트레이터(`dashboard/orchestrator.mjs`)로 실행한다. 지속 감시면 `dashboard/continuous.mjs`로 실행한다.
+- 지시창 파일 올리기: 지시창의 `📎 파일` 버튼이나 끌어다 놓기로 파일을 고르면(한 번에 10개, 파일마다 25MB 이하) 지시할 때 먼저 `POST /api/uploads {name, data(base64)}`로 올린다(`lib/uploads.mjs`).
+  - 서버는 작업 공간 `보관함/업로드/<한국 날짜>/<이름>`에 저장하고 `{path, name, size}`를 돌려준다. 같은 이름이 있으면 ` (2)`를 붙여 덮어쓰지 않는다. 이름의 경로·제어 문자는 빼고, 숨김·계정 파일과 허용 목록(문서·한글·그림: docx doc xlsx xls csv pptx ppt pdf txt md hwp hwpx png jpg jpeg gif webp) 밖의 형식은 막는다. 토큰·출처 검사는 다른 쓰기 요청과 같고, 본문 한도만 base64 크기에 맞춰 따로 둔다. 데모 모드는 409.
+  - 화면은 올린 경로를 지시문 끝에 `[업로드한 파일]` 목록으로 붙여 `POST /api/runs`로 보낸다("첨부"라고 쓰지 않는다. 메일 첨부로 읽히지 않게). 지시가 실패하면 고른 파일은 남고, 다시 보낼 때 이미 올린 파일은 다시 올리지 않는다. 파일만 고르고 할 일을 비우면 보내지 않고 한 줄 적으라고 안내한다.
 - 실제 CLI 동시 실행은 전역 4개다. 넘치면 대기열에 넣는다. 오케스트레이션 자체는 이 수에 넣지 않는다.
 - 중지: 오케스트레이션 전체와 진행 중인 모든 자식 프로세스를 끝낸다. 프로세스는 SIGTERM, 5초 뒤 SIGKILL.
 
@@ -222,6 +225,7 @@ test/                     node:test
 - `plan.deliverables`: 대표에게 전달할 단계 id(또는 산출물 경로). 빈 배열은 첨부 없음. 필드가 없으면 후속 의존이 없는 단계 산출물이다.
 - 계획을 저장하면 plan.json·brief.md를 쓰고 `plan.set` 이벤트를 남긴다.
 - 질문이 꼭 필요하면 `question`에 묶고 plan은 null이다(`phase: plan` 질문).
+- 계획용 문서 미리보기: 대표 원문에 작업 공간 안의 Word·Excel·PowerPoint 경로(`보관함/…`, `outputs/…`, `inputs/…`. 공백·괄호가 든 이름 포함, 지시창에서 올린 파일 포함)가 있으면 앞부분 글자(문서마다 1500자, 최대 3개)를 계획 프롬프트에 넣는다(`documentPreview`). 비서실장의 Read는 이 형식을 열지 못해 담당·단계·전달 파일 이름(문서 속 이름 등)을 정할 근거가 없기 때문이다. 연락처 라벨(휴대폰·전화번호·이메일·주소·계좌) 다음 칸과 메일·7자리 넘는 숫자는 가린다. 비밀 위치·숨김 폴더 파일은 읽지 않는다(`blockedReason`). 문서 전체는 담당 직원이 읽는다.
 
 ### 업무 시작 전 계정 확인
 
@@ -351,6 +355,9 @@ test/                     node:test
   - 저장에 실패하면 `phase: deliver` 질문으로 멈춘다.
 - 그 뒤 `flow.review(pass)` → task status `done`(`completedAt`) → `flow.deliver`. 승인 단계는 없다.
 - 중간 자료는 outputs에 남는다.
+- 결과 파일 내려받기: 폴더를 찾지 않고 화면에서 바로 받는다(`GET /api/outputs/file?path=…&download=1`, 토큰).
+  - 비서실장 대화 창: 대화의 마지막 업무가 `done`이고 진행 중인 실행이 없으면, 마지막 답변 아래 "결과 파일" 칸에 최종산출물(보고서 포함)을 파일마다 `내려받기`, 여러 개면 `모두 내려받기`로 보여 준다. 업무가 끝나기 전에 불러 둔 목록이면 한 번 다시 불러온다.
+  - 완료 창과 산출물 탭의 최종 전달 목록: 파일마다 미리보기 버튼 옆에 `내려받기`를 둔다(Word·PowerPoint처럼 미리보기가 없는 형식도 한 번에 받음).
 - 대표 피드백: 완료된 업무의 대화에 답장하면 같은 체크포인트로 다시 계획한다. `rerunStages`에 고칠 단계만 넣고 후속 단계는 프로그램이 다시 실행한다. 고칠 단계가 비면 전체를 다시 한다.
 
 ### 업무 예산
@@ -731,6 +738,7 @@ node scripts/codex-review.mjs --target outputs/<날짜>/<slug> [--reviewers <id�
 | GET/PUT /api/company | 회사 규칙·설정·작업 공간·최종산출물 위치(토큰) |
 | PUT /api/settings | mode·chief·budget 저장 |
 | POST /api/runs | 비서실장 지시. `agentId`가 있으면 400 |
+| POST /api/uploads | 지시창 파일 올리기 `{name, data(base64)}` → `보관함/업로드/<날짜>/`, 201 `{path, name, size}`(25MB, 허용 형식 밖 415, 너무 큼 413) |
 | POST /api/runs/:id/stop, /reply | 중지, 이어서 답하기 |
 | GET /api/runs/:id/log, /result | 로그 마지막 64KB, 답변 전문(`X-Result-Source`, `X-Session-Id`)(토큰) |
 | POST /api/tasks/:id/seen | 완료 결과 읽음 기록 |

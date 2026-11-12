@@ -281,3 +281,20 @@ test('회사 공통 규칙·부서 지침·최종 지침 미리보기·설명 �
   await api('PUT', '/api/company', { rules: '' });
   await api('DELETE', '/api/departments/layer?cascade=1');
 });
+
+test('POST /api/uploads: 토큰·출처를 확인하고 작업 공간 보관함/업로드/<날짜>/에 저장한다(일반 요청 한도보다 큰 파일 포함)', { skip }, async () => {
+  const small = Buffer.from('상담사 원문').toString('base64');
+  assert.equal((await request('POST', '/api/uploads', { body: { name: 'a.docx', data: small }, headers: { 'Content-Type': 'application/json' } })).status, 403, '토큰 없으면 거부');
+  assert.equal((await request('POST', '/api/uploads', { body: { name: 'a.docx', data: small }, headers: { ...authed(), Origin: 'http://evil.example' } })).status, 403, '다른 출처면 거부');
+  const saved = await api('POST', '/api/uploads', { name: '상담사 프로필.docx', data: small });
+  assert.equal(saved.status, 201);
+  assert.match(saved.json.path, /^보관함\/업로드\/\d{4}-\d{2}-\d{2}\/상담사 프로필\.docx$/);
+  assert.equal(readFileSync(join(root, saved.json.path), 'utf8'), '상담사 원문');
+  // 1MB 일반 요청 한도보다 큰 파일도 올린다
+  const big = await api('POST', '/api/uploads', { name: '큰 파일.pdf', data: Buffer.alloc(3 * 1024 * 1024, 7).toString('base64') });
+  assert.equal(big.status, 201);
+  assert.equal(big.json.size, 3 * 1024 * 1024);
+  const bad = await api('POST', '/api/uploads', { name: 'tool.exe', data: small });
+  assert.equal(bad.status, 415);
+  assert.match(bad.json.error, /올릴 수 있는 파일/);
+});

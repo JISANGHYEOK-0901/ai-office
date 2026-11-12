@@ -962,7 +962,7 @@ function applyDemoLock() {
     if (WRITE_ACTS.has(b.dataset.act) && !b.disabled) { b.disabled = true; b.title = DEMO_HINT; }
   }
   for (const el of document.querySelectorAll('[data-cap-input], [data-handoff-add]')) if (!el.disabled) { el.disabled = true; el.title = DEMO_HINT; }
-  for (const id of ['addDeptBtn', 'chiefSubmit', 'chiefInput', 'chiefEngine', 'chiefModel', 'chiefEffort', 'threadSend', 'threadPrompt', 'threadModel', 'threadEffort']) {
+  for (const id of ['addDeptBtn', 'chiefSubmit', 'chiefInput', 'chiefAttach', 'chiefEngine', 'chiefModel', 'chiefEffort', 'threadSend', 'threadPrompt', 'threadModel', 'threadEffort']) {
     const el = $(id);
     if (el && !el.disabled) { el.disabled = true; el.title = DEMO_HINT; }
   }
@@ -2133,27 +2133,92 @@ function setChiefSending(sending) {
   button.textContent = sending ? '전달 중…' : '지시하기';
   button.setAttribute('aria-busy', String(sending));
   $('chiefInput').readOnly = sending;
+  $('chiefAttach').disabled = sending || S.demo;
   $('chiefSendStatus').textContent = sending ? '비서실장에게 지시를 전달하고 있습니다. 내용을 확인하는 데 최대 15초쯤 걸립니다.' : '';
+  for (const remove of document.querySelectorAll('.chief-file-remove')) remove.disabled = sending;
   if (sending) button.disabled = true;
   else { renderChiefSettings(); if (movedFocus) $('chiefInput').focus(); }
 }
+
+// ───── 지시창 파일 올리기 ─────
+// 고른 파일은 지시할 때 서버(작업 공간 보관함/업로드/<날짜>/)에 올리고, 저장 경로를 지시문 끝에 붙인다.
+// 지시가 실패해 다시 보낼 때 같은 파일을 또 올리지 않도록 올린 경로를 기억한다
+const UPLOAD_LIMIT_MB = 25, UPLOAD_MAX = 10;
+const UPLOAD_ACCEPT = /\.(?:docx|doc|xlsx|xls|csv|pptx|ppt|pdf|txt|md|hwp|hwpx|png|jpe?g|gif|webp)$/i;
+let chiefFiles = [];
+const uploadedPaths = new WeakMap();
+function addChiefFiles(list) {
+  const rejected = [];
+  for (const file of list) {
+    if (!UPLOAD_ACCEPT.test(file.name)) rejected.push(`${file.name}(올릴 수 없는 형식)`);
+    else if (file.size > UPLOAD_LIMIT_MB * 1024 * 1024) rejected.push(`${file.name}(${UPLOAD_LIMIT_MB}MB 초과)`);
+    else if (chiefFiles.some((f) => f.name === file.name && f.size === file.size)) continue;
+    else if (chiefFiles.length >= UPLOAD_MAX) rejected.push(`${file.name}(한 번에 ${UPLOAD_MAX}개까지)`);
+    else chiefFiles.push(file);
+  }
+  if (rejected.length) toast(`올리지 못한 파일: ${rejected.join(', ')}`, { type: 'error' });
+  renderChiefFiles();
+}
+function renderChiefFiles() {
+  const list = $('chiefFileList');
+  list.replaceChildren(...chiefFiles.map((file) => {
+    const item = el('li', 'chief-file');
+    item.append(el('span', 'chief-file-name', `📄 ${file.name}`));
+    const remove = el('button', 'chief-file-remove', '✕');
+    remove.type = 'button';
+    remove.setAttribute('aria-label', `${file.name} 빼기`);
+    remove.disabled = chiefSending;
+    remove.addEventListener('click', () => { chiefFiles = chiefFiles.filter((f) => f !== file); renderChiefFiles(); $('chiefInput').focus(); });
+    item.append(remove);
+    return item;
+  }));
+  list.hidden = !chiefFiles.length;
+}
+const fileBase64 = (file) => new Promise((resolveRead, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolveRead(String(reader.result).split(',')[1] || '');
+  reader.onerror = () => reject(new Error(`${file.name} 파일을 읽지 못했어요.`));
+  reader.readAsDataURL(file);
+});
+async function uploadChiefFiles() {
+  const paths = [];
+  for (const [i, file] of chiefFiles.entries()) {
+    if (!uploadedPaths.has(file)) {
+      $('chiefSendStatus').textContent = `파일 올리는 중 ${i + 1}/${chiefFiles.length}: ${file.name}`;
+      const saved = await api('POST', '/api/uploads', { name: file.name, data: await fileBase64(file) });
+      uploadedPaths.set(file, saved.path);
+    }
+    paths.push(uploadedPaths.get(file));
+  }
+  return paths;
+}
+// 지시문 끝에 올린 파일 경로를 붙인다. "첨부"라고 쓰면 메일 첨부로 읽힐 수 있어 다른 머리말을 쓴다
+export const withUploads = (prompt, paths) => (paths.length ? `${prompt}\n\n[업로드한 파일]\n${paths.map((p) => `- ${p}`).join('\n')}` : prompt);
 
 async function submitChief(ev) {
   ev.preventDefault();
   if (chiefSending) return;
   const input = $('chiefInput');
   const prompt = input.value.trim();
-  if (!prompt) { input.focus(); return; }
-  // 승인 요청 없이 완료 결과를 확인한다.
-  const act = chiefInputAction(prompt, S.tasks);
+  if (!prompt) {
+    input.focus();
+    if (chiefFiles.length) toast('파일로 무엇을 할지 한 줄로 적어 주세요. 예: 프로필 작성해 줘');
+    return;
+  }
+  // 승인 요청 없이 완료 결과를 확인한다(파일을 올리는 지시는 새 업무다).
+  const act = chiefFiles.length ? { action: 'send' } : chiefInputAction(prompt, S.tasks);
   if (act.action === 'show-result') { input.value = ''; openCompletion(act.taskId); return; }
   if (act.action === 'no-approval') { input.value = ''; toast('비서실장 검토가 끝나면 승인 없이 자동으로 완료됩니다.'); return; }
   setChiefSending(true);
   try {
     await chiefSaveQueue;
+    const request = withUploads(prompt, chiefFiles.length ? await uploadChiefFiles() : []);
+    if (chiefFiles.length) $('chiefSendStatus').textContent = '비서실장에게 지시를 전달하고 있습니다. 내용을 확인하는 데 최대 15초쯤 걸립니다.';
     const model = $('chiefModel').value;
-    const result = await api('POST', '/api/runs', { prompt, engine: $('chiefEngine').value, model, effort: $('chiefEffort').value });
+    const result = await api('POST', '/api/runs', { prompt: request, engine: $('chiefEngine').value, model, effort: $('chiefEffort').value });
     input.value = '';
+    chiefFiles = [];
+    renderChiefFiles();
     // 데스크톱에서는 상세 패널이 실행 목록 자리를 가리므로 닫아서 시작된 실행을 바로 보이게 한다
     if (ui.drawer) closeDrawer({ restoreFocus: false });
     toast(chiefResultMessage(result));
@@ -2279,8 +2344,11 @@ function renderThread() {
   $('threadTitle').textContent = latest ? `대화 · ${who}` : '대화';
   $('threadSub').textContent = runs.length ? `${runs.length}번 주고받음` : '';
 
+  // 업무가 끝났으면 대화 아래에 결과 파일(최종산출물)을 바로 내려받게 보여 준다
+  const files = busy ? null : threadFinalFiles(threadTaskId(runs));
   // 바뀐 것이 있을 때만 다시 그린다(입력 중 깜빡임·스크롤 튐 방지)
-  const sig = JSON.stringify(runs.map((r) => [r.id, r.status, r.needsReply, resultCache.get(r.id)?.text?.length ?? -1, resultCache.get(r.id)?.loading]));
+  const sig = JSON.stringify([runs.map((r) => [r.id, r.status, r.needsReply, resultCache.get(r.id)?.text?.length ?? -1, resultCache.get(r.id)?.loading]),
+    files && [Boolean(files.loading), files.error || '', files.data?.final?.updated || '', files.data?.final?.files?.length ?? -1]]);
   if (sig !== threadSig) {
     threadSig = sig;
     const list = $('threadList');
@@ -2308,6 +2376,7 @@ function renderThread() {
       }
       list.append(ask, ans);
     }
+    if (files) list.append(threadFilesNode(files));
     const body = list.parentElement;
     body.scrollTop = body.scrollHeight;
   }
@@ -2733,6 +2802,7 @@ async function loadTaskFiles(taskId, force = false) {
   o.sig = '';
   if (ui.view === 'outputs') renderOutputs();
   if (ui.completion?.taskId === taskId) { ui.completion.sig = ''; renderCompletion(); }
+  if (ui.thread) renderThread();
   return entry;
 }
 
@@ -2885,7 +2955,7 @@ function renderOutDetail() {
     const report = delivered.files.find((f) => f.name.startsWith('비서실장-보고') && f.name.endsWith('.md'));
     const reportBox = el('div', 'doc-box');
     if (report) { section.append(reportBox); renderFileInto(reportBox, report, { compact: true }); }
-    section.append(fileButtons(delivered.files.filter((f) => f !== report), preview));
+    section.append(fileButtons(delivered.files.filter((f) => f !== report), preview, undefined, { download: true }));
     const intermediate = el('details', 'od-sec');
     intermediate.append(el('summary', 'sub-title', '중간 작업·계획·대화 보기'));
     while (acts.nextSibling && acts.nextSibling !== preview) intermediate.append(acts.nextSibling);
@@ -2896,7 +2966,8 @@ function renderOutDetail() {
   box.replaceChildren(frag);
 }
 
-function fileButtons(list, preview, badge) {
+// download: 미리보기를 거치지 않고 바로 내려받는 버튼을 옆에 둔다(최종 전달 파일·완료 창)
+function fileButtons(list, preview, badge, { download = false } = {}) {
   const ul = el('ul', 'file-list');
   for (const f of list) {
     const li = el('li');
@@ -2913,16 +2984,75 @@ function fileButtons(list, preview, badge) {
       renderFileInto(preview, f);
       preview.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
+    const extra = [];
     if (fileKind(f.name) === 'html') {
-      const actions = el('div', 'file-actions');
       const open = el('button', 'btn btn-sm', '새 탭에서 열기');
       open.type = 'button'; open.setAttribute('aria-label', `${f.name} 새 탭에서 열기`);
       open.addEventListener('click', () => openHtmlTab(f));
-      actions.append(b, open); li.append(actions);
+      extra.push(open);
+    }
+    if (download) extra.push(downloadButton(f));
+    if (extra.length) {
+      const actions = el('div', 'file-actions');
+      actions.append(b, ...extra); li.append(actions);
     } else li.append(b);
     ul.append(li);
   }
   return ul;
+}
+
+function downloadButton(file) {
+  const button = el('button', 'btn btn-sm', '내려받기');
+  button.type = 'button';
+  button.setAttribute('aria-label', `${file.name} 내려받기`);
+  button.addEventListener('click', () => downloadFile(file));
+  return button;
+}
+
+// 비서실장 대화 창 아래 결과 파일: 업무가 끝나 최종산출물이 있으면 폴더를 찾지 않고 바로 내려받게 한다
+const threadFilesRequested = new Set();
+export function threadTaskId(runs) {
+  return (runs || []).map((r) => r.task).filter(Boolean).at(-1) || null;
+}
+function threadFinalFiles(taskId) {
+  if (!taskId || S.tasks.find((t) => t.id === taskId)?.status !== 'done') return null;
+  const entry = ui.out.files.get(taskId);
+  // 업무가 끝나기 전에 불러 둔 목록이면 최종산출물이 없으니 한 번 다시 불러온다
+  if (!threadFilesRequested.has(taskId) && !entry?.loading && !entry?.data?.final) {
+    threadFilesRequested.add(taskId);
+    loadTaskFiles(taskId, true);
+  }
+  return ui.out.files.get(taskId) || { loading: true };
+}
+function threadFilesNode(entry) {
+  const box = el('li', 'msg msg-files');
+  const head = el('div', 'msg-head');
+  head.append(el('b', '', '📎 결과 파일'));
+  box.append(head);
+  const files = entry?.data?.final?.files || [];
+  if (entry?.loading) { box.append(el('p', 'muted-text', '결과 파일을 불러오는 중…')); return box; }
+  if (entry?.error) { box.append(el('p', 'help', `결과 파일을 불러오지 못했어요: ${entry.error}`)); return box; }
+  if (!files.length) { box.append(el('p', 'help', '전달된 결과 파일이 없어요.')); return box; }
+  const ul = el('ul', 'dl-list');
+  for (const file of files) {
+    const item = el('li', 'dl-item');
+    item.append(el('span', `fk fk-${fileKind(file.name)}`, (/\.([a-z0-9]+)$/i.exec(file.name)?.[1] || 'file').toUpperCase().slice(0, 4)), el('span', 'dl-name', file.name));
+    if (Number.isFinite(file.size)) item.append(el('small', 'dl-size', formatSize(file.size)));
+    item.append(downloadButton(file));
+    ul.append(item);
+  }
+  box.append(ul);
+  if (files.length > 1) {
+    const all = el('button', 'btn btn-sm btn-primary', `모두 내려받기 (${files.length}개)`);
+    all.type = 'button';
+    all.addEventListener('click', async () => {
+      all.disabled = true;
+      for (const file of files) { await downloadFile(file); await new Promise((done) => setTimeout(done, 300)); }
+      all.disabled = false;
+    });
+    box.append(all);
+  }
+  return box;
 }
 
 function formatSize(n) {
@@ -3217,7 +3347,7 @@ function renderCompletion() {
   else report.replaceChildren(el('p', 'help', files?.error || '완료 보고서를 찾을 수 없습니다.'));
   const deliverables = (final?.files || []).filter((file) => file !== reportFile);
   const list = $('completionFiles');
-  list.replaceChildren(...(deliverables.length ? [...fileButtons(deliverables, preview).children]
+  list.replaceChildren(...(deliverables.length ? [...fileButtons(deliverables, preview, undefined, { download: true }).children]
     : [el('li', 'help', files?.loading ? '불러오는 중…' : final ? '별도 최종 첨부 파일은 없습니다.' : '최종 산출물을 확인할 수 없습니다.')]));
   $('completionFolder').disabled = !final;
   state.ready = Boolean(final && reportFile && !files?.error);
@@ -3505,6 +3635,20 @@ function init() {
     if (d.open && !orgmapCache) loadOrgmap(d);
   }, true);
   $('chiefForm').addEventListener('submit', submitChief);
+  $('chiefAttach').addEventListener('click', () => $('chiefFiles').click());
+  $('chiefFiles').addEventListener('change', (ev) => { addChiefFiles([...ev.target.files]); ev.target.value = ''; $('chiefInput').focus(); });
+  // 지시창에 파일을 끌어다 놓아도 올릴 목록에 넣는다
+  const dropZone = $('chiefForm');
+  const hasFiles = (ev) => [...(ev.dataTransfer?.types || [])].includes('Files');
+  dropZone.addEventListener('dragover', (ev) => { if (!hasFiles(ev) || S.demo) return; ev.preventDefault(); dropZone.classList.add('is-drop'); });
+  dropZone.addEventListener('dragleave', (ev) => { if (!dropZone.contains(ev.relatedTarget)) dropZone.classList.remove('is-drop'); });
+  dropZone.addEventListener('drop', (ev) => {
+    dropZone.classList.remove('is-drop');
+    if (!hasFiles(ev) || S.demo || chiefSending) return;
+    ev.preventDefault();
+    addChiefFiles([...ev.dataTransfer.files]);
+    $('chiefInput').focus();
+  });
   for (const id of ['chiefEngine', 'chiefModel', 'chiefEffort']) $(id).addEventListener('change', saveChiefSelection);
   $('threadModel').addEventListener('change', () => {
     const latest = threadOf(S.runs, ui.thread?.rootId).at(-1);

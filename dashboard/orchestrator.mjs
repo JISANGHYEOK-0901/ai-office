@@ -19,7 +19,7 @@ import { attachmentQuestion, attachmentRef, blockedReason, pickChoices, resolveA
 import { collectFinalOutputs } from '../lib/final-outputs.mjs';
 import { checkSources, sourceProblemReason } from '../lib/source-check.mjs';
 import { QUICK_EDIT_GUIDE, collectGuide, quickEditPlan, quickGuide, quickPlan, quickReport } from '../lib/quick.mjs';
-import { documentDiff, officeGuide, officeKind, officeNotices } from '../lib/office-files.mjs';
+import { documentDiff, documentPreview, officeGuide, officeKind, officeNotices } from '../lib/office-files.mjs';
 import { findSoffice } from '../lib/doc-preview.mjs';
 import { judgeAnswer } from '../lib/intent.mjs';
 import { CONNECTION_PROVIDERS, allowedServiceUrl, serviceProvider } from '../lib/connections.mjs';
@@ -226,7 +226,22 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
         ...(Array.isArray(publication.files) ? { files: publication.files.map(ref) } : {}) })) } : {}),
       ...(candidate.deliverables ? { deliverables: candidate.deliverables.map(ref) } : {}) };
   };
+  // 지시에 적힌 작업 공간 안의 Word·Excel·PowerPoint(지시창에서 올린 파일 포함). 비서실장의 Read는 이 파일들을 열지 못하므로
+  // 앞부분을 계획 프롬프트에 넣어 담당·단계·전달 파일 이름(예: 문서 속 이름)을 정할 수 있게 한다. 비밀 위치·숨김 파일은 읽지 않는다
+  const requestDocuments = () => {
+    const found = [];
+    for (const match of String(state.originalRequest).matchAll(/(?:보관함|outputs|inputs)[\\/][^\n"'<>|*?]*?\.(?:docx|xlsx|pptx)/gi)) {
+      const abs = resolve(root, match[0].trim());
+      if (found.some((f) => f.abs === abs) || !insideRel(root, abs) || !existsSync(abs) || blockedReason(abs, { root, home })) continue;
+      found.push({ rel: match[0].trim(), abs });
+      if (found.length >= 3) break;
+    }
+    return found.flatMap(({ rel, abs }) => {
+      try { const text = documentPreview(readFileSync(abs), abs); return text ? [`[${rel}]\n${text}`] : []; } catch { return []; }
+    });
+  };
   const planning = async (extra = '') => {
+    const documents = requestDocuments();
     const text = await execute({ phase: 'plan', prompt: [
       '당신은 비서실장입니다. 직접 실무·파일 작성·도구 위임을 하지 말고 계획 JSON만 응답하세요.',
       '질문이 꼭 필요하면 question에 한 번에 묶고 plan은 null. 그 외에는 question은 빈 문자열입니다.',
@@ -261,7 +276,9 @@ export async function orchestrate({ root, run, prompt, execute: runAI, signal, m
       'plan.gaps는 필요한 역량의 근무중 직원·부서가 없을 때만 씁니다. 외부 작업 허용·계정 연결·로그인 부족은 실행기가 따로 확인하므로 gaps에 적지 마세요.',
       `연결된 계정: ${JSON.stringify(outbound?.connections() || [])}`,
       HTML_BRIEF,
-      buildOrgMap(org), `대표 요청:\n${context()}`, saved.plan ? `이전 계획과 완료 상태:\n${JSON.stringify({ plan: saved.plan, completed: saved.completed })}` : '', extra,
+      buildOrgMap(org), `대표 요청:\n${context()}`,
+      documents.length ? `지시에 적힌 문서의 앞부분(계획용 미리보기, 연락처는 가림). Word·Excel·PowerPoint는 Read로 열리지 않으니 이 내용으로 담당·단계·전달 파일 이름을 정하세요. 문서 전체는 담당 직원이 읽습니다:\n${documents.join('\n\n')}` : '',
+      saved.plan ?`이전 계획과 완료 상태:\n${JSON.stringify({ plan: saved.plan, completed: saved.completed })}` : '', extra,
     ].filter(Boolean).join('\n\n') });
     checkStop();
     return parseObject(text);

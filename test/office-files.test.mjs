@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, utimesSync, mkdirSync, writeFileSync
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { documentDiff, formulasWithoutValue, officeGuide, officeIssues, officeKind, officeNotices, previewDirectory } from '../lib/office-files.mjs';
+import { documentDiff, documentPreview, formulasWithoutValue, officeGuide, officeIssues, officeKind, officeNotices, previewDirectory } from '../lib/office-files.mjs';
 import { findSoffice, renderDocument } from '../lib/doc-preview.mjs';
 import { outputIssues } from '../lib/work-result.mjs';
 
@@ -157,4 +157,32 @@ test('문서 대조: 바뀐 글자·값만 찾고, 크게 지워지면 표시한
   const deck = async (titles) => { const p = new PptxGenJS(); for (const x of titles) p.addSlide().addText(x, { x: 1, y: 1, w: 5, h: 1 }); return Buffer.from(await p.write({ outputType: 'nodebuffer' })); };
   const slides = documentDiff(await deck(['표지', '일정']), await deck(['표지', '2027 일정', '담당자']), 'PowerPoint');
   assert.deepEqual([slides.removed, slides.added], [['일정'], ['2027 일정', '담당자']]);
+});
+
+test('계획용 문서 미리보기: 글자를 순서대로 보여 주고 연락처 칸·메일·긴 숫자는 가린다', async () => {
+  // 회사 양식처럼 라벨 칸 다음에 값 칸이 오는 표
+  const cell = (text) => new docx.TableCell({ children: [new docx.Paragraph(text)] });
+  const row = (...texts) => new docx.TableRow({ children: texts.map(cell) });
+  const table = new docx.Table({ rows: [
+    row('아호(예명)', '가상별', '상담 스타일', '현실적이에요, 공감해요'),
+    row('휴대폰 번호', '010-1234-5678', '연결 전화번호', '010 1234 5678'),
+    row('이메일', 'rima@example.com'),
+    row('주소', '서울시 가상구 가상로 12'),
+    row('계좌번호', '은행명 : 가상은행 계좌번호: 123-456-789012 계좌주명 : 홍길동'),
+  ] });
+  const word = new docx.Document({ sections: [{ children: [new docx.Paragraph('상담사 프로필 소개서'), table, new docx.Paragraph('안녕하세요, 상담사 가상별입니다. 문의는 help@example.com')] }] });
+  const preview = documentPreview(await docx.Packer.toBuffer(word), 'a.docx');
+  assert.match(preview, /상담사 프로필 소개서\n아호\(예명\)\n가상별\n상담 스타일\n현실적이에요, 공감해요/);
+  assert.match(preview, /휴대폰 번호\n\[가림\]\n연결 전화번호\n\[가림\]\n이메일\n\[가림\]\n주소\n\[가림\]\n계좌번호\n\[가림\]/);
+  assert.match(preview, /상담사 가상별입니다\. 문의는 \[메일\]/);
+  for (const secret of ['010', '1234', 'rima@', '가상로', '123-456', '홍길동']) assert.ok(!preview.includes(secret), secret);
+  // 값이 빈 칸이면 다음 라벨을 가리지 않는다
+  const empty = new docx.Document({ sections: [{ children: [new docx.Table({ rows: [row('휴대폰 번호', ''), row('이메일', 'x@y.kr')] })] }] });
+  assert.equal(documentPreview(await docx.Packer.toBuffer(empty), 'b.docx'), '휴대폰 번호\n이메일\n[가림]');
+  assert.equal(documentPreview(Buffer.from('글자'), 'c.txt'), '', 'Office 문서가 아니면 비운다');
+  assert.equal(documentPreview(Buffer.from('깨진 파일'), 'd.docx'), '', '열 수 없으면 비운다');
+  const long = new docx.Document({ sections: [{ children: Array.from({ length: 200 }, (_, i) => new docx.Paragraph(`문단 ${i}번 내용입니다`)) }] });
+  const cut = documentPreview(await docx.Packer.toBuffer(long), 'e.docx', { maxChars: 100 });
+  assert.equal(cut.length, 101);
+  assert.ok(cut.endsWith('…'));
 });

@@ -1349,3 +1349,31 @@ test('검토 루프: 검증실은 계획의 검토 기준을, 비서실장은 �
   assert.match(f.calls.find((c) => c.kind === 'reviewer').input, /검토 기준: 근거와 산출물을 확인한다[\s\S]*기술·사실 확인에 집중/);
   assert.match(f.calls.find((c) => c.kind === 'review').input, /검증실이 이미 확인한 항목은 다시 검토하지 말고/);
 });
+
+test('지시에 적은 작업 공간 문서(지시창에서 올린 파일 포함)는 앞부분을 연락처를 가려 계획에 넣는다', async (t) => {
+  const { createRequire } = await import('node:module');
+  const docx = createRequire(import.meta.url)('docx');
+  const f = fixture(t);
+  const cell = (text) => new docx.TableCell({ children: [new docx.Paragraph(text)] });
+  const word = new docx.Document({ sections: [{ children: [new docx.Table({ rows: [
+    new docx.TableRow({ children: [cell('아호(예명)'), cell('가상별')] }),
+    new docx.TableRow({ children: [cell('휴대폰 번호'), cell('010-1234-5678')] }),
+  ] })] }] });
+  const bytes = await docx.Packer.toBuffer(word);
+  mkdirSync(join(f.root, '보관함', '업로드', '2026-11-12'), { recursive: true });
+  writeFileSync(join(f.root, '보관함', '업로드', '2026-11-12', '상담사 프로필(원본).docx'), bytes);
+  // 숨김 폴더의 문서는 지시에 적혀 있어도 읽지 않는다
+  mkdirSync(join(f.root, '보관함', '.숨김'), { recursive: true });
+  writeFileSync(join(f.root, '보관함', '.숨김', '비밀.docx'), bytes);
+  await f.final(f.runner.start({ prompt: '프로필 작성해 줘\n\n[업로드한 파일]\n- 보관함/업로드/2026-11-12/상담사 프로필(원본).docx\n- 보관함/.숨김/비밀.docx' }));
+  const plan = f.calls.find((c) => c.kind === 'plan').input;
+  assert.match(plan, /지시에 적힌 문서의 앞부분/);
+  assert.match(plan, /\[보관함\/업로드\/2026-11-12\/상담사 프로필\(원본\)\.docx\]\n아호\(예명\)\n가상별\n휴대폰 번호\n\[가림\]/, '공백·괄호가 든 경로도 찾는다');
+  assert.ok(!plan.includes('010-1234-5678'), '연락처는 계획에 들어가지 않는다');
+  assert.ok(!plan.includes('[보관함/.숨김/비밀.docx]'), '숨김 폴더 문서는 읽지 않는다');
+
+  // 문서가 없는 지시는 미리보기 칸을 넣지 않는다
+  const g = fixture(t);
+  await g.final(g.runner.start({ prompt: '자료를 조사해 줘' }));
+  assert.doesNotMatch(g.calls.find((c) => c.kind === 'plan').input, /지시에 적힌 문서의 앞부분/);
+});

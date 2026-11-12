@@ -725,3 +725,21 @@ test('입력창 승인 의사는 결과 모달로 연결하며 승인·반려 AP
   assert.doesNotMatch(src, /\/api\/tasks\/[^\n]+\/(?:approve|reject)/);
   assert.doesNotMatch(html, /id="approveOk"|id="pickTaskDialog"/);
 });
+
+test('대화 창 결과 파일: 대화의 마지막 업무를 고르고, 완료 창·최종 전달 목록과 함께 바로 내려받기 버튼을 둔다', async () => {
+  const { threadTaskId } = await import('../dashboard/public/app.js');
+  assert.equal(threadTaskId([{ id: 'a', task: '2026-11-12/run-a' }, { id: 'b' }, { id: 'c', task: '2026-11-12/run-c' }]), '2026-11-12/run-c');
+  assert.equal(threadTaskId([{ id: 'a' }]), null);
+  assert.equal(threadTaskId(undefined), null);
+  const src = await readFile(path.join(PUBLIC, 'app.js'), 'utf8');
+  // 대화 창: 업무가 끝나면(진행 중이 아니면) 최종산출물을 불러와 결과 파일 칸을 붙인다
+  assert.match(src, /const files = busy \? null : threadFinalFiles\(threadTaskId\(runs\)\)/);
+  assert.match(src, /if \(files\) list\.append\(threadFilesNode\(files\)\)/);
+  assert.match(src, /status !== 'done'\) return null/, '끝나지 않은 업무는 파일을 보이지 않는다');
+  assert.match(src, /모두 내려받기/);
+  // 완료 창과 산출물 최종 전달 목록은 미리보기를 거치지 않는 내려받기 버튼을 둔다
+  assert.match(src, /fileButtons\(deliverables, preview, undefined, \{ download: true \}\)/);
+  assert.match(src, /fileButtons\(delivered\.files\.filter\(\(f\) => f !== report\), preview, undefined, \{ download: true \}\)/);
+  // 파일이 다 불러와지면 열린 대화 창을 다시 그린다
+  assert.match(src, /if \(ui\.thread\) renderThread\(\);/);
+});

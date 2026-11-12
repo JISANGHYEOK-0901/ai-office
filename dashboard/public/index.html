@@ -44,11 +44,14 @@
         <label for="chiefInput" class="chief-label"><span aria-hidden="true">▶</span> 비서실장</label>
         <input id="chiefInput" name="prompt" type="text" maxlength="4000"
                placeholder="비서실장에게 업무 지시 — 예: 경쟁사 3곳 가격 정책 조사해서 보고서로 정리해 줘">
+        <button type="button" class="btn chief-attach" id="chiefAttach" title="파일 올리기 — 지시창에 끌어다 놓아도 됩니다" aria-label="파일 올리기">📎</button>
+        <input type="file" id="chiefFiles" multiple hidden accept=".docx,.doc,.xlsx,.xls,.csv,.pptx,.ppt,.pdf,.txt,.md,.hwp,.hwpx,.png,.jpg,.jpeg,.gif,.webp">
         <select id="chiefEngine" class="model-select" aria-label="비서실장 제공자"><option value="codex">Codex</option><option value="claude">Claude</option></select>
         <select id="chiefModel" class="model-select" aria-label="비서실장 실행 모델"><option value="gpt-6.1-sol">gpt-6.1-sol</option></select>
         <select id="chiefEffort" class="model-select" aria-label="비서실장 effort"><option value="high">high</option></select>
         <button type="submit" class="btn btn-primary" id="chiefSubmit">지시하기</button>
       </form>
+      <ul id="chiefFileList" class="chief-files" aria-label="지시와 함께 올릴 파일" hidden></ul>
       <span id="chiefPolicy" class="help">계획·실무는 Claude, 최종 검토는 선택한 AI로 진행합니다. Claude를 사용할 수 없으면 Codex로 계획합니다.</span>
       <span id="chiefSettingsStatus" class="help" role="status" aria-live="polite"></span>
       <span id="chiefSendStatus" class="chief-send-status" role="status" aria-live="polite"></span>

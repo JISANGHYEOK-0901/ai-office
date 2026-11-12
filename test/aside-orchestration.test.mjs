@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { createRunner } from '../dashboard/runner.mjs';
 
 // 비서실장은 Claude(구조화 응답), 최종 검토는 Codex, 직원 biz-1은 Aside(aside exec --json)로 응답하는 가짜 실행
-function fixture(t, { plan: planOf, staff, publish, outbound: extraOutbound = {} } = {}) {
+function fixture(t, { plan: planOf, staff, publish, outbound: extraOutbound = {}, staffFile = '작성 완료' } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'ai-office-aside-orch-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, 'org'));
@@ -49,7 +49,12 @@ function fixture(t, { plan: planOf, staff, publish, outbound: extraOutbound = {}
       if (call.kind === 'plan') { task = input.match(/업무 id: ([\d-]+\/run-[\w-]+)\./)?.[1]; value = { plan: planOf(task), question: '', needsMeeting: false, meetingAgents: [], rerunStages: [] }; }
       else if (call.kind === 'progress') value = { action: 'continue', reason: '계획대로', question: '', revisedPlan: null };
       else if (call.kind === 'review') value = { verdict: 'pass', stage: '', reason: '확인', report: '# 결과\n\n확인했습니다.\n\n확인 필요: 없음', question: '' };
-      else value = { status: 'done', summary: 'ok' };
+      else {
+        // Claude 직원 단계: 지시의 출력 경로에 파일을 쓰고 끝낸다(실제 직원처럼 응답 전에 산출물이 있어야 한다)
+        const output = [...input.matchAll(/\n출력: ([^\n]+)/g)].at(-1)?.[1];
+        if (output && root) { const file = join(root, output); mkdirSync(join(file, '..'), { recursive: true }); writeFileSync(file, staffFile); }
+        value = { status: 'done', summary: 'ok' };
+      }
       const text = JSON.stringify(value);
       if (schemaArg) end(JSON.stringify({ type: 'result', structured_output: value, usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
       else end(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text } }) + '\n' + JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
@@ -115,14 +120,11 @@ test('Aside 직원의 댓글: 실행기가 engine:aside로 전달하고, 검토�
       publications: [{ id: 'c1', action: 'comment', service: 'naver_cafe', connection: 'aside', agent: 'biz-1', target, recipients: [], subject: '', content: 'a', instructions: '', files: [], attachments: [] }] }),
     staff: () => { throw new Error('조사 단계는 Claude 직원'); },
     publish: () => JSON.stringify({ status: 'done', submitted: true, summary: '등록' }),
+    // 조사 단계는 Claude 직원(res-1)이 댓글 원문 파일을 쓴다
+    staffFile: '잘 보고 갑니다 :)',
   });
-  // 조사 단계는 Claude 직원(res-1)이 파일을 쓴다(가짜 Claude 응답은 파일을 만들지 않으므로 미리 만든다)
-  const run = f.runner.start({ prompt: `${target} 글에 "잘 보고 갑니다 :)" 댓글 달아줘. 끝까지 자동으로 진행해` });
-  const until = Date.now() + 5000;
-  while (!f.task() && Date.now() < until) await new Promise((r) => setTimeout(r, 5));
+  const result = await f.final(f.runner.start({ prompt: `${target} 글에 "잘 보고 갑니다 :)" 댓글 달아줘. 끝까지 자동으로 진행해` }));
   const out = join(f.root, 'outputs', ...f.task().split('/'), 'res', 'res-1-a.md');
-  mkdirSync(join(out, '..'), { recursive: true }); writeFileSync(out, '잘 보고 갑니다 :)');
-  const result = await f.final(run);
   assert.equal(f.delivered.length, 1, result.summary);
   assert.equal(f.delivered[0].engine, 'aside');
   const publishCall = f.calls.find((c) => c.kind === 'aside' && /외부 작업 1건/.test(c.input));

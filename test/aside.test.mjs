@@ -172,20 +172,23 @@ test('보낸 메일 확인: 보낸사람 주소를 모르면 받는사람 전원
 });
 
 // ---- Aside 직원의 외부 작업(실행기가 실행 전후 화면을 읽어 대조) ----
-function asideWork(t, { pages = {}, login = 'ok', sent = [[], ['900']], stageDir } = {}) {
+function asideWork(t, { pages = {}, login = 'ok', sent = [[], ['900']], stageDir, readFail = 0, apiAccounts = [] } = {}) {
   const root = temp(t, 'aside-work-');
   const reads = [];
   let linkCall = 0;
   const aside = {
     checkLogin: async (url) => ({ status: typeof login === 'function' ? login(url) : login, url }),
-    readPage: async (url, opts) => { reads.push({ url, opts }); const value = typeof pages[url] === 'function' ? pages[url](reads.filter((r) => r.url === url).length) : pages[url]; return { url, text: value ?? '', needsLogin: false, protected: false }; },
+    readPage: async (url, opts) => { reads.push({ url, opts }); if (reads.length <= readFail) throw new Error(`읽기 실패 ${reads.length}`); const value = typeof pages[url] === 'function' ? pages[url](reads.filter((r) => r.url === url).length) : pages[url]; return { url, text: value ?? '', needsLogin: false, protected: false }; },
     links: async () => ({ url: 'https://mail.worksmobile.com/w/sent', links: (sent[Math.min(linkCall++, sent.length - 1)] || []).map((id) => ({ text: '제휴 제안', href: `https://mail.worksmobile.com/read/popup?nMailId=${id}` })), needsLogin: false }),
     stageFiles: (files) => ({ files: files.map((f) => ({ name: f.name, path: join(stageDir || root, f.name) })), cleanup: () => { aside.cleaned = true; } }),
   };
-  const store = { list: () => [], find: () => { throw new Error('연결 계정을 쓰면 안 됨'); }, credentials: () => null, directory: root };
-  const work = createBrowserWork({ root, store, sessions: { close: async () => {} }, aside });
+  // 실제 연결 저장소처럼 없는 계정(aside 등)을 조회하면 오류를 낸다(2026-11-12 실사이트에서 글 결과 확인이 이 오류로 실패했다)
+  const store = { list: () => apiAccounts.map((id) => ({ id, provider: 'naver' })), find: () => { throw new Error('연결 계정을 찾을 수 없습니다.'); }, credentials: () => { throw new Error('연결 계정을 찾을 수 없습니다.'); }, directory: root };
+  const apiPosts = [];
+  const cafeApi = { connected: (id) => apiAccounts.includes(id), post: async (id, args) => { apiPosts.push({ id, ...args }); return { articleId: '501', articleUrl: 'https://cafe.naver.com/petdilab/501' }; } };
+  const work = createBrowserWork({ root, store, sessions: { close: async () => {} }, aside, cafeApi, readbackDelayMs: 1 });
   t.after(() => work.close());
-  return { root, work, aside, reads };
+  return { root, work, aside, reads, apiPosts };
 }
 const baseDeliver = { scope: 'scope-1', allowedActions: ['mail', 'post', 'comment', 'web'], instructionKey: 'k1', signal: new AbortController().signal, engine: 'aside' };
 const records = (root) => { const dir = join(root, '.office', 'publications'); return existsSync(dir) ? readdirSync(dir).map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8'))) : []; };
@@ -327,4 +330,40 @@ test('실행기: Aside가 없으면 부서 엔진(Claude)으로 실행한다', a
   while (['running', 'queued'].includes(runner.list().find((r) => r.id === run.id).status) && Date.now() < until) await new Promise((r) => setTimeout(r, 10));
   assert.equal(runner.list().find((r) => r.id === run.id).engine, 'claude');
   assert.ok(spawned[0].args.includes('--agent'));
+});
+
+test('Aside 결과 확인은 읽기가 실패하면 짧게 다시 읽고, 끝내 못 읽으면 이유를 불확실 기록에 남긴다', async (t) => {
+  const posted = 'https://cafe.naver.com/f-e/cafes/1/articles/88';
+  const publication = { id: 'p9', action: 'post', service: 'naver_cafe', connection: ASIDE_CONNECTION, target: 'https://cafe.naver.com/f-e/cafes/1/menus/2', recipients: [], subject: '집사 일기' };
+  const execute = async () => JSON.stringify({ status: 'done', submitted: true, resultUrl: posted });
+  // 첫 읽기만 실패: 다시 읽어 확인한다(직원은 한 번만 실행)
+  const f = asideWork(t, { pages: { [posted]: '집사 일기 오늘의 이야기입니다' }, readFail: 1 });
+  let runs = 0;
+  const ok = await f.work.deliver({ ...baseDeliver, publication, body: '오늘의 이야기입니다', execute: async (...a) => { runs++; return execute(...a); } });
+  assert.equal(ok.status, 'confirmed'); assert.equal(runs, 1); assert.equal(f.reads.length, 2);
+  // 세 번 모두 실패: 불확실로 멈추고 이유·직원 보고 주소를 알린다
+  const g = asideWork(t, { pages: { [posted]: '집사 일기 오늘의 이야기입니다' }, readFail: 99 });
+  await assert.rejects(g.work.deliver({ ...baseDeliver, publication: { ...publication, id: 'p10' }, body: '오늘의 이야기입니다', execute }), /직원 보고 주소: https:\/\/cafe\.naver\.com\/f-e\/cafes\/1\/articles\/88.*올라간 것 확인했어/);
+  const record = records(g.root)[0];
+  assert.equal(record.status, 'uncertain'); assert.match(record.readbackError, /읽기 실패 3/);
+  assert.equal(g.reads.length, 3);
+});
+
+test('Aside 직원도 카페 공식 API가 연결된 네이버 계정이 있으면 일반 글은 API로, 장소 카드 글만 Aside로 올린다', async (t) => {
+  const board = 'https://cafe.naver.com/f-e/cafes/31520563/menus/44';
+  const placeUrl = 'https://cafe.naver.com/f-e/cafes/31520563/articles/77';
+  const f = asideWork(t, { apiAccounts: ['naver-1'], pages: { [placeUrl]: '성수 카페 소개 빵이 맛있어요' } });
+  let asideRuns = 0;
+  const execute = async () => { asideRuns++; return JSON.stringify({ status: 'done', submitted: true, resultUrl: placeUrl }); };
+  const video = await f.work.deliver({ ...baseDeliver, publication: { id: 'v1', action: 'post', service: 'naver_cafe', connection: ASIDE_CONNECTION, target: board, recipients: [], subject: '댕댕이 귀환' },
+    body: '문 열고 나갔다 돌아온 댕댕이\n\nhttps://www.youtube.com/shorts/jYsBJsmiOIc', execute });
+  assert.equal(video.method, 'api'); assert.equal(video.connection, 'naver-1'); assert.equal(f.apiPosts.length, 1); assert.equal(asideRuns, 0, '일반 글은 Aside 직원을 띄우지 않는다');
+  const place = await f.work.deliver({ ...baseDeliver, publication: { id: 'h1', action: 'post', service: 'naver_cafe', connection: ASIDE_CONNECTION, target: 'https://cafe.naver.com/f-e/cafes/31520563/menus/24', recipients: [], subject: '성수 카페' },
+    body: '성수 카페 소개 빵이 맛있어요\n\nhttps://naver.me/abcd1234', execute });
+  assert.equal(place.method, 'aside'); assert.equal(asideRuns, 1); assert.equal(f.apiPosts.length, 1, '장소 글은 API로 올리지 않는다');
+  // API가 연결된 계정이 없으면 일반 글도 Aside로 올린다
+  const g = asideWork(t, { pages: { [placeUrl]: '댕댕이 귀환 문 열고 나갔다 돌아온 댕댕이' } });
+  const viaAside = await g.work.deliver({ ...baseDeliver, publication: { id: 'v2', action: 'post', service: 'naver_cafe', connection: ASIDE_CONNECTION, target: board, recipients: [], subject: '댕댕이 귀환' },
+    body: '문 열고 나갔다 돌아온 댕댕이\n\nhttps://www.youtube.com/shorts/jYsBJsmiOIc', execute: async () => JSON.stringify({ status: 'done', submitted: true, resultUrl: placeUrl }) });
+  assert.equal(viaAside.method, 'aside'); assert.equal(g.apiPosts.length, 0);
 });

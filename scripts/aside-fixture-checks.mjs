@@ -73,7 +73,8 @@ export async function verifyAside({ only = ['comment', 'post', 'mail', 'web'], l
   const { server, state } = fixtureSite();
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const store = { list: () => [], find: () => { throw new Error('Aside 직원은 계정 연결을 쓰지 않는다'); }, credentials: () => null, directory: join(temp, 'private') };
+  // 실제 연결 저장소처럼 없는 계정(aside)을 조회하면 오류를 낸다
+  const store = { list: () => [], find: () => { throw new Error('연결 계정을 찾을 수 없습니다.'); }, credentials: () => { throw new Error('연결 계정을 찾을 수 없습니다.'); }, directory: join(temp, 'private') };
   const work = createBrowserWork({ root, store, sessions: { close: async () => {} }, aside, asideSentUrl: `${origin}/w/sent`, providersForTests: (_provider, url) => new URL(url).origin === origin });
   const results = [];
   // 실제 Aside 에이전트 실행: 실행기와 같은 지시문(asidePublishPrompt)을 쓴다

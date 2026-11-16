@@ -63,6 +63,13 @@ async function main() {
     if (repo) return deny(repo.reason);
   }
 
+  // 카페 공식 API 세팅 보호: 작업 공간 세션과 직원은 앱 키 저장·연결 명령을 쓰지 못한다
+  {
+    const { decideSetupGuard } = await import('../lib/chief-guard.mjs');
+    const setup = decideSetupGuard(input, { workspaceSession: ROOT !== HERE_ROOT });
+    if (setup) return deny(setup.reason);
+  }
+
   if (typeof input.agent_type === 'string' && input.agent_type) return null; // 직원 세션은 정본을 읽지 않고 바로 끝낸다
 
   const sessions = readSessions(join(ROOT, '.office', 'sessions.json'));

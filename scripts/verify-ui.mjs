@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 import { startServer } from '../dashboard/server.mjs';
+import { naverApiCallback, saveNaverApiApp } from '../lib/naver-cafe-api.mjs';
 import { verifyBrowserWork } from './browser-fixture-checks.mjs';
 import { verifyLogin } from './login-fixture-checks.mjs';
 import { verifyCompletionUi } from './completion-ui-checks.mjs';
@@ -18,9 +19,9 @@ mkdirSync(dirname(reportPath), { recursive: true, mode: 0o700 });
 const root = mkdtempSync(join(tmpdir(), 'office-browser-'));
 const connectionBase = mkdtempSync(join(tmpdir(), 'office-ui-auth-'));
 mkdirSync(join(root, 'org'));
-// 네이버 카페 공식 API 앱 키(가짜 값): 네이버 계정 카드에 "카페 공식 API 연결" 버튼이 보여야 한다
+// 네이버 카페 공식 API 앱 키는 처음에 없다. 계정 연결 검사 중에 세팅 명령과 같은 저장 함수로 가짜 값을 넣는다
 mkdirSync(join(root, '보관함'), { recursive: true });
-writeFileSync(join(root, '보관함/계정.env'), 'NAVER_API_CLIENT=fixture-client\nNAVER_API_SECRET=fixture-secret\nNAVER_API_CALLBACK=http://localhost:4777/oauth/naver/callback\n', { mode: 0o600 });
+writeFileSync(join(root, '보관함/계정.env'), '# 검증용 계정 파일\n', { mode: 0o600 });
 writeFileSync(join(root, 'org/departments.json'), JSON.stringify([
   { id: 'research', name: '리서치부', engine: 'claude', capabilities: ['자료조사'], color: '#38bdf8' },
   { id: 'dev', name: '개발부', engine: 'codex', codexRole: 'exec', capabilities: ['HTML'], color: '#34d399' },
@@ -352,6 +353,17 @@ try {
   assert.equal(await page.locator('#connectionPassword').inputValue(), '');
   await page.waitForFunction(() => !document.querySelector('[data-connection-action="confirm"]'), null, { timeout: 20000 });
   await page.getByText(/자동 로그인 저장됨/).waitFor();
+  // 앱 키가 없으면 네이버 계정 카드에 터미널 AI 세팅 안내가 보이고 공식 API 버튼은 없다
+  await page.getByText(/터미널 AI에게 “네이버 카페 api 세팅해줘”/).waitFor();
+  assert.equal(await page.locator('[data-connection-action="naver-api"]').count(), 0);
+  await shot('connections-api-setup-hint.png');
+  // 세팅 명령(scripts/naver-api.mjs save)과 같은 저장 함수로 넣으면 서버를 다시 켜지 않아도 버튼이 생긴다
+  saveNaverApiApp(root, { clientId: 'fixture-client', secret: 'fixture-secret', callback: naverApiCallback(4777) });
+  await page.locator('#connectionsClose').click();
+  await page.locator('#connectionsBtn').click();
+  await page.locator('[data-connection-action="naver-api"]').waitFor();
+  assert.equal(await page.getByText(/네이버 카페 api 세팅해줘/).count(), 0, '앱 키가 생기면 세팅 안내를 숨긴다');
+  report.checks.push({ name: '앱 키가 없으면 세팅 요청 안내, 저장 뒤 서버 재시작 없이 공식 API 연결 버튼', interaction: 'click', passed: true });
   // 카페 공식 API 연결: 누르면 새 창이 네이버 동의 주소(PKCE)로 열린다. 실제 네이버에는 접속하지 않는다
   await page.context().route('https://nid.naver.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>naver</title>' }));
   const apiButton = page.locator('[data-connection-action="naver-api"]');

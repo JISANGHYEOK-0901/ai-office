@@ -155,6 +155,7 @@ test('splitSafeCommand·summarizeAgents 경계', () => {
   // Windows는 대소문자를 가리지 않는다(platform 인자로 비교 규칙만 바꾼다)
   assert.equal(isAllowedOfficeCommand('NODE.EXE Scripts/Office.mjs task list', { root: ROOT, platform: 'win32' }), true);
   assert.equal(isAllowedOfficeCommand('node Scripts/Office.mjs task list', { root: ROOT, platform: 'darwin' }), false);
+  assert.equal(isAllowedOfficeCommand('node scripts/naver-api.mjs status', { root: ROOT }), false, '비서실장은 카페 API 세팅 명령을 쓰지 않는다');
   assert.equal(isAllowedChiefWrite(join(ROOT, 'outputs', '2026-10-29', 'landing', 'REPORT.md'), { root: ROOT, task: TASK, platform: 'win32' }), true);
   assert.equal(isAllowedChiefWrite(join(ROOT, 'outputs', '2026-10-29', 'landing', 'REPORT.md'), { root: ROOT, task: TASK, platform: 'darwin' }), false);
   assert.equal(isAllowedChiefWrite(join(ROOT, 'outputs', 'brief.md'), { root: ROOT, task: '../..', platform: 'darwin' }), false, '업무 id가 outputs 밖이면 거부');

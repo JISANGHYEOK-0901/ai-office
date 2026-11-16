@@ -19,4 +19,7 @@ test('office-request 스킬은 현재 안전선(20통·첨부·직접 실무 금
   for (const rule of [/20통마다/, /직접 하지 않는다/, /첨부/, /초안만/, /끝까지 자동으로/, /원문 그대로 넣기/, /office-ask\.mjs ask/, /대표가 직접 말한 경우에만/]) assert.match(claude, rule);
   assert.ok(![...workspaceFiles({ program: root }).keys()].some((path) => path.includes('office-request')), '비서실장 작업 공간에는 넣지 않는다');
   assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /office-request/);
+  // "카페"가 들어간 API 세팅 요청을 비서실장 업무로 넘기지 않는다
+  assert.match(claude, /네이버 카페 api 세팅해줘/);
+  assert.match(readFileSync(join(root, 'AGENTS.md'), 'utf8'), /node scripts\/naver-api\.mjs save/);
 });

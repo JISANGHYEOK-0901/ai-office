@@ -46,6 +46,10 @@ export function createClient({ url, token, fetchImpl = fetch }) {
     reply: (id, prompt) => call('POST', `/api/runs/${encodeURIComponent(id)}/reply`, { prompt }),
     state: () => call('GET', '/api/state'),
     result: (id) => call('GET', `/api/runs/${encodeURIComponent(id)}/result`),
+    // 카페 공식 API 세팅(scripts/naver-api.mjs)이 화면의 계정 연결과 같은 API를 쓴다
+    connections: () => call('GET', '/api/connections'),
+    createConnection: (body) => call('POST', '/api/connections', body),
+    naverApiStart: (id) => call('POST', `/api/connections/${encodeURIComponent(id)}/naver-api`, {}),
   };
 }
 

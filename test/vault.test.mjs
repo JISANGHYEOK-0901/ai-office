@@ -76,6 +76,7 @@ test('직원·비서실장은 계정 파일과 계정 저장소를 읽거나 고
   assert.equal(check('Read', { file_path: '/work/space/outputs/2026-11-03/x/report.md' }), null);
   assert.equal(check('Read', { file_path: '/work/space/보관함/최종산출물/2026-11-03/a.md' }), null, '보관함의 산출물은 읽을 수 있다');
   assert.equal(check('Bash', { command: 'node scripts/office.mjs task files 2026-11-03/x' }), null);
+  assert.equal(check('Bash', { command: 'node read-keys.mjs | node scripts/naver-api.mjs save' }), null, '카페 API 키 저장 명령은 계정 파일을 직접 다루지 않아 쓸 수 있다');
   assert.equal(check('Grep', { pattern: 'TODO', path: '.' }), null);
   assert.ok(existsSync(homedir()));
 });

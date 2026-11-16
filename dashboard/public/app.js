@@ -2464,7 +2464,7 @@ async function refreshConnections() {
   connectionCache = data.connections;
   $('connectionList').innerHTML = data.connections.length ? data.connections.map((c) => `<article class="connection-card">
     <div><strong>${esc(c.label)}</strong><p class="help">${esc(data.providers.find((p) => p.id === c.provider)?.name || c.provider)}${c.hosts?.length ? ` (${esc(c.hosts.join(', '))})` : ''} · ${esc(CONNECTION_LABEL[c.status] || c.status)}${c.firstLoginDone === false ? ' · 처음 로그인 필요' : ''}${c.source === 'file' ? ' · 보관함/계정.env' : c.hasCredentials ? ' · 자동 로그인 저장됨' : ''}${c.naverApi?.connected ? ' · 카페 공식 API 연결됨' : ''}</p>
-    ${c.provider === 'naver' && !data.naverApiConfigured ? '<p class="help">보관함/계정.env에 NAVER_API_CLIENT·NAVER_API_SECRET·NAVER_API_CALLBACK을 넣으면 카페 글을 공식 API로 올릴 수 있습니다.</p>' : ''}</div>
+    ${c.provider === 'naver' && !data.naverApiConfigured ? '<p class="help">카페 글을 공식 API로 올리려면 터미널 AI에게 “네이버 카페 api 세팅해줘”라고 하세요. 로그인과 동의만 직접 합니다(GUIDE 6장).</p>' : ''}</div>
     <div class="connection-actions"><button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="open">${c.status === 'needs_login' ? '재연결' : '로그인 창 열기'}</button>
     ${c.source === 'file' ? '' : `<button type="button" class="btn btn-sm" data-connection="${esc(c.id)}" data-connection-action="credentials">${c.hasCredentials ? '로그인 정보 변경' : '자동 로그인 설정'}</button>`}
     ${c.status === 'connecting' ? `<button type="button" class="btn btn-sm btn-primary" data-connection="${esc(c.id)}" data-connection-action="confirm">연결 완료</button>` : ''}

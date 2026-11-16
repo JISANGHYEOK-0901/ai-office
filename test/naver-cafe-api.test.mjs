@@ -10,7 +10,7 @@ import { cafeBoard, cafeHtml, createNaverCafeApi, naverApiApp, naverApiCallback,
 import { createConnectionStore } from '../lib/connections.mjs';
 import { createBrowserWork } from '../lib/browser-work.mjs';
 import { accountsFile, parseAccounts } from '../lib/vault.mjs';
-import { connect, findAppKeys } from '../scripts/naver-api.mjs';
+import { connect, findAppKeys, inWorkspaceSession } from '../scripts/naver-api.mjs';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -202,15 +202,20 @@ test('앱 키 저장: 다른 줄은 그대로 두고 세 값을 쓰며, 같은 �
   const { root } = workspace(t, '# 메모\nERP_URL=https://erp.example.com/\nERP_ID=qa\nERP_PASSWORD=pw\n');
   const callback = naverApiCallback(4777);
   assert.equal(callback, 'http://localhost:4777/oauth/naver/callback');
-  assert.deepEqual(saveNaverApiApp(root, { clientId: 'Client_ID-1234', secret: 'Secret_5678', callback }), { changed: true, replaced: false });
+  assert.deepEqual(saveNaverApiApp(root, { clientId: 'Client_ID-1234', secret: 'Secret_5678', callback }), { changed: true, replaced: false, callbackOnly: false });
   assert.deepEqual(naverApiApp(root), { clientId: 'Client_ID-1234', secret: 'Secret_5678', callback });
   const text = readFileSync(accountsFile(root), 'utf8');
   assert.match(text, /^# 메모\nERP_URL=https:\/\/erp\.example\.com\/\nERP_ID=qa\nERP_PASSWORD=pw\n\n# 네이버 카페 공식 API/);
   assert.deepEqual(parseAccounts(text).problems, [], '계정 항목 검사에 경고가 생기지 않는다');
   if (process.platform !== 'win32') assert.equal(statSync(accountsFile(root)).mode & 0o777, 0o600);
-  assert.deepEqual(saveNaverApiApp(root, { clientId: 'Client_ID-1234', secret: 'Secret_5678', callback }), { changed: false, replaced: false });
+  assert.deepEqual(saveNaverApiApp(root, { clientId: 'Client_ID-1234', secret: 'Secret_5678', callback }), { changed: false, replaced: false, callbackOnly: false });
+  // 같은 앱에서 대시보드 포트만 바뀌면 --replace 없이 Callback URL만 고친다(기존 연결은 그대로 쓴다)
+  const moved = naverApiCallback(4780);
+  assert.deepEqual(saveNaverApiApp(root, { clientId: 'Client_ID-1234', secret: 'Secret_5678', callback: moved }), { changed: true, replaced: false, callbackOnly: true });
+  assert.equal(naverApiApp(root).callback, moved);
+  saveNaverApiApp(root, { clientId: 'Client_ID-1234', secret: 'Secret_5678', callback });
   assert.throws(() => saveNaverApiApp(root, { clientId: 'Other_Client', secret: 'Other_Secret', callback }), (e) => e.kind === 'setup' && /--replace/.test(e.message) && !/Other_/.test(e.message));
-  assert.deepEqual(saveNaverApiApp(root, { clientId: 'Other_Client', secret: 'Other_Secret', callback }, { replace: true }), { changed: true, replaced: true });
+  assert.deepEqual(saveNaverApiApp(root, { clientId: 'Other_Client', secret: 'Other_Secret', callback }, { replace: true }), { changed: true, replaced: true, callbackOnly: false });
   const replaced = readFileSync(accountsFile(root), 'utf8');
   assert.equal(replaced.match(/NAVER_API_CLIENT=/g).length, 1, '예전 줄은 남기지 않는다');
   assert.equal(replaced.match(/# 네이버 카페 공식 API/g).length, 1);
@@ -242,8 +247,8 @@ test('세팅 명령: save·status는 키 값을 출력하지 않고, 대시보�
   const temp = mkdtempSync(join(tmpdir(), 'office-naver-api-cli-')), root = join(temp, 'workspace');
   mkdirSync(join(root, '보관함'), { recursive: true });
   t.after(() => rmSync(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  const env = { ...process.env, HOME: temp, USERPROFILE: temp, OFFICE_AI_RUN: '', OFFICE_CHIEF_RUN: '', OFFICE_ORCHESTRATOR_CHILD: '' };
-  const run = (args, input = '', extra = {}) => spawnSync(process.execPath, [join(REPO, 'scripts/naver-api.mjs'), ...args, '--workspace', root], { env: { ...env, ...extra }, input, encoding: 'utf8' });
+  const env = { ...process.env, HOME: temp, USERPROFILE: temp, OFFICE_AI_RUN: '', OFFICE_CHIEF_RUN: '', OFFICE_ORCHESTRATOR_CHILD: '', CLAUDE_PROJECT_DIR: '' };
+  const run = (args, input = '', extra = {}, cwd = REPO) => spawnSync(process.execPath, [join(REPO, 'scripts/naver-api.mjs'), ...args, '--workspace', root], { env: { ...env, ...extra }, input, encoding: 'utf8', cwd });
   const keys = JSON.stringify({ clientId: 'Client_ID-1234', secret: 'Secret_5678' });
   const blocked = run(['save'], keys, { OFFICE_AI_RUN: '1' });
   assert.equal(blocked.status, 1); assert.match(blocked.stderr, /업무 실행 중인 AI는/);
@@ -255,13 +260,25 @@ test('세팅 명령: save·status는 키 값을 출력하지 않고, 대시보�
   const saved = run(['save'], `noise\n${keys}\n`);
   assert.equal(saved.status, 0, saved.stderr);
   assert.match(saved.stdout, /앱 키를 저장했습니다\(Client ID …1234/);
+  // 작업 공간에서 연 세션(실행 위치나 Claude 프로젝트 폴더가 작업 공간)은 저장하지 못한다
+  for (const [extra, cwd] of [[{}, root], [{ CLAUDE_PROJECT_DIR: root }, REPO]]) {
+    const ws = run(['save', '--replace'], JSON.stringify({ clientId: 'Other_Client', secret: 'Other_Secret' }), extra, cwd);
+    assert.equal(ws.status, 1); assert.match(ws.stderr, /작업 공간에서 연 세션은/);
+  }
+  assert.equal(inWorkspaceSession(root, { cwd: join(root, 'outputs'), env: {} }), true);
+  assert.equal(inWorkspaceSession(root, { cwd: REPO, env: {} }), false);
+  assert.equal(inWorkspaceSession(REPO, { cwd: REPO, env: {} }), false, '작업 공간이 곧 프로그램 폴더(호환 모드)면 막지 않는다');
+  // 키 입력 없이 --callback만 주면 저장된 키로 주소만 바꾼다
+  const moved = run(['save', '--callback', 'http://localhost:4780/oauth/naver/callback']);
+  assert.equal(moved.status, 0, moved.stderr); assert.match(moved.stdout, /Callback URL만 http:\/\/localhost:4780/);
+  assert.equal(naverApiApp(root).clientId, 'Client_ID-1234');
   const again = run(['save'], JSON.stringify({ clientId: 'Other_Client', secret: 'Other_Secret' }));
   assert.equal(again.status, 1); assert.match(again.stderr, /--replace/);
   const bad = run(['save'], 'Secret_5678');
   assert.equal(bad.status, 1); assert.match(bad.stderr, /찾지 못했습니다/);
   const status = run(['status', '--json']);
   assert.equal(JSON.parse(status.stdout).appConfigured, true);
-  for (const out of [saved, again, bad, status, run(['status'])]) assert.doesNotMatch(out.stdout + out.stderr, /Secret_5678|Client_ID-1234|Other_Secret/, '키 값은 어떤 출력에도 없다');
+  for (const out of [saved, moved, again, bad, status, run(['status'])]) assert.doesNotMatch(out.stdout + out.stderr, /Secret_5678|Client_ID-1234|Other_Secret/, '키 값은 어떤 출력에도 없다');
   assert.ok(!readFileSync(join(REPO, 'lib/workspace.mjs'), 'utf8').includes('naver-api.mjs'), '작업 공간(비서실장)에는 연결 파일을 만들지 않는다');
 });
 
@@ -288,7 +305,21 @@ test('세팅 명령 connect: 네이버 계정이 없으면 만들고, 여럿이�
   await assert.rejects(connect('/w', {}, { client: noKeys.client, ...quiet }), /앱 키가 없습니다/);
   // 이미 연결된 계정을 다시 연결할 때는 연결 시각이 바뀌어야 끝난다
   const again = fake([{ naverApiConfigured: true, connections: [naver('a', 'old')] }, { naverApiConfigured: true, connections: [naver('a', 'old')] }, { naverApiConfigured: true, connections: [naver('a', 'new')] }]);
-  assert.equal((await connect('/w', { connection: 'a' }, { client: again.client, ...quiet })).naverApi.connectedAt, 'new');
+  assert.equal((await connect('/w', { connection: 'a', reconnect: true }, { client: again.client, ...quiet })).naverApi.connectedAt, 'new');
+  // 이미 연결된 계정은 --reconnect 없이 동의 창을 다시 열지 않는다
+  const done = fake([{ naverApiConfigured: true, connections: [naver('a', 'old')] }]);
+  const logs = [];
+  assert.equal((await connect('/w', {}, { client: done.client, ...quiet, log: (m) => logs.push(m) })).id, 'a');
+  assert.deepEqual(done.calls.started, []); assert.match(logs.join('\n'), /이미 연결돼 있습니다/);
+  // 다른 아이디는 --new로 새 계정을 만든다(기존 계정에 덮어쓰지 않는다)
+  const added = fake([{ naverApiConfigured: true, connections: [naver('a', 'old'), naver('b')] }, { naverApiConfigured: true, connections: [naver('a', 'old'), naver('b'), naver('c', 'now')] }], naver('c'));
+  assert.equal((await connect('/w', { create: true, label: '홍보용' }, { client: added.client, ...quiet })).id, 'c');
+  assert.deepEqual(added.calls.created, [{ provider: 'naver', label: '홍보용' }]); assert.deepEqual(added.calls.started, ['c']);
+  // 브라우저를 열지 못하면 동의 주소(Client ID 포함)를 출력하지 않고 대시보드 버튼을 안내한다
+  const noBrowser = fake([{ naverApiConfigured: true, connections: [naver('a')] }, { naverApiConfigured: true, connections: [naver('a', 'now')] }]);
+  const out = [];
+  await connect('/w', {}, { client: noBrowser.client, dashboardUrl: 'http://127.0.0.1:4777/', ...quiet, open: async () => false, log: (m) => out.push(m) });
+  assert.doesNotMatch(out.join('\n'), /nid\.naver\.com|client_id|x=1/); assert.match(out.join('\n'), /카페 공식 API 연결/);
   const never = fake([{ naverApiConfigured: true, connections: [naver('a')] }]);
   await assert.rejects(connect('/w', { timeout: 0.001 }, { client: never.client, ...quiet, sleep: () => new Promise((done) => setTimeout(done, 5)) }), /아직 연결되지 않았습니다/);
 });

@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 // 네이버 카페 공식 API 세팅 도구. 프로그램 폴더의 터미널 AI가 "네이버 카페 api 세팅해줘"를 처리할 때 쓴다(AGENTS.md "프로그램 레포에서 연 세션").
 // 앱 키 값은 어떤 출력에도 싣지 않는다. 키는 표준 입력으로만 받는다(명령줄 인자는 프로세스 목록·대화 기록에 남는다).
-// 터미널 AI 세션은 훅 때문에 보관함/계정.env를 직접 쓰지 못하므로 이 명령이 대신 쓴다. 대시보드가 실행한 AI(비서실장·직원)는 쓰지 못한다.
+// 터미널 AI 세션은 훅 때문에 보관함/계정.env를 직접 쓰지 못하므로 이 명령이 대신 쓴다.
+// save·connect는 대표가 프로그램 폴더에서 연 터미널 AI만 쓴다. 대시보드가 실행한 AI와 작업 공간에서 실행하면 거부하고,
+// 작업 공간 세션·직원의 명령은 훅(decideSetupGuard)도 거부한다.
 //   node scripts/naver-api.mjs status [--json]
 //   <키를 읽는 코드> | node scripts/naver-api.mjs save [--replace] [--callback <주소>]
-//   node scripts/naver-api.mjs connect [--connection <id>] [--timeout 600]
+//   node scripts/naver-api.mjs connect [--connection <id> | --new [--label <이름>]] [--reconnect] [--timeout 600]
 import { spawn } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { createConnectionStore } from '../lib/connections.mjs';
 import { insideOfficeRun, readDashboardAccess } from '../lib/dashboard-access.mjs';
 import { createNaverCafeApi, naverApiApp, naverApiCallback, saveNaverApiApp } from '../lib/naver-cafe-api.mjs';
-import { resolveWorkspace } from '../lib/paths.mjs';
+import { isInside, programRoot, realish, resolveWorkspace } from '../lib/paths.mjs';
 import { runningServer } from '../lib/server-lock.mjs';
 import { createClient } from './office-ask.mjs';
 
@@ -19,14 +21,14 @@ const USAGE = [
   '사용법:',
   '  node scripts/naver-api.mjs status [--json]   앱 키 저장 여부, 개발자센터에 등록할 값, 네이버 계정별 공식 API 연결 상태(키 값은 출력하지 않음)',
   '  <키를 읽는 코드> | node scripts/naver-api.mjs save [--replace] [--callback <주소>]   표준 입력 JSON의 clientId·secret을 보관함 계정 파일에 저장',
-  '  node scripts/naver-api.mjs connect [--connection <id>] [--timeout 600]   네이버 동의 창을 열고 연결될 때까지 기다림(대시보드 서버 필요)',
+  '  node scripts/naver-api.mjs connect [--connection <id> | --new [--label <이름>]] [--reconnect] [--timeout 600]   네이버 동의 창을 열고 연결될 때까지 기다림(대시보드 서버 필요, 최대 10분)',
 ].join('\n');
 const SERVICE_URL = 'http://localhost';
 const REGISTER_URL = 'https://developers.naver.com/apps/#/register';
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
-  const opts = { command, json: false, replace: false, callback: null, connection: null, timeout: 600, workspace: null };
+  const opts = { command, json: false, replace: false, callback: null, connection: null, create: false, label: '', reconnect: false, timeout: 600, workspace: null };
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
     const value = () => { const v = rest[++i]; if (!v) throw new Error(`${arg} 값이 비어 있습니다.\n${USAGE}`); return v; };
@@ -34,11 +36,15 @@ export function parseArgs(argv) {
     else if (arg === '--replace') opts.replace = true;
     else if (arg === '--callback') opts.callback = value();
     else if (arg === '--connection') opts.connection = value();
+    else if (arg === '--new') opts.create = true;
+    else if (arg === '--label') opts.label = value();
+    else if (arg === '--reconnect') opts.reconnect = true;
     else if (arg === '--timeout') opts.timeout = Number(value());
     else if (arg === '--workspace') opts.workspace = value();
     else throw new Error(`알 수 없는 옵션입니다: ${arg}\n${USAGE}`);
   }
   if (!['status', 'save', 'connect'].includes(command)) throw new Error(USAGE);
+  if (opts.create && opts.connection) throw new Error('--new와 --connection은 함께 쓸 수 없습니다.');
   if (!Number.isFinite(opts.timeout) || opts.timeout <= 0) throw new Error('--timeout은 0보다 큰 초 단위 숫자여야 합니다.');
   return opts;
 }
@@ -117,11 +123,14 @@ function status(root, { json }) {
 }
 
 async function save(root, { replace, callback }) {
-  const keys = findAppKeys(await readStdin());
+  let keys = findAppKeys(process.stdin.isTTY && callback ? '' : await readStdin());
+  // 키 입력 없이 --callback만 주면 저장된 키로 Callback URL만 바꾼다(키를 다시 읽지 않게)
+  if (!keys && callback) { const saved = naverApiApp(root); if (saved) keys = { clientId: saved.clientId, secret: saved.secret }; }
   if (!keys) throw new Error('표준 입력에서 clientId·secret을 찾지 못했습니다. {"clientId":"…","secret":"…"} 형식의 JSON을 넘겨 주세요(입력 내용은 표시하지 않습니다).');
   const result = saveNaverApiApp(root, { ...keys, callback: callback || naverApiCallback(runningServer(root)?.port || 4777) }, { replace });
   const app = naverApiApp(root);
   if (!result.changed) return console.log(`같은 앱 키가 이미 저장돼 있습니다(Client ID ${tail(app.clientId)}). 다음: node scripts/naver-api.mjs connect`);
+  if (result.callbackOnly) return console.log(`같은 앱의 Callback URL만 ${app.callback}로 바꿨습니다. 개발자센터 앱의 Callback URL도 같은 값으로 바꾸세요. 기존 연결은 그대로 씁니다.`);
   const store = createConnectionStore({ root });
   const tokenDir = join(store.directory, 'naver-api');
   const linked = result.replaced && existsSync(tokenDir) ? readdirSync(tokenDir).filter((f) => f.endsWith('.json')).length : 0;
@@ -133,23 +142,27 @@ async function save(root, { replace, callback }) {
 }
 
 // 시험에서는 client(대시보드 API)·open(브라우저 열기)·sleep을 바꿔 끼운다
-export async function connect(root, { connection = null, timeout = 600 } = {}, { client = null, open = openInBrowser, sleep = (ms) => new Promise((done) => setTimeout(done, ms)), log = console.log } = {}) {
+export async function connect(root, { connection = null, create = false, label = '', reconnect = false, timeout = 600 } = {}, { client = null, dashboardUrl = '', open = openInBrowser, sleep = (ms) => new Promise((done) => setTimeout(done, ms)), log = console.log } = {}) {
   if (!client) {
     const access = readDashboardAccess(root);
     if (!access) throw new Error(`대시보드 서버가 꺼져 있거나 이 작업 공간(${root})의 서버가 아닙니다. npm run office:start로 켠 뒤 다시 실행하세요.`);
     client = createClient(access);
+    dashboardUrl = access.url;
   }
   const listed = await client.connections();
   if (!listed.naverApiConfigured) throw new Error('카페 공식 API 앱 키가 없습니다. 먼저 개발자센터에 앱을 등록하고 node scripts/naver-api.mjs save로 저장하세요.');
   const naver = naverConnections(listed.connections);
-  let target = connection ? naver.find((c) => c.id === connection) : naver.length === 1 ? naver[0] : null;
+  let target = create ? null : connection ? naver.find((c) => c.id === connection) : naver.length === 1 ? naver[0] : null;
   if (connection && !target) throw new Error(`네이버 계정 연결을 찾을 수 없습니다: ${connection}. node scripts/naver-api.mjs status로 id를 확인하세요.`);
-  if (!target && naver.length > 1) throw new Error(`네이버 계정이 여러 개입니다. 대표에게 어느 계정에 연결할지 물은 뒤 --connection으로 지정하세요: ${naver.map((c) => `${c.label}(${c.id})`).join(', ')}`);
-  if (!target) { target = await client.createConnection({ provider: 'naver', label: '네이버' }); log(`계정 연결에 네이버 계정을 만들었습니다(${target.label}, ${target.id}).`); }
+  if (!target && !create && naver.length > 1) throw new Error(`네이버 계정이 여러 개입니다. 대표에게 어느 계정에 연결할지 물은 뒤 --connection으로 지정하세요(다른 네이버 아이디를 새로 연결하려면 --new): ${naver.map((c) => `${c.label}(${c.id})`).join(', ')}`);
+  // 이미 연결된 계정은 동의를 다시 받지 않는다(대표가 다시 연결하라고 할 때만 --reconnect)
+  if (target?.naverApi?.connected && !reconnect) { log(`이미 연결돼 있습니다: ${target.label}(${target.id}) 카페 공식 API 연결됨 ${target.naverApi.connectedAt || ''}. 다시 연결하려면 --reconnect를 붙입니다.`.trim()); return target; }
+  if (!target) { target = await client.createConnection({ provider: 'naver', label: String(label || '').trim() || '네이버' }); log(`계정 연결에 네이버 계정을 만들었습니다(${target.label}, ${target.id}).`); }
   const before = target.naverApi?.connectedAt || null;
   const { url } = await client.naverApiStart(target.id);
+  // 동의 주소에는 Client ID가 들어 있어 출력하지 않는다
   if (await open(url)) log('네이버 동의 창을 기본 브라우저에 열었습니다. 대표에게 "카페 가입·카페 글쓰기 항목을 체크하고 동의"를 부탁하세요.');
-  else log(`브라우저를 열지 못했습니다. 이 주소를 대표의 브라우저에서 열어 동의하게 하세요(10분 안):\n${url}`);
+  else log(`브라우저를 열지 못했습니다. 대표에게 대시보드${dashboardUrl ? `(${dashboardUrl})` : ''} → 계정 연결 → "${target.label}"의 "카페 공식 API 연결"을 눌러 동의하게 하세요. 연결되면 여기서도 알아챕니다.`);
   const deadline = Date.now() + timeout * 1000;
   for (;;) {
     await sleep(3000);
@@ -159,11 +172,20 @@ export async function connect(root, { connection = null, timeout = 600 } = {}, {
   }
 }
 
+// 작업 공간에서 연 세션(비서실장·직원)에서 실행했는가. 실행 위치나 Claude 프로젝트 폴더가 작업 공간 안이면 그렇다
+// (호환 모드처럼 작업 공간이 곧 프로그램 폴더면 구분할 수 없어 허용한다)
+export function inWorkspaceSession(root, { cwd = process.cwd(), env = process.env, program = programRoot() } = {}) {
+  const ws = realish(resolve(root));
+  if (ws === realish(program)) return false;
+  return [cwd, env.CLAUDE_PROJECT_DIR].some((p) => p && isInside(ws, realish(resolve(p))));
+}
+
 async function main(argv) {
   const opts = parseArgs(argv);
   // 대시보드가 실행한 AI가 앱 키를 바꾸거나 동의 창을 띄우지 못하게 한다(대표가 터미널에서 요청한 세팅만)
   if (opts.command !== 'status' && insideOfficeRun()) throw new Error('대시보드 업무 실행 중인 AI는 카페 공식 API 세팅을 바꿀 수 없습니다. 대표가 터미널 AI에게 "네이버 카페 api 세팅해줘"라고 요청해야 합니다.');
   const root = resolveWorkspace({ workspace: opts.workspace }).path;
+  if (opts.command !== 'status' && inWorkspaceSession(root)) throw new Error('작업 공간에서 연 세션은 카페 공식 API 세팅을 바꿀 수 없습니다. 대표가 프로그램 폴더에서 연 터미널 AI에게 "네이버 카페 api 세팅해줘"라고 요청해야 합니다.');
   if (opts.command === 'status') return status(root, opts);
   if (opts.command === 'save') return save(root, opts);
   return connect(root, opts);

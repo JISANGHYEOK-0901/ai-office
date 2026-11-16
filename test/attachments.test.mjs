@@ -9,7 +9,7 @@ import { MAX_ATTACHMENT_BYTES, attachmentQuestion, blockedReason, pickChoices, r
 
 function fixture(t) {
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'office-attach-'))), home = join(base, 'home'), root = join(base, 'workspace');
-  t.after(() => rm(base, { recursive: true, force: true }));
+  t.after(() => rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const put = (path, content = 'x') => { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, content); return path; };
   for (const dir of ['Downloads', 'Documents', 'Desktop', 'Music']) mkdirSync(join(home, dir), { recursive: true });
   mkdirSync(join(root, '보관함'), { recursive: true });

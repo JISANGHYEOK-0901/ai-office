@@ -8,7 +8,7 @@ import { orchestrate } from '../dashboard/orchestrator.mjs';
 
 for (const mode of ['normal', 'race', 'empty', 'mixed']) test(`예약 영상 게시: ${mode} — 중복 제외·실제 게시 수·후보 부족·영상이 아닌 글·완료 보고 연결`, async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'office-scheduled-posts-')), task = '2026-10-30/daily-posts';
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const dir of ['org', '.office', `outputs/${task}`]) mkdirSync(join(root, dir), { recursive: true });
   writeFileSync(join(root, 'org/departments.json'), JSON.stringify([{ id: 'ops', name: '운영', engine: 'claude' }]));
   writeFileSync(join(root, 'org/roster.json'), JSON.stringify([{ id: 'writer', name: '작성', department: 'ops' }]));

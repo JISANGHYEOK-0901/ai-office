@@ -194,7 +194,7 @@ test('done_missing_output: 완료 단계의 산출물 파일이 없으면(서버
 
 test('planOutputStatus: 업무 폴더 안 파일만 확인하고, 밖을 가리키는 경로·심볼릭 링크는 없음/확인 안 함', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'ai-office-outputs-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const dir = join(root, 'outputs', ...TA.split('/'));
   mkdirSync(join(dir, 'marketing'), { recursive: true });
   writeFileSync(join(dir, 'marketing', 'a.md'), '# a');
@@ -225,7 +225,7 @@ test('planOutputStatus: 업무 폴더 안 파일만 확인하고, 밖을 가리�
 
 test('planOutputStatus: plan.json 원본 경로로 확인해 공백 연속·비밀값 모양·긴 이름을 놓치지 않고, 비어 있지 않은 폴더 산출물은 있음', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'ai-office-outputs-raw-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const dir = join(root, 'outputs', ...TA.split('/'));
   // 경로 전체는 160자를 넘기되, 폴더·파일 이름 하나는 Linux 한도(255바이트) 안으로 나눈다
   const longDirs = Array.from({ length: 6 }, (_, i) => `${'긴이름'.repeat(10)}${i}`);
@@ -257,7 +257,7 @@ test('planOutputStatus: plan.json 원본 경로로 확인해 공백 연속·비�
 
 test('task files: 계획 단계 산출물은 plan.json 원본 경로로 확인한다(공백 연속·폴더 산출물)', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'ai-office-taskfiles-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const dir = join(root, 'outputs', ...TA.split('/'));
   mkdirSync(join(dir, 'marketing'), { recursive: true });
   mkdirSync(join(dir, 'dev', 'site'), { recursive: true });
@@ -277,7 +277,7 @@ test('task files: 계획 단계 산출물은 plan.json 원본 경로로 확인�
 test('서버: 상태를 만들 때 계획 단계 산출물 파일을 확인해 done_missing_output을 내고, meetings를 함께 준다', async (t) => {
   const { startServer } = await import('../dashboard/server.mjs');
   const root = mkdtempSync(join(tmpdir(), 'ai-office-kickoff-server-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, 'org'), { recursive: true });
   writeFileSync(join(root, 'org', 'departments.json'), JSON.stringify(ORG.departments));
   writeFileSync(join(root, 'org', 'roster.json'), JSON.stringify(ORG.roster));
@@ -322,7 +322,7 @@ test('서버: 상태를 만들 때 계획 단계 산출물 파일을 확인해 d
 test('서버: 산출물 확인은 plan.json 원본 경로로 하므로 공백 연속·폴더 산출물이 산출물 없음으로 잘못 뜨지 않고, 원본과 다른 단계는 확인하지 않는다', async (t) => {
   const { startServer } = await import('../dashboard/server.mjs');
   const root = mkdtempSync(join(tmpdir(), 'ai-office-kickoff-raw-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, 'org'), { recursive: true });
   writeFileSync(join(root, 'org', 'departments.json'), JSON.stringify(ORG.departments));
   writeFileSync(join(root, 'org', 'roster.json'), JSON.stringify(ORG.roster));

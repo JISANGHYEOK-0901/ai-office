@@ -338,7 +338,7 @@ process.stdin.on('end', () => {
 
 test('자식 종료 직후에는 로그 닫힘까지 완료 상태와 서버 종료를 기다린다', async (t) => {
   const root = makeRoot();
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const { calls, spawnImpl } = fakeSpawner();
   const runner = createRunner({ root, spawnImpl });
   const run = runner.start({ agentId: 'research-1', prompt: '로그 확인' });

@@ -13,7 +13,7 @@ test('shorts/watch/공유/임베드/인코딩 주소를 같은 영상 ID로 정�
 });
 
 test('작업·날짜·재시작과 무관하게 게시 ID를 보존하고 다른 소유자의 동시 게시를 차단한다', async (t) => {
-  const root = mkdtempSync(tmpdir() + '/office-videos-'); t.after(() => rm(root, { recursive: true, force: true }));
+  const root = mkdtempSync(tmpdir() + '/office-videos-'); t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   let store = createVideoHistory(root);
   const one = { ids: [A], owner: 'job-1', scope: 'day-1' };
   store.check(one); assert.deepEqual(store.excluded('day-2'), []);
@@ -26,7 +26,7 @@ test('작업·날짜·재시작과 무관하게 게시 ID를 보존하고 다른
 });
 
 test('게시 시도·불명 결과도 일일 한도에 포함하며 같은 업무의 확인 단계는 추가 소비하지 않는다', async (t) => {
-  const root = mkdtempSync(tmpdir() + '/office-video-quota-'); t.after(() => rm(root, { recursive: true, force: true }));
+  const root = mkdtempSync(tmpdir() + '/office-video-quota-'); t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const store = createVideoHistory(root), schedule = { id: 'daily', slot: '2026-10-30', maxPosts: 1 };
   store.claim({ ids: [A], owner: 'one', scope: 'one', schedule });
   store.check({ ids: [A], owner: 'one', scope: 'one', schedule });

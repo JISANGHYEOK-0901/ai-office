@@ -11,7 +11,7 @@ const REPO = repoRoot();
 
 function tempRoot(t) {
   const dir = mkdtempSync(join(tmpdir(), 'ai-office-org-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return dir;
 }
 

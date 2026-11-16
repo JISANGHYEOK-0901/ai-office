@@ -41,7 +41,7 @@ test('메일이 아닌 작업은 한도와 무관하고, 같은 수신자라도 
 
 async function fixture(t, { prompt, schedule = null }) {
   const root = mkdtempSync(join(tmpdir(), 'office-mail-batch-')), task = '2026-11-04/partner-mail';
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const dir of ['org', '.office', `outputs/${task}`]) mkdirSync(join(root, dir), { recursive: true });
   writeFileSync(join(root, 'org/departments.json'), JSON.stringify([{ id: 'ops', name: '운영', engine: 'claude' }]));
   writeFileSync(join(root, 'org/roster.json'), JSON.stringify([{ id: 'writer', name: '작성', department: 'ops' }]));

@@ -217,7 +217,7 @@ test('업무 id 형식과 요약(compactPlan)의 비밀값 가림', () => {
 // ---- CLI ----
 function setup(t) {
   const root = mkdtempSync(join(tmpdir(), 'ai-office-plan-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, 'org'), { recursive: true });
   writeFileSync(join(root, 'org', 'departments.json'), JSON.stringify(ORG.departments));
   writeFileSync(join(root, 'org', 'roster.json'), JSON.stringify(ORG.roster));

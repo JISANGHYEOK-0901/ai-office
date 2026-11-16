@@ -45,7 +45,7 @@ process.exit(2);
 
 function setup(t) {
   const dir = mkdtempSync(join(tmpdir(), 'office-doctor-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const claude = join(dir, 'fake-claude.js');
   const codex = join(dir, 'fake-codex.mjs');
   writeFileSync(claude, FAKE_CLAUDE);

@@ -10,7 +10,7 @@ import { shutdownSignals } from '../dashboard/server.mjs';
 
 function tmp(t) {
   const dir = mkdtempSync(join(tmpdir(), 'office-win-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return dir;
 }
 

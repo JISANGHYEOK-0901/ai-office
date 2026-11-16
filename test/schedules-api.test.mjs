@@ -11,7 +11,7 @@ test('예약 HTTP: 인증·자연어 등록·정시 실행·재시작·내역 �
   const root = mkdtempSync(join(tmpdir(), 'office-schedule-api-')), auth = mkdtempSync(join(tmpdir(), 'office-schedule-api-auth-'));
   const fixture = createScheduleFixture(root);
   let server = await startServer({ root, port: 0, quiet: true, env: fixture.env, scheduleNow: fixture.now, connectionBase: auth });
-  t.after(async () => { await server.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); await rm(auth, { recursive: true, force: true }); });
+  t.after(async () => { await server.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); await rm(auth, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); });
   const api = async (method, path, body, authenticated = true) => {
     const base = server.url.replace(/\/$/, '');
     const response = await fetch(base + path, { method, headers: { 'Content-Type': 'application/json', Origin: base, ...(authenticated ? { 'X-Office-Token': server.token } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });

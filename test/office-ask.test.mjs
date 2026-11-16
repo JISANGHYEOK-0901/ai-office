@@ -14,7 +14,7 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 test('접속 정보는 본인만 읽고, 서버가 꺼졌거나 다른 서버가 남긴 기록은 쓰지 않는다', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'office-ask-access-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const release = writeDashboardAccess(root, { url: 'http://127.0.0.1:4777/', token: 'a'.repeat(64) });
   assert.deepEqual(readDashboardAccess(root), { url: 'http://127.0.0.1:4777/', token: 'a'.repeat(64) });
   if (process.platform !== 'win32') assert.equal(statSync(join(root, DASHBOARD_ACCESS)).mode & 0o777, 0o600);
@@ -34,7 +34,7 @@ test('명령 인자: 지시문·답장·대기 시간·작업 공간', () => {
 
 test('실제 서버: 켜지면 접속 정보를 남기고, 지시창과 같은 API(토큰·Origin·JSON)로 부르며, 꺼지면 지운다', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'office-ask-server-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, 'org'), { recursive: true });
   writeFileSync(join(root, 'org', 'departments.json'), '[]\n');
   writeFileSync(join(root, 'org', 'roster.json'), '[]\n');
@@ -62,7 +62,7 @@ test('실제 서버: 켜지면 접속 정보를 남기고, 지시창과 같은 A
 
 test('대시보드가 실행한 AI(비서실장·직원)는 지시·답장을 넣지 못하고, 서버가 꺼져 있으면 켜라고 안내한다', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'office-ask-cli-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const run = (env) => spawnSync(process.execPath, [join(REPO, 'scripts/office-ask.mjs'), 'ask', '메일 보내줘', '--workspace', root], { env: { ...process.env, ...env }, encoding: 'utf8' });
   const blocked = run({ OFFICE_AI_RUN: '1' });
   assert.equal(blocked.status, 1); assert.match(blocked.stderr, /업무 실행 중인 AI는/);

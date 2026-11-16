@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 const PptxGenJS = require('pptxgenjs'), docx = require('docx'), ExcelJS = require('exceljs'), JSZip = require('jszip');
 const { addChart } = require('../lib/xlsx-chart.cjs');
 
-const dir = (t) => { const d = mkdtempSync(join(tmpdir(), 'office-files-')); t.after(() => rmSync(d, { recursive: true, force: true })); return d; };
+const dir = (t) => { const d = mkdtempSync(join(tmpdir(), 'office-files-')); t.after(() => rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })); return d; };
 async function makeXlsx(file, { result = 3 } = {}) {
   const book = new ExcelJS.Workbook();
   const ws = book.addWorksheet('매출 표');

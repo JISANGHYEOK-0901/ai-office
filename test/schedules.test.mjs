@@ -34,7 +34,7 @@ test('영상 글과 영상이 아닌 글을 섞은 예약은 개수 앞 문구�
 
 async function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'office-schedules-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   let stamp = Date.parse('2026-10-30T01:59:00Z'); const history = [], started = [];
   const options = { root, now: () => stamp, runs: () => history,
     start: (request) => { started.push(request); const id = `run-${started.length}`; const run = { id, rootId: id, schedule: request.schedule, status: 'running', task: `2026-10-30/${id}` }; history.push(run); return run; } };

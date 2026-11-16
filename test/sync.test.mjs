@@ -11,7 +11,7 @@ const SCRIPT = join(repoRoot(), 'scripts', 'sync-agents.mjs');
 
 function setup(t, org) {
   const root = mkdtempSync(join(tmpdir(), 'ai-office-sync-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeOrg(root, org);
   return root;
 }

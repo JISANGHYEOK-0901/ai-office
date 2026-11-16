@@ -168,7 +168,7 @@ test('splitSafeCommand·summarizeAgents 경계', () => {
 
 function makeRoot(t) {
   const root = mkdtempSync(join(tmpdir(), 'office-guard-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, 'hooks'));
   cpSync(join(REPO, 'hooks', 'chief-guard.mjs'), join(root, 'hooks', 'chief-guard.mjs'));
   cpSync(join(REPO, 'lib'), join(root, 'lib'), { recursive: true });

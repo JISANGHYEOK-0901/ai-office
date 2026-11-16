@@ -40,7 +40,7 @@ test('정리 노트는 완료·남은 단계, 대표 결정 대기, 만든 파�
     assert.match(note, /2026-11-03 18:00 \(KST\)/);
     assert.match(note, /이어서 해줘/);
     assert.doesNotMatch(note, /hunter2/);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); }
 });
 
 test('지시창 안내는 일시정지·재개 결과 건수를 알려 준다', () => {

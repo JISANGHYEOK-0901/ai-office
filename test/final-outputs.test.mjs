@@ -13,7 +13,7 @@ const task = '2026-10-30/partner-research';
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'office-final-'));
   const external = mkdtempSync(join(tmpdir(), 'office-final-destination-'));
-  t.after(async () => { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); await rm(external, { recursive: true, force: true }); });
+  t.after(async () => { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); await rm(external, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); });
   const write = (rel, value) => { const path = join(root, rel); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, value); return path; };
   write(`outputs/${task}/report.md`, `# 결과\n\n검토를 마쳤습니다. [최종 문서](outputs/${task}/dev/page.html#result)`);
   write(`outputs/${task}/research/raw.txt`, '중간 조사 자료');

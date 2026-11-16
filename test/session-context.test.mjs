@@ -19,7 +19,7 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 function makeRoot(t, org) {
   const root = mkdtempSync(join(tmpdir(), 'office-ctx-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, 'hooks'));
   cpSync(join(REPO, 'hooks', 'session-context.mjs'), join(root, 'hooks', 'session-context.mjs'));
   cpSync(join(REPO, 'lib'), join(root, 'lib'), { recursive: true });

@@ -21,7 +21,7 @@ test('stdio MCP: 초기화·도구 목록·실행별 권한으로 도구 호출�
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const directory = mkdtempSync(join(tmpdir(), 'office-mcp-permission-')), permissions = join(directory, 'permissions.json');
   writePrivate(permissions, { url: `http://127.0.0.1:${server.address().port}/tools`, token: 'fixture-only' });
-  t.after(async () => { server.closeAllConnections?.(); await new Promise((resolve) => server.close(resolve)); await rm(directory, { recursive: true, force: true }); });
+  t.after(async () => { server.closeAllConnections?.(); await new Promise((resolve) => server.close(resolve)); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); });
   const child = spawn(process.execPath, [join(programRoot(), 'scripts/browser-mcp.mjs'), '--permissions', permissions], {
     env: { ...process.env, OFFICE_BROWSER_ENDPOINT: '', OFFICE_BROWSER_TOKEN: '' }, stdio: ['pipe', 'pipe', 'pipe'],
   });

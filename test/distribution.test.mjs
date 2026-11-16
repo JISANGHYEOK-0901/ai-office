@@ -20,7 +20,7 @@ const SYNC = join(REPO, 'scripts', 'sync-agents.mjs');
 // org/ 폴더도, .claude/agents·.codex/agents도 없는 빈 레포(처음 clone한 상태와 같음)
 function emptyRoot(t) {
   const root = mkdtempSync(join(tmpdir(), 'office-dist-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return root;
 }
 

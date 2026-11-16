@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { UPLOAD_MAX_BYTES, saveUpload, uploadName } from '../lib/uploads.mjs';
 import { withUploads } from '../dashboard/public/app.js';
 
-const workspace = (t) => { const d = mkdtempSync(join(tmpdir(), 'office-uploads-')); t.after(() => rmSync(d, { recursive: true, force: true })); return d; };
+const workspace = (t) => { const d = mkdtempSync(join(tmpdir(), 'office-uploads-')); t.after(() => rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })); return d; };
 const b64 = (text) => Buffer.from(text).toString('base64');
 const NOW = new Date('2026-11-12T03:00:00Z'); // 한국 시간 2026-11-12
 // 계정 파일 이름은 훅이 막는 글자라 실행할 때 만든다

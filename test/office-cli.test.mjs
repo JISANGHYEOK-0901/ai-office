@@ -10,7 +10,7 @@ const SCRIPT = join(repoRoot(), 'scripts', 'office.mjs');
 
 function setup(t) {
   const root = mkdtempSync(join(tmpdir(), 'ai-office-cli-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { env: { ...process.env, AI_OFFICE_ROOT: root }, encoding: 'utf8' });
   return { root, run };
 }

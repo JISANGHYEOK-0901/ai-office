@@ -49,7 +49,7 @@ AI Office는 **각자 자기 컴퓨터에서, 자기 claude·codex 로그인으�
    powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"  # Codex CLI
    ```
 
-   - **PATH:** Claude 공식 설치 프로그램은 PATH를 바꾸지 않습니다(설치 위치 macOS `~/.local/bin`, Windows `%USERPROFILE%\.local\bin`). Codex는 스스로 등록합니다(macOS `~/.local/bin`을 `~/.zprofile`에, Windows `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin`을 사용자 PATH에). 붙여 넣을 등록 명령은 `GUIDE.html` 3장 6단계(`#path`)에 있습니다. IntelliJ·VS Code 안의 터미널은 편집기가 켜질 때의 PATH를 쓰므로, 등록하거나 winget으로 Node를 설치한 뒤에는 편집기를 완전히 껐다 켭니다.
+   - **PATH:** Claude 공식 설치 프로그램은 PATH를 바꾸지 않습니다(설치 위치 macOS `~/.local/bin`, Windows `%USERPROFILE%\.local\bin`). Codex는 스스로 등록합니다(macOS `~/.local/bin`을 `~/.zprofile`에, Windows `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin`을 사용자 PATH에). 붙여 넣을 등록 명령은 `GUIDE.html` 3장 5단계(`#path`)에 있습니다. IntelliJ·VS Code 안의 터미널은 편집기가 켜질 때의 PATH를 쓰므로, 등록하거나 winget으로 Node를 설치한 뒤에는 편집기를 완전히 껐다 켭니다.
    - **Windows 터미널:** IntelliJ 터미널의 기본값은 PowerShell이고, PowerShell은 실행 정책 때문에 `npm.ps1` 같은 스크립트가 막힐 수 있습니다. 가이드는 명령 프롬프트(cmd) 기준입니다(Settings → Tools → Terminal → Shell path `cmd.exe`).
    - 설치 뒤 새 터미널을 열고 `claude`(구독 계정으로 로그인, 실행 중이면 `/login`) 또는 `codex`(ChatGPT로 로그인)를 실행해 로그인합니다.
    - npm으로도 설치할 수 있습니다: `npm install -g @anthropic-ai/claude-code`, `npm install -g @openai/codex`(Node 필요).

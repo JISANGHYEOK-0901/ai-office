@@ -321,24 +321,32 @@
         <li><a href="https://www.jetbrains.com/ko-kr/idea/download/?section=windows" target="_blank" rel="noopener">IntelliJ IDEA 다운로드 페이지</a>에서 <b>Windows</b>가 선택된 것을 확인하고 <span class="btnlike">다운로드</span>를 누릅니다. 받은 설치 파일(<code>idea-….exe</code>)을 엽니다.</li>
         <li>“이 앱이 디바이스를 변경하도록 허용하시겠어요?” 창이 뜨면 <span class="btnlike">예</span>를 누릅니다.</li>
         <li>첫 화면에서 <span class="btnlike">Next</span>, 설치 위치 화면도 그대로 두고 <span class="btnlike">Next</span>를 누릅니다.</li>
-        <li><b>Installation Options</b> 화면에서는 아래 그림처럼 바탕화면 바로가기(<b>Create Desktop Shortcut</b>)만 체크하고 <span class="btnlike">Next</span>를 누릅니다.</li>
-        <li><span class="btnlike">Install</span>을 누르고, 설치가 끝나면 <span class="btnlike">Finish</span>를 누릅니다.</li>
+        <li><b>Installation Options</b> 화면에서는 아래 그림처럼 네 곳을 체크하고 <span class="btnlike">Next</span>를 누릅니다.
+          <ul>
+            <li><b>Create Desktop Shortcut</b>: <b>IntelliJ IDEA</b> (바탕화면 바로가기)</li>
+            <li><b>Update PATH Variable</b>: <b>Add “bin” folder to the PATH</b></li>
+            <li><b>Update Context Menu</b>: <b>Add “Open Folder as Project”</b> (폴더를 마우스 오른쪽 클릭해 IntelliJ로 열기)</li>
+            <li><b>Create Associations</b>: <b>.java</b>, <b>.groovy</b></li>
+          </ul>
+        </li>
+        <li>다음 화면에서 <span class="btnlike">Install</span>을 누릅니다.</li>
+        <li>설치가 끝나면 컴퓨터를 다시 시작하라는 화면이 나옵니다(PATH 항목을 체크했기 때문입니다). 열려 있는 문서를 저장한 뒤 <b>Reboot now</b>를 고르고 <span class="btnlike">Finish</span>를 누릅니다. 다시 켜지면 이 가이드를 다시 열고, 바탕화면의 <b>IntelliJ IDEA</b> 아이콘으로 IntelliJ를 엽니다.</li>
       </ol>
       <figure class="shot only-win">
-        <div class="mock" role="img" aria-label="IntelliJ 설치 옵션 화면 그림: 바탕화면 바로가기 체크 후 Next">
+        <div class="mock" role="img" aria-label="IntelliJ 설치 옵션 화면 그림: IntelliJ IDEA 바로가기, bin 폴더 PATH 추가, Open Folder as Project, .java와 .groovy를 체크한 뒤 Next">
           <div class="mock-bar"><span>IntelliJ IDEA Setup</span><span class="mock-x">✕</span></div>
           <div class="mock-main">
             <p class="mock-title">Installation Options</p>
             <div class="mock-opts">
               <div><b>Create Desktop Shortcut</b><span class="mark" data-n="1">☑ IntelliJ IDEA</span></div>
-              <div><b>Update PATH Variable (restart needed)</b><span>☐ Add “bin” folder to the PATH</span></div>
-              <div><b>Update Context Menu</b><span>☐ Add “Open Folder as Project”</span></div>
-              <div><b>Create Associations</b><span>☐ .java ☐ .groovy ☐ .kt ☐ .kts</span></div>
+              <div><b>Update PATH Variable (restart needed)</b><span class="mark" data-n="2">☑ Add “bin” folder to the PATH</span></div>
+              <div><b>Update Context Menu</b><span class="mark" data-n="3">☑ Add “Open Folder as Project”</span></div>
+              <div><b>Create Associations</b><span><span class="mark" data-n="4">☑ .java ☑ .groovy</span><span style="margin-left:14px">☐ .kt ☐ .kts</span></span></div>
             </div>
           </div>
-          <div class="mock-foot"><span class="mock-btn">&lt; Back</span><span class="mock-btn primary mark" data-n="2">Next &gt;</span><span class="mock-btn">Cancel</span></div>
+          <div class="mock-foot"><span class="mock-btn">&lt; Back</span><span class="mock-btn primary mark" data-n="5">Next &gt;</span><span class="mock-btn">Cancel</span></div>
         </div>
-        <figcaption>① 바탕화면 바로가기만 체크 → ② Next. <b>Update PATH Variable</b>은 IntelliJ 자체 명령용이라 Claude·Codex와는 관계없습니다. 체크하지 않아도 됩니다.</figcaption>
+        <figcaption>① IntelliJ IDEA ② Add “bin” folder to the PATH ③ Add “Open Folder as Project” ④ .java·.groovy 체크 → ⑤ Next. 여기의 PATH 항목은 IntelliJ 자체 명령용입니다. Claude·Codex의 PATH는 <a href="#path">6단계</a>에서 따로 등록합니다.</figcaption>
       </figure>
       <ol class="only-mac">
         <li>내 맥의 칩을 먼저 확인합니다. 화면 왼쪽 위 사과 메뉴 → <b>이 Mac에 관하여</b>를 누르고, <b>칩</b>에 “Apple M…”이 보이면 <b>Apple Silicon</b>, “Intel”이 보이면 <b>Intel</b>입니다.</li>
